@@ -603,20 +603,39 @@ cmd_install() {
     grep -q '^VD_COMPOSE_PROJECT=' "${PREFIX}/.env" || echo "VD_COMPOSE_PROJECT=viewdock" >> "${PREFIX}/.env"
   else
     cat > "${PREFIX}/.env" <<EOF
+# ViewDock. Uncomment and set the optional lines you need.
+# First-run does not rewrite this file. TMDB and Discord can also be set in the UI.
+
 VD_HTTP_ADDR=:8080
 VD_CONFIG_DIR=/config
 VD_CACHE_DIR=/cache
 VD_TRANSCODE_DIR=/transcode
 VD_MEDIA_DIR=/media
 VD_LOG_LEVEL=info
+# VD_DATABASE_PATH=/config/viewdock.db
+# VD_PUBLIC_URL=https://app.viewdock.dev
+# VD_TMDB_API_KEY=
+# VD_DISCORD_CLIENT_ID=
+# VD_DISCORD_CLIENT_SECRET=
+# VD_DISCORD_LOGIN=0
+# First-admin token. If unset, ViewDock writes /config/setup.token (not logged).
+# VD_SETUP_TOKEN=
 VD_COOKIE_SECURE=${cookie}
 VD_TRUSTED_PROXIES=127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+# VD_LAN_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128
+# VD_SQLITE_BUSY_TIMEOUT_MS=20000
+# VD_SHUTDOWN_WAIT=45s
+
 VD_IMAGE=${IMAGE}
 VD_MEDIA_HOST=${CFG_MEDIAHOST}
 VD_PORT=8080
 VD_DOCKER_GID=${dockergid}
 VD_COMPOSE_PROJECT=viewdock
 VD_UPDATE_DIR=/update
+# VD_VERSION_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/VERSION
+# VD_CHANGELOG_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/CHANGELOG.md
+# VD_INSTALL_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh
+
 PUID=1000
 PGID=1000
 TZ=UTC
