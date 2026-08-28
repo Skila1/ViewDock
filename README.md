@@ -1,0 +1,38 @@
+# ViewDock
+
+**Mount a folder or upload a video. ViewDock handles the rest.**
+
+ViewDock is a lightweight, private, self-hosted video platform for movies and TV. One Docker container. SQLite. Your files stay on your disk.
+
+```yaml
+services:
+  viewdock:
+    image: ghcr.io/viewdock/viewdock:latest
+    container_name: viewdock
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - ./transcode:/transcode
+      - /mnt/media:/media:ro
+    restart: unless-stopped
+```
+
+License: **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`).
+
+## Documentation
+
+- [Installation](docs/install.md)
+- [Docker](docs/docker.md)
+- [Environment](docs/environment.md)
+- [Reverse proxy](docs/reverse-proxy.md)
+
+## Development
+
+```bash
+cd web && npm install && npm run build && cd ..
+go run ./cmd/viewdock
+```
+
+Open http://127.0.0.1:8080
