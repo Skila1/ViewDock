@@ -1,0 +1,580 @@
+openapi: 3.0.3
+info:
+  title: ViewDock API
+  version: 0.1.0
+  license:
+    name: AGPL-3.0-or-later
+servers:
+  - url: /api/v1
+paths:
+  /system:
+    get:
+      operationId: getSystem
+      summary: Public instance info
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+  /auth/csrf:
+    get:
+      operationId: getCsrf
+      responses:
+        "200":
+          description: CSRF cookie + token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+  /auth/login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200": { description: Logged in }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "200": { description: Logged out }
+  /me:
+    get:
+      operationId: getMe
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+    patch:
+      operationId: patchMe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+  /auth/discord:
+    get:
+      operationId: discordStart
+      summary: Redirect to Discord OAuth (optional)
+      responses:
+        "302": { description: Redirect }
+        "503": { description: Discord sign-in disabled }
+  /admin/roles:
+    get:
+      operationId: listRoles
+      responses:
+        "200": { description: Role list }
+    post:
+      operationId: createRole
+      responses:
+        "201": { description: Created }
+  /admin/integrations/discord:
+    get:
+      operationId: getDiscordSettings
+      responses:
+        "200": { description: Discord admin settings }
+    put:
+      operationId: putDiscordSettings
+      responses:
+        "200": { description: Saved }
+  /me/preferences:
+    get:
+      operationId: getPreferences
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Preferences"
+    put:
+      operationId: putPreferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Preferences"
+      responses:
+        "200": { description: OK }
+  /me/pin:
+    post:
+      operationId: setPin
+      responses:
+        "200": { description: OK }
+    delete:
+      operationId: clearPin
+      responses:
+        "200": { description: OK }
+  /me/pin/unlock:
+    post:
+      operationId: unlockPin
+      responses:
+        "200": { description: OK }
+  /setup/status:
+    get:
+      operationId: setupStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needed: { type: boolean }
+                  step: { type: string }
+  /setup/admin:
+    post:
+      operationId: setupAdmin
+      responses:
+        "200": { description: OK }
+  /setup/library:
+    post:
+      operationId: setupLibrary
+      responses:
+        "200": { description: OK }
+  /setup/ffmpeg:
+    get:
+      operationId: setupFfmpeg
+      responses:
+        "200": { description: OK }
+  /setup/tmdb:
+    post:
+      operationId: setupTmdb
+      responses:
+        "200": { description: OK }
+  /setup/scan:
+    post:
+      operationId: setupScan
+      responses:
+        "200": { description: OK }
+  /setup/complete:
+    post:
+      operationId: setupComplete
+      responses:
+        "200": { description: OK }
+  /libraries:
+    get:
+      operationId: listLibraries
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Library"
+    post:
+      operationId: createLibrary
+      responses:
+        "201": { description: Created }
+  /libraries/{id}:
+    get:
+      operationId: getLibrary
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+    patch:
+      operationId: patchLibrary
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+    delete:
+      operationId: deleteLibrary
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204": { description: Deleted }
+  /libraries/{id}/scan:
+    post:
+      operationId: scanLibrary
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "202": { description: Started }
+  /movies:
+    get:
+      operationId: listMovies
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Movie"
+  /movies/{id}:
+    get:
+      operationId: getMovie
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+  /series:
+    get:
+      operationId: listSeries
+      responses:
+        "200": { description: OK }
+  /series/{id}:
+    get:
+      operationId: getSeries
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+  /series/{id}/next:
+    get:
+      operationId: nextEpisode
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+  /episodes/{id}:
+    get:
+      operationId: getEpisode
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+  /uploads:
+    post:
+      operationId: createUpload
+      responses:
+        "201": { description: Created }
+  /uploads/{id}:
+    head:
+      operationId: uploadHead
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+    put:
+      operationId: uploadPut
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+    delete:
+      operationId: uploadDelete
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204": { description: Deleted }
+  /playback/sessions:
+    post:
+      operationId: createPlaybackSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSession"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackSession"
+  /playback/sessions/{id}/file:
+    get:
+      operationId: playbackFile
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: Range media }
+        "206": { description: Partial }
+  /playback/sessions/{id}/progress:
+    put:
+      operationId: putProgress
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: OK }
+  /playback/sessions/{id}:
+    delete:
+      operationId: endSession
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204": { description: Ended }
+  /playback/continue:
+    get:
+      operationId: continueWatching
+      responses:
+        "200": { description: OK }
+  /hls/{sessionId}/index.m3u8:
+    get:
+      operationId: hlsPlaylist
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Playlist }
+        "410": { description: Session gone }
+  /share/{token}:
+    get:
+      operationId: getShare
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Share meta }
+        "404": { description: Not found }
+  /share/{token}/unlock:
+    post:
+      operationId: unlockShare
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Guest cookie }
+  /watch-together/rooms:
+    post:
+      operationId: createWTRoom
+      responses:
+        "200": { description: Created }
+  /watch-together/invites/{code}:
+    get:
+      operationId: getWTInvite
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Invite }
+  /watch-together/join:
+    post:
+      operationId: joinWT
+      responses:
+        "200": { description: Joined }
+  /watch-together/rooms/{id}/ticket:
+    post:
+      operationId: wtTicket
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: Ticket }
+  /admin/streams:
+    get:
+      operationId: adminStreams
+      responses:
+        "200": { description: Live sessions }
+  /admin/streams/{sessionId}:
+    get:
+      operationId: adminInspector
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Inspector }
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        "200": { description: OK }
+    post:
+      operationId: createUser
+      responses:
+        "201": { description: Created }
+  /invites:
+    get:
+      operationId: listInvites
+      responses:
+        "200": { description: OK }
+    post:
+      operationId: createInvite
+      responses:
+        "201": { description: Created }
+  /shares:
+    get:
+      operationId: listShares
+      responses:
+        "200": { description: OK }
+    post:
+      operationId: createShare
+      responses:
+        "201": { description: Created }
+components:
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+    SystemInfo:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: string }
+        api_version: { type: string }
+        tmdb_configured: { type: boolean }
+        setup_needed: { type: boolean }
+        discord_login: { type: boolean }
+        discord_configured: { type: boolean }
+        public_url: { type: string }
+    Me:
+      type: object
+      properties:
+        id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        is_admin: { type: boolean }
+        kind: { type: string, enum: [user, guest_share] }
+        pin_locked: { type: boolean }
+        can_download: { type: boolean }
+        has_password: { type: boolean }
+        has_pin: { type: boolean }
+        permissions:
+          type: array
+          items: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+    Preferences:
+      type: object
+      properties:
+        audio_lang: { type: string }
+        subtitle_lang: { type: string }
+        subtitle_mode: { type: string }
+        autoplay: { type: boolean }
+    Library:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        content_type: { type: string, enum: [movies, tv, mixed] }
+        uploads_enabled: { type: boolean }
+    Movie:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        poster_url: { type: string, nullable: true }
+        unmatched: { type: boolean }
+        metadata_source: { type: string }
+    ClientProfile:
+      type: object
+      properties:
+        user_agent: { type: string }
+        mse: { type: boolean }
+        hls_native: { type: boolean }
+        ass_js: { type: boolean }
+        hdr: { type: boolean }
+        viewport_w: { type: integer }
+        viewport_h: { type: integer }
+        hevc: { type: boolean }
+        av1: { type: boolean }
+        ac3: { type: boolean }
+        eac3: { type: boolean }
+        truehd: { type: boolean }
+        decoding_info:
+          type: object
+          additionalProperties: true
+    CreateSession:
+      type: object
+      required: [item_kind, item_id]
+      properties:
+        item_kind: { type: string, enum: [movie, episode] }
+        item_id: { type: string }
+        media_file_id: { type: string }
+        start_ms: { type: integer }
+        quality: { type: string }
+        audio_index: { type: integer }
+        subtitle_index: { type: integer, nullable: true }
+        client:
+          $ref: "#/components/schemas/ClientProfile"
+    PlaybackSession:
+      type: object
+      properties:
+        id: { type: string }
+        delivery: { type: string, enum: [direct, hls] }
+        hls_attach: { type: string, enum: [native, mse] }
+        urls:
+          type: object
+          additionalProperties: { type: string }
+        qualities:
+          type: array
+          items: { type: string }
+        audio:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        subtitles:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        decision:
+          type: object
+          properties:
+            reasons:
+              type: array
+              items: { type: string }
+            mode: { type: string }
+        intro:
+          type: object
+          nullable: true
+        next_episode:
+          type: object
+          nullable: true
+        duration_ms: { type: integer }
+        seekable_from_ms: { type: integer }

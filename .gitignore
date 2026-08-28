@@ -1,0 +1,16 @@
+config/
+cache/
+transcode/
+media/
+*.db
+*.db-wal
+*.db-shm
+.env
+web/node_modules/
+web/dist/assets/
+bin/
+.idea/
+.vscode/
+*.exe
+*.test
+*.out

@@ -1,0 +1,31 @@
+services:
+  viewdock:
+    image: ghcr.io/viewdock/viewdock:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: viewdock
+    ports:
+      - "8080:8080"
+    environment:
+      VD_HTTP_ADDR: ":8080"
+      VD_CONFIG_DIR: /config
+      VD_CACHE_DIR: /cache
+      VD_TRANSCODE_DIR: /transcode
+      VD_MEDIA_DIR: /media
+      VD_LOG_LEVEL: info
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - ./transcode:/transcode
+      - ./media:/media:ro
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 8

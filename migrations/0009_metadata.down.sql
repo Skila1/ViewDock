@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS match_queue;
+DROP TABLE IF EXISTS artwork;
+DROP TABLE IF EXISTS metadata_locks;
+DROP TABLE IF EXISTS tmdb_cache;

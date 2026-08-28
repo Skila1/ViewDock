@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS scan_runs;
+DROP TABLE IF EXISTS media_file_episodes;
+DROP TABLE IF EXISTS media_files;
+DROP TABLE IF EXISTS episodes;
+DROP TABLE IF EXISTS seasons;
+DROP TABLE IF EXISTS series;
+DROP TABLE IF EXISTS movies;
+DROP TABLE IF EXISTS libraries;

@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: var(--vd-bg);
+  --color-raised: var(--vd-surface-1);
+  --color-overlay: var(--vd-surface-2);
+  --color-line: var(--vd-border);
+  --color-ink: var(--vd-text);
+  --color-dim: var(--vd-text-2);
+  --color-accent: var(--vd-accent);
+  --color-accent-dim: var(--vd-accent-hover);
+  --color-warn: var(--vd-warning);
+  --color-danger: var(--vd-destructive);
+  --color-ok: var(--vd-success);
+  --font-sans: Outfit, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+  --vd-bg: #0c1117;
+  --vd-surface-1: #131a22;
+  --vd-surface-2: #1a232d;
+  --vd-surface-3: #24303c;
+  --vd-border: rgba(232, 238, 245, 0.08);
+  --vd-text: #eef3f8;
+  --vd-text-2: #9aa8b6;
+  --vd-text-3: #6b7a88;
+  --vd-accent: #1db954;
+  --vd-accent-hover: #22c55e;
+  --vd-destructive: #f07187;
+  --vd-warning: #e3b341;
+  --vd-success: #34d399;
+  --vd-ring: #3ddc84;
+  --chip: #1a2a1c;
+  --chip-text: #1ed760;
+  --poster-ratio: 2 / 3;
+  --radius: 12px;
+  --nav-h: 56px;
+  --gap: 10px;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: var(--vd-bg);
+  color: var(--vd-text);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(900px 420px at 0% -10%, rgba(29, 185, 84, 0.08), transparent 55%),
+    var(--vd-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  background: var(--vd-surface-1);
+  border: 1px solid var(--vd-border);
+  border-radius: 12px;
+  padding: 0.5rem 0.75rem;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--vd-ring);
+  outline-offset: 1px;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: var(--gap);
+}
+
+@media (min-width: 900px) {
+  .poster-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+}
+
+.poster-tile {
+  aspect-ratio: var(--poster-ratio);
+}
+
+.continue-slip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.continue-slip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scrim {
+  background: linear-gradient(to top, rgb(0 0 0 / 78%), rgb(0 0 0 / 8%) 55%, transparent);
+}
+
+.btn-green {
+  background: var(--vd-accent);
+  color: #04140a;
+  font-weight: 650;
+}
+
+.btn-green:hover {
+  background: var(--vd-accent-hover);
+}

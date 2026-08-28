@@ -30,6 +30,10 @@ License: **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later
 
 ## Development
 
+FFmpeg/ffprobe on `PATH` enables remux, transcode, and accurate probes. Filename catalogue and Direct Play of the original file work without them.
+
+The public marketing site lives in the sibling `../Marketing` folder (Astro, port 8085) and is served at [viewdock.dev](https://viewdock.dev). The app is typically `https://app.viewdock.dev` behind your own reverse proxy or Cloudflare Tunnel — cloudflared is not part of this Compose file.
+
 ```bash
 cd web && npm install && npm run build && cd ..
 go run ./cmd/viewdock
