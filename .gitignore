@@ -1,7 +1,9 @@
-config/
-cache/
-transcode/
-media/
+# Root data dirs only. Bare "config/" also matches internal/config and
+# those packages never get pushed, which breaks the GitHub image build.
+/config/
+/cache/
+/transcode/
+/media/
 *.db
 *.db-wal
 *.db-shm
