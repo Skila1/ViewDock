@@ -70,6 +70,9 @@ func main() {
 		logger.Error("setup bootstrap", "err", err)
 		os.Exit(1)
 	}
+	if app.Uploads != nil {
+		app.Uploads.Sweep(context.Background())
+	}
 	defer app.Playback.Close()
 
 	root := chi.NewRouter()
@@ -112,6 +115,9 @@ func main() {
 				return
 			case <-t.C:
 				update.Tick(context.Background(), kv)
+				if app != nil && app.Uploads != nil {
+					app.Uploads.Sweep(context.Background())
+				}
 			}
 		}
 	}()

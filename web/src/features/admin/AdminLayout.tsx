@@ -1,8 +1,11 @@
 import { NavLink, Outlet } from "react-router";
 import { cn } from "@/lib/cn";
+import { formatBytes } from "@/lib/format";
+import { useUploads } from "@/store/uploads";
 
 const links = [
   { to: "/admin", label: "Overview", end: true },
+  { to: "/admin/uploads", label: "Uploads" },
   { to: "/admin/streams", label: "Streams" },
   { to: "/admin/users", label: "Users" },
   { to: "/admin/roles", label: "Groups" },
@@ -13,9 +16,11 @@ const links = [
 ];
 
 export function AdminLayout() {
+  const active = useUploads((s) => s.jobs.filter((j) => j.status === "uploading" || j.status === "processing" || j.status === "queued"));
+
   return (
     <div>
-      <nav className="mb-4 flex gap-3 text-sm">
+      <nav className="mb-4 flex flex-wrap gap-3 text-sm">
         {links.map((l) => (
           <NavLink
             key={l.to}
@@ -27,6 +32,16 @@ export function AdminLayout() {
           </NavLink>
         ))}
       </nav>
+      {active.length ? (
+        <div className="mb-4 rounded-md border border-line bg-raised px-3 py-2 text-xs text-dim">
+          {active.map((j) => (
+            <p key={j.localId}>
+              {j.filename} · {j.status}
+              {j.size ? ` · ${formatBytes(j.offset)} / ${formatBytes(j.size)}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
       <Outlet />
     </div>
   );

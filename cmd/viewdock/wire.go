@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -31,6 +32,7 @@ import (
 type app struct {
 	Auth     *auth.Service
 	Playback *playback.API
+	Uploads  *upload.Service
 }
 
 func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Logger, kv *settings.Store) *app {
@@ -42,7 +44,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	libs.SetScan(sc)
 	art := artwork.New(sqlDB, cfg.CacheDir, ff, metadata.NewClient(kv))
 	meta := metadata.New(sqlDB, kv, art)
-	up := upload.New(sqlDB, libs, sc)
+	up := upload.New(sqlDB, libs, sc, ff, filepath.Join(cfg.ConfigDir, "uploads"))
 	srch := search.New(sqlDB)
 	cols := collections.New(sqlDB, libs)
 	shareSvc := share.New(sqlDB, libs)
@@ -70,8 +72,8 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 				httpapi.WriteErr(w, http.StatusForbidden, "forbidden", "permission required")
 				return
 			}
-			if write && strings.HasPrefix(path, "/api/v1/uploads") && !p.HasPerm(auth.PermMediaUpload) {
-				httpapi.WriteErr(w, http.StatusForbidden, "forbidden", "permission required")
+			if strings.HasPrefix(path, "/api/v1/uploads") && !p.IsAdmin {
+				httpapi.WriteErr(w, http.StatusForbidden, "forbidden", "admin required")
 				return
 			}
 			ctx := library.WithUserID(r.Context(), p.UserID)
@@ -106,5 +108,5 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		play.Routes,
 		update.Routes(kv),
 	)
-	return &app{Auth: authSvc, Playback: play}
+	return &app{Auth: authSvc, Playback: play, Uploads: up}
 }

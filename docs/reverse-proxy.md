@@ -4,7 +4,7 @@ Internet expose requires a reverse proxy or tunnel you run yourself. ViewDock do
 
 ViewDock already trusts loopback, private LAN/Docker ranges, and Cloudflare edge IPs for `X-Forwarded-*`. Set `VD_PUBLIC_URL` (or Admin → Settings) to the app origin, for example `https://app.viewdock.dev`. Marketing for the project lives at `https://viewdock.dev`.
 
-Disable buffering on `/api/v1/playback` and `/hls`. Do not cache `/api` or HLS playlists. Allow WebSockets on `/api/v1/watch-together`. Raise upload body size for offset-PUT.
+Disable buffering on `/api/v1/playback`, `/api/v1/uploads`, and `/hls`. Do not cache `/api` or HLS playlists. Allow WebSockets on `/api/v1/watch-together`. Admin uploads use 8 MiB offset PUTs (10 GiB max per file). Cloudflare’s per-request body limit still applies to each PUT, not the whole file.
 
 ## Caddy
 

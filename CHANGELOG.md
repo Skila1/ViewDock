@@ -8,3 +8,4 @@
 - Automatic updates can pull a newer image about once an hour when the helper or socket is available.
 - SQLite, one container. Media stays on your disk. First-run prints an 8-character setup token in the console and logs after the server is listening.
 - `.env` only has `VD_PORT` and `VD_PUBLIC_URL`. Trusted proxies include local/Docker and Cloudflare. Public URL and TMDB are also under Admin → Settings.
+- Administrators can upload videos (max 10 GB) under Admin → Uploads. Staging is `/config/uploads`. `/media` is read-write so finished files can land in the library.

@@ -568,7 +568,7 @@ services:
       - ./config:/config
       - ./cache:/cache
       - ./transcode:/transcode
-      - ./media:/media:ro
+      - ./media:/media
       - ./update:/update
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -608,7 +608,7 @@ cmd_install() {
   CFG_MEDIAHOST="${PREFIX}/media"
 
   install_docker
-  mkdir -p "${PREFIX}/config" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
+  mkdir -p "${PREFIX}/config" "${PREFIX}/config/uploads" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
   chmod 0777 "${PREFIX}/update" || true
   mkdir -p "${CFG_MEDIAHOST}"
   local dockergid="0"
@@ -707,6 +707,23 @@ cmd_doctor() {
   command -v docker
   docker compose version
   curl -fsS http://127.0.0.1:8080/healthz || true
+  echo
+  if [[ -d "${PREFIX}/config" ]]; then
+    mkdir -p "${PREFIX}/config/uploads" "${PREFIX}/media"
+    if [[ ! -w "${PREFIX}/config/uploads" ]]; then
+      echo "upload staging not writable: ${PREFIX}/config/uploads"
+    else
+      echo "upload staging ok: ${PREFIX}/config/uploads"
+    fi
+    if [[ ! -w "${PREFIX}/media" ]]; then
+      echo "media folder not writable: ${PREFIX}/media (Admin uploads need a read-write /media mount)"
+    else
+      echo "media folder writable: ${PREFIX}/media"
+    fi
+    if grep -q '/media:ro' "${PREFIX}/docker-compose.yml" 2>/dev/null; then
+      echo "docker-compose.yml still mounts /media:ro — change to /media so uploads can write"
+    fi
+  fi
   echo
   if [[ -f "${PREFIX}/docker-compose.yml" ]]; then
     cd "${PREFIX}" && ${COMPOSE} ps

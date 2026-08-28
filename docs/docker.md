@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | s
 | `./config` | `/config` | SQLite only |
 | `./cache` | `/cache` | artwork + HLS |
 | `./transcode` | `/transcode` | in-flight jobs |
-| media folder | `/media:ro` | never rewritten; never chowned |
+| media folder | `/media` | writable so Admin uploads can land here; never chowned recursively |
 
 ## User
 

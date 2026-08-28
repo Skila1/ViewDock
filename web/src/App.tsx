@@ -10,6 +10,7 @@ import { SettingsPage } from "@/features/admin/SettingsPage";
 import { GrantsPage } from "@/features/admin/GrantsPage";
 import { RolesPage } from "@/features/admin/RolesPage";
 import { UpdatesPage } from "@/features/admin/UpdatesPage";
+import { UploadsPage } from "@/features/admin/UploadsPage";
 import { UsersPage } from "@/features/admin/UsersPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { ConnectedPage } from "@/pages/ConnectedPage";
@@ -95,6 +96,7 @@ export function App() {
                   <Route path="users" element={<UsersPage />} />
                   <Route path="roles" element={<RolesPage />} />
                   <Route path="grants" element={<GrantsPage />} />
+                  <Route path="uploads" element={<UploadsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="discord" element={<DiscordPage />} />
                   <Route path="updates" element={<UpdatesPage />} />

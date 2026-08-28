@@ -3,19 +3,16 @@ import { api } from "@/api/api";
 import { ContinueStrip } from "@/components/layout/ContinueStrip";
 import { PosterCard } from "@/components/layout/PosterCard";
 import { PosterGrid } from "@/components/layout/PosterGrid";
-import { UploadDropzone } from "@/components/upload/UploadDropzone";
 
 export function HomePage({ filter }: { filter?: "movies" | "tv" }) {
   const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies });
   const series = useQuery({ queryKey: ["series"], queryFn: api.listSeries });
   const cont = useQuery({ queryKey: ["continue"], queryFn: api.continueWatching });
-  const libs = useQuery({ queryKey: ["libraries"], queryFn: api.listLibraries });
   const showMovies = filter !== "tv";
   const showTv = filter !== "movies";
 
   return (
     <div>
-      {!filter ? <UploadDropzone libraries={libs.data ?? []} /> : null}
       {!filter ? <ContinueStrip items={cont.data ?? []} /> : null}
 
       {showMovies ? (

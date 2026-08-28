@@ -145,9 +145,11 @@ export const api = {
 
   createUpload: (body: CreateUploadRequest) =>
     request<UploadSession>("/api/v1/uploads", { method: "POST", body }),
+  listUploads: async () => asArray<UploadSession>(await request("/api/v1/uploads")),
+  getUpload: (id: string) => request<UploadSession>(`/api/v1/uploads/${id}`),
   uploadHead: (id: string) => head(`/api/v1/uploads/${id}`),
   uploadPut: (id: string, chunk: Blob, offset: number, total: number) =>
-    request(`/api/v1/uploads/${id}`, {
+    request<UploadSession>(`/api/v1/uploads/${id}`, {
       method: "PUT",
       body: chunk,
       headers: {
@@ -156,6 +158,7 @@ export const api = {
         "Content-Range": `bytes ${offset}-${offset + chunk.size - 1}/${total}`,
       },
     }),
+  cancelUpload: (id: string) => request(`/api/v1/uploads/${id}`, { method: "DELETE" }),
 
   createWTRoom: (body: { item_kind: string; item_id: string }) =>
     request<WTRoom>("/api/v1/watch-together/rooms", { method: "POST", body }),

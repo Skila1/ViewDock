@@ -414,16 +414,23 @@ export interface ShareRow {
 export interface CreateUploadRequest {
   library_id: string;
   filename: string;
-  size_bytes: number;
+  size: number;
+  size_bytes?: number;
+  mime?: string;
 }
 
 export interface UploadSession {
   id: string;
-  offset_bytes?: number;
-  library_id?: string;
-  filename?: string;
-  size_bytes?: number;
-  status?: string;
+  library_id: string;
+  filename: string;
+  size: number;
+  offset: number;
+  status: string;
+  item_kind?: string;
+  item_id?: string;
+  media_file_id?: string;
+  error?: string;
+  expires_at?: string;
 }
 
 export interface WTRoom {

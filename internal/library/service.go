@@ -63,13 +63,13 @@ func (s *Service) Create(ctx context.Context, name, rootPath, contentType string
 		Name:           name,
 		RootPath:       resolved,
 		ContentType:    contentType,
-		UploadsEnabled: false,
+		UploadsEnabled: true,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO libraries(id, name, root_path, content_type, uploads_enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 0, ?, ?)
+		VALUES (?, ?, ?, ?, 1, ?, ?)
 	`, lib.ID, lib.Name, lib.RootPath, lib.ContentType, now, now)
 	if err != nil {
 		return Library{}, err

@@ -299,11 +299,27 @@ paths:
       responses:
         "200": { description: OK }
   /uploads:
+    get:
+      operationId: listUploads
+      responses:
+        "200": { description: Admin upload sessions }
     post:
       operationId: createUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadRequest"
       responses:
         "201": { description: Created }
   /uploads/{id}:
+    get:
+      operationId: getUpload
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { description: Upload session }
     head:
       operationId: uploadHead
       parameters:
@@ -315,13 +331,14 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
-        "200": { description: OK }
+        "200": { description: Bytes accepted }
+        "409": { description: Offset conflict }
     delete:
       operationId: uploadDelete
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
-        "204": { description: Deleted }
+        "204": { description: Cancelled }
   /playback/sessions:
     post:
       operationId: createPlaybackSession
@@ -606,3 +623,26 @@ components:
           nullable: true
         duration_ms: { type: integer }
         seekable_from_ms: { type: integer }
+    CreateUploadRequest:
+      type: object
+      required: [library_id, filename]
+      properties:
+        library_id: { type: string }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+        size_bytes: { type: integer, format: int64 }
+        mime: { type: string }
+    UploadSession:
+      type: object
+      properties:
+        id: { type: string }
+        library_id: { type: string }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+        offset: { type: integer, format: int64 }
+        status: { type: string, enum: [open, processing, complete, failed, cancelled] }
+        item_kind: { type: string }
+        item_id: { type: string }
+        media_file_id: { type: string }
+        error: { type: string }
+        expires_at: { type: string }

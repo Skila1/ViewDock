@@ -544,7 +544,12 @@ func (s *Scanner) IngestFile(ctx context.Context, libraryID, absPath string) err
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.probeWhenStable(ctx, libraryID, absPath, rel)
+	if s.Prober != nil {
+		var fileID string
+		if err := s.DB.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&fileID); err == nil {
+			_ = media.PersistProbe(ctx, s.DB, s.Prober, fileID)
+		}
+	}
 	return nil
 }
 
