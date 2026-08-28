@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Service) DiscordCallbackURL(r *http.Request) string {
-	return strings.TrimRight(httpapi.PublicBase(r, s.Cfg), "/") + "/api/v1/auth/discord/callback"
+	return strings.TrimRight(httpapi.PublicBase(r, s.Cfg, s.Settings), "/") + "/api/v1/auth/discord/callback"
 }
 
 func (s *Service) handleDiscordStart(w http.ResponseWriter, r *http.Request) {
@@ -123,10 +123,10 @@ func (s *Service) handleAdminDiscordGet(w http.ResponseWriter, r *http.Request) 
 
 func (s *Service) handleAdminDiscordPut(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		LoginEnabled        *bool  `json:"login_enabled"`
+		LoginEnabled        *bool   `json:"login_enabled"`
 		ClientID            *string `json:"client_id"`
 		ClientSecret        *string `json:"client_secret"`
-		RegistrationEnabled *bool  `json:"registration_enabled"`
+		RegistrationEnabled *bool   `json:"registration_enabled"`
 		AdminDiscordIDs     *string `json:"admin_discord_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -180,6 +180,8 @@ func mountAdminRBAC(s *Service, r chi.Router) {
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(RequirePerm(PermSettingsManage))
+		r.Get("/admin/settings", s.handleAdminSiteGet)
+		r.Put("/admin/settings", s.handleAdminSitePut)
 		r.Get("/admin/integrations/discord", s.handleAdminDiscordGet)
 		r.Put("/admin/integrations/discord", s.handleAdminDiscordPut)
 	})

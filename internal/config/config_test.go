@@ -18,12 +18,14 @@ func TestIsLAN(t *testing.T) {
 	}
 }
 
-func TestTrustedDefaultLoopback(t *testing.T) {
+func TestTrustedLocalAndCloudflare(t *testing.T) {
 	cfg := Load()
-	if !cfg.TrustedContains(net.ParseIP("127.0.0.1")) {
-		t.Fatal("loopback should be trusted")
+	for _, ip := range []string{"127.0.0.1", "10.0.0.1", "172.18.0.1", "192.168.1.1", "162.158.1.1", "104.16.1.1", "2606:4700::1"} {
+		if !cfg.TrustedContains(net.ParseIP(ip)) {
+			t.Fatalf("%s should be trusted (local or Cloudflare)", ip)
+		}
 	}
-	if cfg.TrustedContains(net.ParseIP("10.0.0.1")) {
-		t.Fatal("LAN must not be trusted by default")
+	if cfg.TrustedContains(net.ParseIP("8.8.8.8")) {
+		t.Fatal("public resolver must not be trusted")
 	}
 }

@@ -8,7 +8,7 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/mai
 
 The wizard does not ask for an install path or a media folder. Run it from the directory that should contain `viewdock`. If that folder is already named `viewdock`, it installs in place. Cloudflared, if enabled, is a systemd service. It does not ask for an IP, a public URL, or Discord credentials.
 
-Open `http://<host>:8080` (or your tunnel) and create the first local administrator. First-run needs the one-time token from `config/setup.token` (or `VD_SETUP_TOKEN`). Configure Discord later under **Admin → Discord**.
+Open `http://<host>:8080` (or your tunnel) and create the first local administrator. After ViewDock is listening it prints an 8-character setup token in the console and in `docker compose logs` (`ViewDock setup token:`). Set the public URL in `.env` or **Admin → Settings**. Configure Discord and TMDB in Admin.
 
 ```bash
 cd ~/viewdock

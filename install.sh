@@ -100,13 +100,28 @@ ui_ok() {
   [[ -e /dev/tty && "${VD_UNATTENDED:-0}" != "1" ]] && command -v whiptail >/dev/null 2>&1
 }
 
+# Leave newt/whiptail's alternate screen so the shell is usable again.
+ui_restore() {
+  [[ -e /dev/tty ]] || return 0
+  {
+    printf '\033[?1049l\033[?25h\033[0m'
+    if command -v tput >/dev/null 2>&1; then
+      tput rmcup || true
+      tput sgr0 || true
+      tput cnorm || true
+    fi
+    stty sane < /dev/tty || true
+    clear
+  } >/dev/tty 2>/dev/null || true
+}
+
 # Dialogs talk to the real terminal so curl|bash still works.
 ui_yesno() {
-  whiptail --backtitle "${BACKTITLE}" --title "$1" --yesno "$2" "${3:-12}" 72 </dev/tty
+  whiptail --backtitle "${BACKTITLE}" --title "$1" --yesno "$2" "${3:-12}" 72 </dev/tty >/dev/tty
 }
 
 ui_msg() {
-  whiptail --backtitle "${BACKTITLE}" --title "$1" --msgbox "$2" "${3:-12}" 72 </dev/tty
+  whiptail --backtitle "${BACKTITLE}" --title "$1" --msgbox "$2" "${3:-12}" 72 </dev/tty >/dev/tty
 }
 
 ui_input() {
@@ -238,6 +253,7 @@ collect_config() {
   ui_msg "ViewDock" "Use Tab and Enter to move.\n\nInstalls into a viewdock folder in this directory.\nIf you are already in a folder named viewdock, it installs here.\nDocker publishes port 8080. Cloudflare Tunnel (optional) is a systemd service. Discord is configured later in Admin." 14 || true
 
   if ! ui_yesno "Install ViewDock" "Install here:\n${PREFIX}\n\nWrites docker-compose.yml and .env.\nPort 8080 on the host.\nThen: cd ${PREFIX} && docker compose ps"; then
+    ui_restore
     echo "Cancelled."
     exit 0
   fi
@@ -245,7 +261,11 @@ collect_config() {
   if cloudflared_service_present; then
     msg_ok "cloudflared is already installed as a systemd service"
   elif ui_yesno "Cloudflare Tunnel" "Install cloudflared as a systemd service now?\n\nNot Docker. Point the tunnel at http://localhost:8080 (Docker publishes that port on the host)." 13; then
-    CFG_CFTOK="$(ui_pass "Tunnel token" "Cloudflare Tunnel token from Zero Trust.")" || exit 0
+    CFG_CFTOK="$(ui_pass "Tunnel token" "Cloudflare Tunnel token from Zero Trust.")" || {
+      ui_restore
+      echo "Cancelled."
+      exit 0
+    }
   fi
 
   local cfstatus="no"
@@ -255,11 +275,13 @@ collect_config() {
     cfstatus="yes"
   fi
   local summary
-  summary="Compose project: ${PREFIX}\nFiles: docker-compose.yml and .env\nHost port: 8080\nMedia: ${CFG_MEDIAHOST}\ncloudflared systemd: ${cfstatus}\n\nFirst visit: create a local administrator in the browser.\nDiscord is set up later under Admin."
+  summary="Compose project: ${PREFIX}\nFiles: docker-compose.yml and .env\nHost port: 8080 (change VD_PORT in .env if you want)\nMedia: ${CFG_MEDIAHOST}\ncloudflared systemd: ${cfstatus}\n\nFirst visit: create a local administrator in the browser.\nPublic URL, Discord, and TMDB are set in Admin."
   if ! ui_yesno "Ready" "${summary}\n\nStart install?" 16; then
+    ui_restore
     echo "Cancelled."
     exit 0
   fi
+  ui_restore
 }
 
 write_cli() {
@@ -401,11 +423,13 @@ progress_write() {
   progress_write 5 "queued" "Host received update request"
   sleep 1
   cd "${PREFIX}"
-  img=""
-  if [[ -f .env ]]; then
-    img="$(grep -E '^VD_IMAGE=' .env | tail -1 | cut -d= -f2- | tr -d '"' || true)"
+  img="ghcr.io/skila1/viewdock:latest"
+  if [[ -f docker-compose.yml ]]; then
+    from_compose="$(grep -E 'image:[[:space:]]' docker-compose.yml | head -1 | awk '{print $2}' | tr -d '"' || true)"
+    if [[ -n "${from_compose}" && "${from_compose}" != *'$'* ]]; then
+      img="${from_compose}"
+    fi
   fi
-  img="${img:-ghcr.io/skila1/viewdock:latest}"
 
   progress_write 10 "pulling" "Pulling ${img}"
   set +e
@@ -518,13 +542,14 @@ remove_update_helper() {
 }
 
 write_compose() {
+  local dockergid="${1:-0}"
   mkdir -p "${PREFIX}"
   cat > "${PREFIX}/docker-compose.yml" <<EOF
 name: viewdock
 
 services:
   viewdock:
-    image: \${VD_IMAGE:-ghcr.io/skila1/viewdock:latest}
+    image: ghcr.io/skila1/viewdock:latest
     container_name: viewdock
     restart: unless-stopped
     stop_grace_period: 60s
@@ -538,12 +563,12 @@ services:
       VD_COMPOSE_PROJECT: viewdock
       VD_UPDATE_DIR: /update
     group_add:
-      - "\${VD_DOCKER_GID:-0}"
+      - "${dockergid}"
     volumes:
       - ./config:/config
       - ./cache:/cache
       - ./transcode:/transcode
-      - \${VD_MEDIA_HOST:-./media}:/media:ro
+      - ./media:/media:ro
       - ./update:/update
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -574,7 +599,11 @@ cmd_install() {
   need_root
   header_info
   ensure_whiptail
+  if ui_ok; then
+    trap 'ui_restore; exit 130' INT TERM
+  fi
   collect_config
+  trap - INT TERM
   PREFIX="$(prefix_from_here)"
   CFG_MEDIAHOST="${PREFIX}/media"
 
@@ -582,63 +611,27 @@ cmd_install() {
   mkdir -p "${PREFIX}/config" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
   chmod 0777 "${PREFIX}/update" || true
   mkdir -p "${CFG_MEDIAHOST}"
-  write_compose
-  write_cli
-  save_installer
-  install_update_helper
-
-  local cookie="false"
-  if [[ -n "${CFG_CFTOK}" ]] || cloudflared_service_present; then
-    cookie="true"
-  fi
   local dockergid="0"
   if [[ -S /var/run/docker.sock ]]; then
     dockergid="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)"
   fi
-  if [[ -f "${PREFIX}/.env" ]] && grep -q VD_IMAGE "${PREFIX}/.env"; then
+  write_compose "${dockergid}"
+  write_cli
+  save_installer
+  install_update_helper
+
+  if [[ -f "${PREFIX}/.env" ]]; then
     msg_info "Keeping existing ${PREFIX}/.env"
-    grep -q '^VD_IMAGE=' "${PREFIX}/.env" || echo "VD_IMAGE=${IMAGE}" >> "${PREFIX}/.env"
-    grep -q '^VD_MEDIA_HOST=' "${PREFIX}/.env" || echo "VD_MEDIA_HOST=${CFG_MEDIAHOST}" >> "${PREFIX}/.env"
-    grep -q '^VD_DOCKER_GID=' "${PREFIX}/.env" || echo "VD_DOCKER_GID=${dockergid}" >> "${PREFIX}/.env"
-    grep -q '^VD_COMPOSE_PROJECT=' "${PREFIX}/.env" || echo "VD_COMPOSE_PROJECT=viewdock" >> "${PREFIX}/.env"
+    grep -q '^VD_PORT=' "${PREFIX}/.env" || echo "VD_PORT=8080" >> "${PREFIX}/.env"
+    grep -q '^VD_PUBLIC_URL=' "${PREFIX}/.env" || echo "VD_PUBLIC_URL=" >> "${PREFIX}/.env"
   else
     cat > "${PREFIX}/.env" <<EOF
-# ViewDock. Uncomment and set the optional lines you need.
-# First-run does not rewrite this file. TMDB and Discord can also be set in the UI.
-
-VD_HTTP_ADDR=:8080
-VD_CONFIG_DIR=/config
-VD_CACHE_DIR=/cache
-VD_TRANSCODE_DIR=/transcode
-VD_MEDIA_DIR=/media
-VD_LOG_LEVEL=info
-# VD_DATABASE_PATH=/config/viewdock.db
-# VD_PUBLIC_URL=https://app.viewdock.dev
-# VD_TMDB_API_KEY=
-# VD_DISCORD_CLIENT_ID=
-# VD_DISCORD_CLIENT_SECRET=
-# VD_DISCORD_LOGIN=0
-# First-admin token. If unset, ViewDock writes /config/setup.token (not logged).
-# VD_SETUP_TOKEN=
-VD_COOKIE_SECURE=${cookie}
-VD_TRUSTED_PROXIES=127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-# VD_LAN_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128
-# VD_SQLITE_BUSY_TIMEOUT_MS=20000
-# VD_SHUTDOWN_WAIT=45s
-
-VD_IMAGE=${IMAGE}
-VD_MEDIA_HOST=${CFG_MEDIAHOST}
+# Host port. The container always listens on 8080.
 VD_PORT=8080
-VD_DOCKER_GID=${dockergid}
-VD_COMPOSE_PROJECT=viewdock
-VD_UPDATE_DIR=/update
-# VD_VERSION_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/VERSION
-# VD_CHANGELOG_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/CHANGELOG.md
-# VD_INSTALL_URL=https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh
 
-PUID=1000
-PGID=1000
-TZ=UTC
+# Public origin for Discord OAuth and share links. Example: https://app.viewdock.dev
+# You can also set this later under Admin → Settings.
+VD_PUBLIC_URL=
 EOF
     chmod 0600 "${PREFIX}/.env"
   fi
@@ -669,21 +662,14 @@ EOF
 
   install_cloudflared_service "${CFG_CFTOK}"
 
-  local extra=""
-  if [[ -n "${CFG_CFTOK}" ]]; then
-    extra="\ncloudflared: systemd (sudo systemctl status cloudflared)\nTunnel origin: http://localhost:8080"
-  fi
-  local done="Compose project: ${PREFIX}\n  docker-compose.yml\n  .env\nHost port: 8080${extra}\n\nOpen http://<this-host>:8080 and create the first administrator.\nFirst-run needs the token from config/setup.token.\n\ncd ${PREFIX}\ndocker compose ps"
-  if ui_ok; then
-    ui_msg "Installed" "${done}" 18 || true
-  fi
   echo
   echo -e " ${BOLD}${BL}ViewDock files are in ${PREFIX}${CL}"
   echo "  ${PREFIX}/docker-compose.yml"
   echo "  ${PREFIX}/.env"
   echo "  Open http://<this-host>:8080 and create the first administrator."
-  echo "  First-run token: ${PREFIX}/config/setup.token (not logged, not returned by the API)."
-  echo "  Discord is configured in Admin after you log in."
+  echo "  First-run token: printed in docker compose logs after ViewDock starts (8 characters)."
+  echo "  Public URL: ${PREFIX}/.env (VD_PUBLIC_URL) or Admin → Settings after login."
+  echo "  Discord and TMDB are configured in Admin."
   if [[ -n "${CFG_CFTOK}" ]]; then
     echo "  cloudflared: systemctl status cloudflared"
   fi

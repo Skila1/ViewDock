@@ -6,4 +6,5 @@
 - One-line installer writes a Compose project in `./viewdock`, installs Docker if missing, and starts the stack. Optional Cloudflare Tunnel is a systemd service, not a container.
 - Admin → Updates checks GHCR digest plus GitHub `VERSION` / `CHANGELOG.md`. Update now uses the host helper (`viewdock-update`) or the Docker socket.
 - Automatic updates can pull a newer image about once an hour when the helper or socket is available.
-- SQLite, one container. Media stays on your disk. First-run still requires the bootstrap token from `config/setup.token` (or `VD_SETUP_TOKEN`).
+- SQLite, one container. Media stays on your disk. First-run prints an 8-character setup token in the console and logs after the server is listening.
+- `.env` only has `VD_PORT` and `VD_PUBLIC_URL`. Trusted proxies include local/Docker and Cloudflare. Public URL and TMDB are also under Admin → Settings.

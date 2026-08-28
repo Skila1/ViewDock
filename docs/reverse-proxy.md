@@ -2,7 +2,7 @@
 
 Internet expose requires a reverse proxy or tunnel you run yourself. ViewDock does **not** ship cloudflared (or any tunnel) in Docker — configure that on the host.
 
-Set `VD_TRUSTED_PROXIES` to the proxy CIDR (not `0.0.0.0/0` unless you understand the risk). Set `VD_PUBLIC_URL` to the app origin, for example `https://app.viewdock.dev`. Marketing for the project lives at `https://viewdock.dev`.
+ViewDock already trusts loopback, private LAN/Docker ranges, and Cloudflare edge IPs for `X-Forwarded-*`. Set `VD_PUBLIC_URL` (or Admin → Settings) to the app origin, for example `https://app.viewdock.dev`. Marketing for the project lives at `https://viewdock.dev`.
 
 Disable buffering on `/api/v1/playback` and `/hls`. Do not cache `/api` or HLS playlists. Allow WebSockets on `/api/v1/watch-together`. Raise upload body size for offset-PUT.
 
@@ -42,4 +42,4 @@ Forward `X-Forwarded-*`. Disable buffering on playback/HLS routers. Enable WebSo
 
 Run `cloudflared` (or any tunnel) on the host. Do not add it to the ViewDock Compose file. Point the tunnel hostname at `http://127.0.0.1:8080` (the app). Marketing is a separate site on port 8085 / `viewdock.dev`.
 
-Pass `X-Forwarded-Proto: https`. Bypass cache for `/api` and `/hls`. Range requests must reach the origin. Set `VD_PUBLIC_URL=https://app.viewdock.dev` so Discord OAuth and share links use a stable origin.
+Pass `X-Forwarded-Proto: https`. Bypass cache for `/api` and `/hls`. Range requests must reach the origin. Set the public URL in `.env` or **Admin → Settings** so Discord OAuth and share links use a stable origin.

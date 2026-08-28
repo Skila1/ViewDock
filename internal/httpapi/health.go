@@ -70,6 +70,6 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 		"media_dir":          s.Cfg.MediaDir,
 		"discord_login":      discordLogin,
 		"discord_configured": discordConfigured,
-		"public_url":         s.Cfg.PublicURL,
+		"public_url":         ResolvePublicURL(r.Context(), s.Cfg, s.Settings),
 	})
 }

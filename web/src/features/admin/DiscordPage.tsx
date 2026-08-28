@@ -77,8 +77,8 @@ export function DiscordPage() {
         <input className="mt-1 w-full" value={admins} onChange={(e) => setAdmins(e.target.value)} />
       </label>
       <p className="text-xs text-dim">
-        Set <code>VD_PUBLIC_URL=https://app.viewdock.dev</code> so the redirect URL stays stable behind
-        your reverse proxy or Cloudflare Tunnel. ViewDock does not run cloudflared.
+        Set the public URL under Admin → Settings so this redirect stays stable behind your reverse proxy
+        or Cloudflare Tunnel.
       </p>
       {msg ? <p className="text-xs text-accent">{msg}</p> : null}
       <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">

@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,6 +98,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+	waitListen(cfg.HTTPAddr)
+	if setup.BootstrapPending(context.Background(), kv) {
+		setup.AnnounceToken(cfg, logger)
+	}
 
 	go func() {
 		t := time.NewTicker(15 * time.Minute)
@@ -115,4 +121,25 @@ func main() {
 	shCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownWait)
 	defer cancel()
 	_ = hs.Shutdown(shCtx)
+}
+
+func waitListen(addr string) {
+	host := addr
+	switch {
+	case strings.HasPrefix(addr, ":"):
+		host = "127.0.0.1" + addr
+	case strings.HasPrefix(addr, "0.0.0.0:"):
+		host = "127.0.0.1" + strings.TrimPrefix(addr, "0.0.0.0")
+	case strings.HasPrefix(addr, "[::]:"):
+		host = "[::1]" + strings.TrimPrefix(addr, "[::]")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", host, 50*time.Millisecond)
+		if err == nil {
+			_ = c.Close()
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

@@ -38,10 +38,23 @@ func ClientIPString(r *http.Request, cfg config.Config) string {
 	return ""
 }
 
-// PublicBase is VD_PUBLIC_URL when set, otherwise the request host.
-// Operators typically set https://app.viewdock.dev behind their own reverse proxy or tunnel.
-func PublicBase(r *http.Request, cfg config.Config) string {
-	if u := strings.TrimRight(strings.TrimSpace(cfg.PublicURL), "/"); u != "" {
+const settingPublicURL = "app.public_url"
+
+// ResolvePublicURL prefers Admin → Settings, then VD_PUBLIC_URL.
+func ResolvePublicURL(ctx context.Context, cfg config.Config, kv SettingsLookup) string {
+	if kv != nil {
+		if v, err := kv.Get(ctx, settingPublicURL); err == nil {
+			if u := strings.TrimRight(strings.TrimSpace(v), "/"); u != "" {
+				return u
+			}
+		}
+	}
+	return strings.TrimRight(strings.TrimSpace(cfg.PublicURL), "/")
+}
+
+// PublicBase is the Admin / .env public origin when set, otherwise the request host.
+func PublicBase(r *http.Request, cfg config.Config, kv SettingsLookup) string {
+	if u := ResolvePublicURL(r.Context(), cfg, kv); u != "" {
 		return u
 	}
 	scheme := "http"

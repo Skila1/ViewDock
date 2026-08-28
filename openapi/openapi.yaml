@@ -93,6 +93,15 @@ paths:
       operationId: createRole
       responses:
         "201": { description: Created }
+  /admin/settings:
+    get:
+      operationId: getSiteSettings
+      responses:
+        "200": { description: Site settings }
+    put:
+      operationId: putSiteSettings
+      responses:
+        "200": { description: Saved }
   /admin/integrations/discord:
     get:
       operationId: getDiscordSettings

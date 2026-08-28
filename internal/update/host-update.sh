@@ -54,11 +54,13 @@ progress_write() {
   progress_write 5 "queued" "Host received update request"
   sleep 1
   cd "${PREFIX}"
-  img=""
-  if [[ -f .env ]]; then
-    img="$(grep -E '^VD_IMAGE=' .env | tail -1 | cut -d= -f2- | tr -d '"' || true)"
+  img="ghcr.io/skila1/viewdock:latest"
+  if [[ -f docker-compose.yml ]]; then
+    from_compose="$(grep -E 'image:[[:space:]]' docker-compose.yml | head -1 | awk '{print $2}' | tr -d '"' || true)"
+    if [[ -n "${from_compose}" && "${from_compose}" != *'$'* ]]; then
+      img="${from_compose}"
+    fi
   fi
-  img="${img:-ghcr.io/skila1/viewdock:latest}"
 
   progress_write 10 "pulling" "Pulling ${img}"
   set +e

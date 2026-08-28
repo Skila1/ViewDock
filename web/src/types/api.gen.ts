@@ -79,6 +79,12 @@ export interface PermissionRow {
   description: string;
 }
 
+export interface SiteSettings {
+  public_url: string;
+  tmdb_configured: boolean;
+  tmdb_api_key_set: boolean;
+}
+
 export interface DiscordSettings {
   login_enabled: boolean;
   client_id: string;

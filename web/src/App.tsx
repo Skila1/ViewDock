@@ -6,6 +6,7 @@ import { AdminLayout } from "@/features/admin/AdminLayout";
 import { InspectorPage } from "@/features/admin/InspectorPage";
 import { StreamsPage } from "@/features/admin/StreamsPage";
 import { DiscordPage } from "@/features/admin/DiscordPage";
+import { SettingsPage } from "@/features/admin/SettingsPage";
 import { GrantsPage } from "@/features/admin/GrantsPage";
 import { RolesPage } from "@/features/admin/RolesPage";
 import { UpdatesPage } from "@/features/admin/UpdatesPage";
@@ -94,6 +95,7 @@ export function App() {
                   <Route path="users" element={<UsersPage />} />
                   <Route path="roles" element={<RolesPage />} />
                   <Route path="grants" element={<GrantsPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
                   <Route path="discord" element={<DiscordPage />} />
                   <Route path="updates" element={<UpdatesPage />} />
                 </Route>

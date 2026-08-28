@@ -8,17 +8,14 @@ services:
       dockerfile: docker/Dockerfile
     container_name: viewdock
     ports:
-      - "8080:8080"
+      - "${VD_PORT:-8080}:8080"
     environment:
       VD_HTTP_ADDR: ":8080"
       VD_CONFIG_DIR: /config
       VD_CACHE_DIR: /cache
       VD_TRANSCODE_DIR: /transcode
       VD_MEDIA_DIR: /media
-      VD_LOG_LEVEL: info
-      PUID: "1000"
-      PGID: "1000"
-      TZ: UTC
+      VD_PUBLIC_URL: ${VD_PUBLIC_URL:-}
     volumes:
       - ./config:/config
       - ./cache:/cache

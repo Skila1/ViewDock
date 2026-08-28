@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -17,7 +19,7 @@ import (
 	"github.com/viewdock/viewdock/internal/settings"
 )
 
-func setupAPI(t *testing.T, token string) (*API, *settings.Store, config.Config) {
+func setupAPI(t *testing.T) (*API, *settings.Store, config.Config, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "t.db")
 	if err := db.Migrate(path); err != nil {
@@ -32,11 +34,15 @@ func setupAPI(t *testing.T, token string) (*API, *settings.Store, config.Config)
 	cfg.ConfigDir = t.TempDir()
 	kv := settings.New(sqlDB)
 	a := auth.New(sqlDB, cfg, kv, audit.New(sqlDB))
-	t.Setenv("VD_SETUP_TOKEN", token)
+	t.Setenv("VD_SETUP_TOKEN", "SHOULD-BE-IGNORED")
 	if err := EnsureBootstrap(context.Background(), kv, cfg, nil, 0); err != nil {
 		t.Fatal(err)
 	}
-	return New(a, kv, nil, nil, nil), kv, cfg
+	token := ReadTokenFile(cfg)
+	if !isEasySetupToken(token) {
+		t.Fatalf("generated token %q is not 4–12 easy chars", token)
+	}
+	return New(a, kv, nil, nil, nil), kv, cfg, token
 }
 
 func postAdmin(t *testing.T, api *API, body map[string]string) *httptest.ResponseRecorder {
@@ -52,7 +58,7 @@ func postAdmin(t *testing.T, api *API, body map[string]string) *httptest.Respons
 }
 
 func TestSetupAdminRejectsMissingToken(t *testing.T) {
-	api, _, _ := setupAPI(t, "correct-token-value")
+	api, _, _, _ := setupAPI(t)
 	rec := postAdmin(t, api, map[string]string{"username": "admin", "password": "secret12"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
@@ -60,7 +66,7 @@ func TestSetupAdminRejectsMissingToken(t *testing.T) {
 }
 
 func TestSetupAdminRejectsWrongToken(t *testing.T) {
-	api, _, _ := setupAPI(t, "correct-token-value")
+	api, _, _, _ := setupAPI(t)
 	rec := postAdmin(t, api, map[string]string{
 		"username": "admin", "password": "secret12", "bootstrap_token": "nope",
 	})
@@ -69,16 +75,26 @@ func TestSetupAdminRejectsWrongToken(t *testing.T) {
 	}
 }
 
-func TestSetupAdminTokenReuseAndClosed(t *testing.T) {
-	api, kv, _ := setupAPI(t, "correct-token-value")
+func TestSetupAdminAcceptsLowercaseToken(t *testing.T) {
+	api, _, _, token := setupAPI(t)
 	rec := postAdmin(t, api, map[string]string{
-		"username": "admin", "password": "secret12", "bootstrap_token": "correct-token-value",
+		"username": "admin", "password": "secret12", "bootstrap_token": strings.ToLower(token),
+	})
+	if rec.Code != 200 {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupAdminTokenReuseAndClosed(t *testing.T) {
+	api, kv, _, token := setupAPI(t)
+	rec := postAdmin(t, api, map[string]string{
+		"username": "admin", "password": "secret12", "bootstrap_token": token,
 	})
 	if rec.Code != 200 {
 		t.Fatalf("first create %d %s", rec.Code, rec.Body.String())
 	}
 	rec = postAdmin(t, api, map[string]string{
-		"username": "other", "password": "secret12", "bootstrap_token": "correct-token-value",
+		"username": "other", "password": "secret12", "bootstrap_token": token,
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("reuse/closed got %d %s", rec.Code, rec.Body.String())
@@ -89,7 +105,7 @@ func TestSetupAdminTokenReuseAndClosed(t *testing.T) {
 }
 
 func TestSetupStatusDoesNotLeakToken(t *testing.T) {
-	api, _, _ := setupAPI(t, "correct-token-value")
+	api, _, _, token := setupAPI(t)
 	r := chi.NewRouter()
 	api.Routes(r)
 	rec := httptest.NewRecorder()
@@ -106,20 +122,52 @@ func TestSetupStatusDoesNotLeakToken(t *testing.T) {
 		t.Fatalf("expected bootstrap_required, got %#v", body["bootstrap_required"])
 	}
 	raw, _ := json.Marshal(body)
-	if bytes.Contains(raw, []byte("correct-token-value")) {
+	if bytes.Contains(raw, []byte(token)) {
 		t.Fatal("token value present in status")
 	}
 }
 
 func TestSetupAdminAfterCreateAdminRejected(t *testing.T) {
-	api, _, _ := setupAPI(t, "correct-token-value")
+	api, _, _, token := setupAPI(t)
 	if _, err := api.Auth.CreateAdmin(context.Background(), "admin", "secret12", "Admin"); err != nil {
 		t.Fatal(err)
 	}
 	rec := postAdmin(t, api, map[string]string{
-		"username": "late", "password": "secret12", "bootstrap_token": "correct-token-value",
+		"username": "late", "password": "secret12", "bootstrap_token": token,
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnsureBootstrapRotatesLongToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	if err := db.Migrate(path); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.Open(path, 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	cfg := config.Load()
+	cfg.ConfigDir = t.TempDir()
+	kv := settings.New(sqlDB)
+	old := "this-is-a-very-long-old-token-value"
+	if err := os.WriteFile(TokenFile(cfg), []byte(old+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := kv.Set(context.Background(), settingBootstrapHash, auth.HashToken(old)); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureBootstrap(context.Background(), kv, cfg, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadTokenFile(cfg)
+	if got == normalizeSetupToken(old) {
+		t.Fatal("long token should have been replaced")
+	}
+	if !isEasySetupToken(got) {
+		t.Fatalf("rotated token %q is not easy", got)
 	}
 }

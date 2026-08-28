@@ -7,6 +7,7 @@ const links = [
   { to: "/admin/users", label: "Users" },
   { to: "/admin/roles", label: "Groups" },
   { to: "/admin/grants", label: "Grants" },
+  { to: "/admin/settings", label: "Settings" },
   { to: "/admin/discord", label: "Discord" },
   { to: "/admin/updates", label: "Updates" },
 ];

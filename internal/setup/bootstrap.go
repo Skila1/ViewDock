@@ -2,9 +2,13 @@ package setup
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/config"
@@ -15,6 +19,10 @@ const (
 	settingBootstrapHash     = "setup.bootstrap_hash"
 	settingBootstrapConsumed = "setup.bootstrap_consumed"
 	settingAdminCreated      = "setup.admin_created"
+
+	// Easy to type: no 0/O, 1/I. Length is within the 4–12 range the UI expects.
+	setupTokenLen      = 8
+	setupTokenAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 )
 
 func TokenFile(cfg config.Config) string {
@@ -36,6 +44,70 @@ func BootstrapPending(ctx context.Context, kv *settings.Store) bool {
 	return h != ""
 }
 
+func normalizeSetupToken(raw string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToUpper(r)
+	}, raw)
+}
+
+func isEasySetupToken(raw string) bool {
+	s := normalizeSetupToken(raw)
+	if len(s) < 4 || len(s) > 12 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune(setupTokenAlphabet, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func generateSetupToken() (string, error) {
+	out := make([]byte, setupTokenLen)
+	alphabet := []byte(setupTokenAlphabet)
+	for i := range out {
+		var b [1]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return "", err
+		}
+		out[i] = alphabet[int(b[0])%len(alphabet)]
+	}
+	return string(out), nil
+}
+
+func ReadTokenFile(cfg config.Config) string {
+	b, err := os.ReadFile(TokenFile(cfg))
+	if err != nil {
+		return ""
+	}
+	return normalizeSetupToken(string(b))
+}
+
+func writeTokenFile(cfg config.Config, raw string) error {
+	if err := os.MkdirAll(cfg.ConfigDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(TokenFile(cfg), []byte(raw+"\n"), 0o600)
+}
+
+// AnnounceToken prints the pending first-admin token to stdout, stderr, and logs.
+func AnnounceToken(cfg config.Config, log *slog.Logger) {
+	raw := ReadTokenFile(cfg)
+	if raw == "" {
+		return
+	}
+	line := fmt.Sprintf("ViewDock setup token: %s  (also in %s)", raw, TokenFile(cfg))
+	_, _ = fmt.Fprintln(os.Stdout, line)
+	_, _ = fmt.Fprintln(os.Stderr, line)
+	if log != nil {
+		log.Info("setup bootstrap token ready", "token", raw, "token_file", TokenFile(cfg))
+	}
+}
+
 func EnsureBootstrap(ctx context.Context, kv *settings.Store, cfg config.Config, log *slog.Logger, userCount int) error {
 	if kv == nil {
 		return nil
@@ -49,39 +121,26 @@ func EnsureBootstrap(ctx context.Context, kv *settings.Store, cfg config.Config,
 	if kv.Bool(ctx, settingBootstrapConsumed) {
 		return nil
 	}
-	path := TokenFile(cfg)
-	if existing, _ := kv.Get(ctx, settingBootstrapHash); existing != "" {
-		if log != nil {
-			log.Info("setup bootstrap pending", "token_file", path)
-		}
+
+	existingHash, _ := kv.Get(ctx, settingBootstrapHash)
+	fileTok := ReadTokenFile(cfg)
+	keep := existingHash != "" && isEasySetupToken(fileTok) && auth.HashToken(fileTok) == existingHash
+	if keep {
+		AnnounceToken(cfg, log)
 		return nil
 	}
-	raw := os.Getenv("VD_SETUP_TOKEN")
-	wroteFile := false
-	if raw == "" {
-		tok, err := auth.RandomToken(24)
-		if err != nil {
-			return err
-		}
-		raw = tok
-		if err := os.MkdirAll(cfg.ConfigDir, 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, []byte(raw+"\n"), 0o600); err != nil {
-			return err
-		}
-		wroteFile = true
+
+	raw, err := generateSetupToken()
+	if err != nil {
+		return err
+	}
+	if err := writeTokenFile(cfg, raw); err != nil {
+		return err
 	}
 	if err := kv.Set(ctx, settingBootstrapHash, auth.HashToken(raw)); err != nil {
 		return err
 	}
-	if log != nil {
-		if wroteFile {
-			log.Info("setup bootstrap token written", "token_file", path)
-		} else {
-			log.Info("setup bootstrap token accepted from environment")
-		}
-	}
+	AnnounceToken(cfg, log)
 	return nil
 }
 
@@ -99,8 +158,9 @@ func checkBootstrapToken(ctx context.Context, kv *settings.Store, raw string) bo
 		return false
 	}
 	want, _ := kv.Get(ctx, settingBootstrapHash)
-	if want == "" || raw == "" {
+	got := normalizeSetupToken(raw)
+	if want == "" || got == "" {
 		return false
 	}
-	return auth.HashToken(raw) == want
+	return auth.HashToken(got) == want
 }

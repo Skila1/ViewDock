@@ -7,6 +7,7 @@ import type {
   CreateUploadRequest,
   CreateUserRequest,
   DiscordSettings,
+  SiteSettings,
   DetectResult,
   IdentityRow,
   PermissionRow,
@@ -204,6 +205,9 @@ export const api = {
     if (q.role_id) p.set("role_id", q.role_id);
     return request(`/api/v1/admin/libraries/${libraryId}/grants?${p.toString()}`, { method: "DELETE" });
   },
+  getSiteSettings: () => request<SiteSettings>("/api/v1/admin/settings"),
+  putSiteSettings: (body: { public_url?: string; tmdb_api_key?: string }) =>
+    request<SiteSettings>("/api/v1/admin/settings", { method: "PUT", body }),
   getDiscordSettings: () => request<DiscordSettings>("/api/v1/admin/integrations/discord"),
   putDiscordSettings: (body: Partial<DiscordSettings> & { client_secret?: string }) =>
     request<DiscordSettings>("/api/v1/admin/integrations/discord", { method: "PUT", body }),

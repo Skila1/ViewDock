@@ -106,15 +106,18 @@ export function SetupPage() {
             <>
               <input
                 className="w-full"
-                type="password"
+                type="text"
                 autoComplete="off"
-                placeholder="Setup bootstrap token"
+                spellCheck={false}
+                placeholder="Setup token from the logs"
                 value={bootstrapToken}
                 onChange={(e) => setBootstrapToken(e.target.value)}
                 required
               />
               <p className="text-xs text-dim">
-                Token is in your config directory as <code>setup.token</code>, or set <code>VD_SETUP_TOKEN</code>. It is not shown in the API.
+                ViewDock prints an 8-character token in the console and logs after it starts. Look for{" "}
+                <code>ViewDock setup token:</code> in <code>docker compose logs</code>. It is also in{" "}
+                <code>config/setup.token</code>.
               </p>
             </>
           ) : null}
