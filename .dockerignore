@@ -1,20 +1,15 @@
 .git
 .github
-# Root data dirs only. Unanchored names also match internal/config,
-# internal/cache, internal/transcode, and internal/media and break the image build.
-/config
-/cache
-/transcode
-/media
+.env
 *.db
 *.db-wal
 *.db-shm
-.env
+*.exe
 web/node_modules
-**/*.test
+web/dist
 **/*_test.go
+**/*.test
 docs
 .idea
 .vscode
-*.exe
 .cursor

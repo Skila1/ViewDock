@@ -14,12 +14,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
-COPY cmd ./cmd
-COPY internal ./internal
-COPY migrations ./migrations
-COPY openapi ./openapi
-COPY web/embed.go ./web/embed.go
-COPY VERSION ./
+COPY . .
 COPY --from=web /src/web/dist ./web/dist
 ARG VERSION
 RUN --mount=type=cache,target=/go/pkg/mod \
