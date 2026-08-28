@@ -1,11 +1,17 @@
+# Builds and publishes ghcr.io/skila1/viewdock from https://github.com/Skila1/ViewDock.
+# GitHub only. Gitea may receive the first push and mirror here; its Actions
+# runner must not build or push images (github.server_url is not github.com).
 name: docker
+
 on:
   push:
-    branches: [main, master]
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+
 jobs:
   image:
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,7 +25,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: version
+      - name: Image name
+        id: img
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: App version
         id: ver
         run: |
           v="$(tr -d '[:space:]' < VERSION)"
@@ -28,18 +37,23 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ steps.img.outputs.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.ver.outputs.version }}
-            type=raw,value=sha-${{ steps.ver.outputs.sha }}
             type=semver,pattern={{version}}
+            type=sha,prefix=
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.ver.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=viewdock-image
+          cache-to: type=gha,mode=max,scope=viewdock-image

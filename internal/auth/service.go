@@ -140,11 +140,29 @@ func (s *Service) CreateAdmin(ctx context.Context, username, password, display s
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	u := User{ID: uuid.NewString(), Username: strings.TrimSpace(username), DisplayName: display, IsAdmin: true}
-	_, err = s.DB.ExecContext(ctx, `
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO server_settings(key, value) VALUES ('setup.admin_created', '1')`); err != nil {
+		return User{}, ErrSetupComplete
+	}
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&existing); err != nil {
+		return User{}, err
+	}
+	if existing > 0 {
+		return User{}, ErrSetupComplete
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO users(id, username, password_hash, display_name, email, is_admin, disabled, pin_hash, created_at, updated_at, has_password)
 		VALUES (?, ?, ?, ?, '', 1, 0, '', ?, ?, 1)
 	`, u.ID, u.Username, hash, u.DisplayName, now, now)
 	if err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
 	_ = s.AssignRole(ctx, u.ID, RoleAdministrator)
@@ -196,9 +214,14 @@ func (s *Service) UpdateDisplayName(ctx context.Context, userID, display string)
 	return err
 }
 
-func (s *Service) SetDisabled(ctx context.Context, actorID, userID string, disabled bool) error {
-	if actorID == userID && disabled {
+func (s *Service) SetDisabled(ctx context.Context, actor *Principal, userID string, disabled bool) error {
+	if actor != nil && actor.UserID == userID && disabled {
 		return errors.New("cannot disable your own account")
+	}
+	if actor != nil {
+		if err := s.AssertCanModifyUser(ctx, actor, userID); err != nil {
+			return err
+		}
 	}
 	if disabled {
 		if err := s.guardLastAdmin(ctx, userID, true, nil); err != nil {

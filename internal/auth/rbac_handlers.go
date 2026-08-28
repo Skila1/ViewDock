@@ -47,6 +47,10 @@ func (s *Service) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 	if body.Permissions == nil {
 		body.Permissions = []string{PermMediaUpload, PermSharesCreate}
 	}
+	if err := s.AssertCanGrantPermissions(r.Context(), FromRequest(r), body.Permissions); err != nil {
+		httpapi.WriteErr(w, CeilingHTTPStatus(err), "roles", err.Error())
+		return
+	}
 	role, err := s.CreateRole(r.Context(), body.Name, body.Description, body.Permissions)
 	if err != nil {
 		httpapi.WriteErr(w, 400, "roles", err.Error())
@@ -70,6 +74,12 @@ func (s *Service) handlePatchRole(w http.ResponseWriter, r *http.Request) {
 	if body.Description != nil {
 		desc = *body.Description
 	}
+	if body.Permissions != nil {
+		if err := s.AssertCanGrantPermissions(r.Context(), FromRequest(r), body.Permissions); err != nil {
+			httpapi.WriteErr(w, CeilingHTTPStatus(err), "roles", err.Error())
+			return
+		}
+	}
 	role, err = s.UpdateRole(r.Context(), role.ID, desc, body.Permissions)
 	if err != nil {
 		httpapi.WriteErr(w, 400, "roles", err.Error())
@@ -91,16 +101,16 @@ func (s *Service) handleAddMembers(w http.ResponseWriter, r *http.Request) {
 		UserIDs []string `json:"user_ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	if err := s.AddRoleMembers(r.Context(), chi.URLParam(r, "id"), body.UserIDs); err != nil {
-		httpapi.WriteErr(w, 400, "roles", err.Error())
+	if err := s.AddRoleMembersAs(r.Context(), FromRequest(r), chi.URLParam(r, "id"), body.UserIDs); err != nil {
+		httpapi.WriteErr(w, CeilingHTTPStatus(err), "roles", err.Error())
 		return
 	}
 	httpapi.WriteOK(w)
 }
 
 func (s *Service) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
-	if err := s.RemoveRoleMember(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "userID")); err != nil {
-		httpapi.WriteErr(w, 400, "roles", err.Error())
+	if err := s.RemoveRoleMemberAs(r.Context(), FromRequest(r), chi.URLParam(r, "id"), chi.URLParam(r, "userID")); err != nil {
+		httpapi.WriteErr(w, CeilingHTTPStatus(err), "roles", err.Error())
 		return
 	}
 	httpapi.WriteOK(w)

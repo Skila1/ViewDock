@@ -1,6 +1,8 @@
+# Development Compose. Production hosts should use install.sh, then
+# docker compose pull && docker compose up -d (ghcr.io/skila1/viewdock:latest).
 services:
   viewdock:
-    image: ghcr.io/viewdock/viewdock:latest
+    image: ghcr.io/skila1/viewdock:latest
     build:
       context: .
       dockerfile: docker/Dockerfile

@@ -78,7 +78,7 @@ export function RolesPage() {
             e.preventDefault();
             await api.patchRole(selected.id, {
               description: desc,
-              permissions: selected.name === "Administrator" ? undefined : picked,
+              permissions: selected.is_system ? undefined : picked,
             });
             setSelected(null);
             await qc.invalidateQueries({ queryKey: ["roles"] });
@@ -86,8 +86,8 @@ export function RolesPage() {
         >
           <h2 className="text-sm font-medium">{selected.name}</h2>
           <input className="w-full" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          {selected.name === "Administrator" ? (
-            <p className="text-xs text-dim">Administrator always has every permission.</p>
+          {selected.is_system ? (
+            <p className="text-xs text-dim">Built-in group permissions cannot be changed.</p>
           ) : (
             <div className="grid gap-1 text-xs">
               {(perms.data ?? [])

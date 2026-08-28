@@ -300,36 +300,12 @@ func (s *Service) userByDiscord(ctx context.Context, discordID string) (User, er
 	return s.GetUser(ctx, userID)
 }
 
-func (s *Service) firstUnlinkedAdmin(ctx context.Context) (string, bool) {
-	var id string
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT u.id FROM users u
-		WHERE u.is_admin = 1 AND u.disabled = 0
-		AND NOT EXISTS (
-			SELECT 1 FROM user_identities i WHERE i.user_id = u.id AND i.provider = 'discord'
-		)
-		ORDER BY u.created_at LIMIT 1
-	`).Scan(&id)
-	return id, err == nil && id != ""
-}
-
 func (s *Service) UpsertDiscordUser(ctx context.Context, p DiscordProfile) (User, error) {
 	if u, err := s.userByDiscord(ctx, p.ID); err == nil {
 		return u, nil
 	}
 	cfg := s.LoadDiscord(ctx)
 	adminListed := isAdminDiscordID(p.ID, cfg.AdminDiscordIDs)
-	admins, _ := s.AdministratorCount(ctx)
-	if id, ok := s.firstUnlinkedAdmin(ctx); ok && admins == 1 {
-		if err := s.linkDiscord(ctx, id, p); err != nil {
-			return User{}, err
-		}
-		if adminListed {
-			_ = s.AssignRole(ctx, id, RoleAdministrator)
-		}
-		return s.GetUser(ctx, id)
-	}
-
 	if !cfg.RegistrationEnabled && !adminListed {
 		return User{}, errors.New("discord registration is disabled")
 	}

@@ -60,11 +60,18 @@ func (a *API) unlock(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if sh.MaxConcurrent > 0 && a.Svc.activeCount(r.Context(), id) >= sh.MaxConcurrent {
-		if c, err := r.Cookie(auth.GuestCookie); err != nil || c.Value == "" {
+	if c, err := r.Cookie(auth.GuestCookie); err == nil && a.Svc.ValidGuestForShare(r.Context(), c.Value, id) {
+		if sh.MaxConcurrent > 0 && !a.Svc.guestActiveForShare(r.Context(), c.Value, id) && a.Svc.activeCount(r.Context(), id) >= sh.MaxConcurrent {
 			httpapi.WriteErr(w, 429, "share_busy", "too many viewers")
 			return
 		}
+		a.Svc.touchGuestToken(r.Context(), c.Value)
+		httpapi.WriteJSON(w, 200, map[string]any{"ok": true, "item_kind": sh.ItemKind, "item_id": sh.ItemID, "returning": true})
+		return
+	}
+	if sh.MaxConcurrent > 0 && a.Svc.activeCount(r.Context(), id) >= sh.MaxConcurrent {
+		httpapi.WriteErr(w, 429, "share_busy", "too many viewers")
+		return
 	}
 	raw, exp, err := a.Svc.MintGuest(r.Context(), id, httpapi.ClientIPString(r, a.Auth.Cfg))
 	if err != nil {

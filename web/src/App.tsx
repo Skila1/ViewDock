@@ -8,6 +8,7 @@ import { StreamsPage } from "@/features/admin/StreamsPage";
 import { DiscordPage } from "@/features/admin/DiscordPage";
 import { GrantsPage } from "@/features/admin/GrantsPage";
 import { RolesPage } from "@/features/admin/RolesPage";
+import { UpdatesPage } from "@/features/admin/UpdatesPage";
 import { UsersPage } from "@/features/admin/UsersPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { ConnectedPage } from "@/pages/ConnectedPage";
@@ -94,6 +95,7 @@ export function App() {
                   <Route path="roles" element={<RolesPage />} />
                   <Route path="grants" element={<GrantsPage />} />
                   <Route path="discord" element={<DiscordPage />} />
+                  <Route path="updates" element={<UpdatesPage />} />
                 </Route>
               </Route>
             </Route>

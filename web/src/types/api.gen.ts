@@ -88,6 +88,41 @@ export interface DiscordSettings {
   redirect_uri: string;
 }
 
+export interface UpdateChangelogEntry {
+  version: string;
+  notes: string[];
+}
+
+export interface UpdateProgress {
+  percent: number;
+  stage: string;
+  detail: string;
+  log?: string;
+}
+
+export interface UpdateStatus {
+  auto_enabled: boolean;
+  helper_ok: boolean;
+  socket_ok: boolean;
+  can_apply: boolean;
+  available: boolean;
+  version: string;
+  latest_version: string;
+  image: string;
+  current_digest?: string;
+  latest_digest?: string;
+  changelog?: UpdateChangelogEntry[];
+  progress?: UpdateProgress | null;
+  last_check_at?: string | null;
+  last_applied_at?: string | null;
+  last_status?: string;
+  last_error?: string;
+  last_applied_by?: string;
+  checking?: boolean;
+  updating?: boolean;
+  apply_reason?: string;
+}
+
 export interface LibraryGrantUser {
   user_id: string;
   username: string;
@@ -118,12 +153,14 @@ export interface SetupStatus {
   needed: boolean;
   step: string;
   media_dir?: string;
+  bootstrap_required?: boolean;
 }
 
 export interface SetupAdminRequest {
   username: string;
   password: string;
   display_name?: string;
+  bootstrap_token?: string;
 }
 
 export interface SetupLibraryRequest {

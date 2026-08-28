@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -70,16 +71,38 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 		"media_dir":          media,
 		"discord_enabled":    discord,
 		"discord_configured": configured,
+		"bootstrap_required": needed && step == "admin" && BootstrapPending(r.Context(), a.Settings),
 	})
 }
 
+func (a *API) setupClosed(ctx context.Context) bool {
+	if a.Auth.SetupComplete(ctx) || AdminCreated(ctx, a.Settings) {
+		return true
+	}
+	n, _ := a.Auth.UserCount(ctx)
+	return n > 0
+}
+
 func (a *API) admin(w http.ResponseWriter, r *http.Request) {
+	if a.setupClosed(r.Context()) {
+		httpapi.WriteErr(w, http.StatusConflict, "setup_closed", "setup is closed")
+		return
+	}
 	var body struct {
-		Username    string `json:"username"`
-		Password    string `json:"password"`
-		DisplayName string `json:"display_name"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		DisplayName    string `json:"display_name"`
+		BootstrapToken string `json:"bootstrap_token"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	tok := strings.TrimSpace(body.BootstrapToken)
+	if tok == "" {
+		tok = strings.TrimSpace(r.Header.Get("X-ViewDock-Setup-Token"))
+	}
+	if !checkBootstrapToken(r.Context(), a.Settings, tok) {
+		httpapi.WriteErr(w, http.StatusForbidden, "setup_token", "valid setup bootstrap token required")
+		return
+	}
 	u, err := a.Auth.CreateAdmin(r.Context(), body.Username, body.Password, body.DisplayName)
 	if err != nil {
 		httpapi.WriteErr(w, 400, "setup", err.Error())
@@ -95,6 +118,7 @@ func (a *API) admin(w http.ResponseWriter, r *http.Request) {
 		Secure: httpapi.CookieSecure(r, a.Auth.Cfg), SameSite: http.SameSiteLaxMode, Expires: exp,
 	})
 	_, _ = auth.IssueCSRF(w, r, a.Auth.Cfg)
+	consumeBootstrap(r.Context(), a.Settings, a.Auth.Cfg)
 	httpapi.WriteJSON(w, 200, map[string]any{"id": u.ID, "username": u.Username})
 }
 

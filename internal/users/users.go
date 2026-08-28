@@ -3,7 +3,6 @@ package users
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
@@ -92,14 +91,30 @@ func (a *API) create(w http.ResponseWriter, r *http.Request) {
 		RoleIDs     []string `json:"role_ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	actor := auth.FromRequest(r)
+	if body.Admin && (actor == nil || !actor.CanManageAdministrators()) {
+		httpapi.WriteErr(w, 403, "users", auth.ErrAdministratorsManage.Error())
+		return
+	}
+	assign := body.RoleIDs
+	if len(assign) == 0 && !body.Admin {
+		assign = []string{auth.RoleUser}
+	}
+	if body.Admin {
+		assign = append(assign, auth.RoleAdministrator)
+	}
+	if err := a.Auth.AssertCanAssignRoles(r.Context(), actor, "", assign); err != nil {
+		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
+		return
+	}
 	u, err := a.Auth.CreateUser(r.Context(), body.Username, body.Password, body.DisplayName, body.Admin)
 	if err != nil {
 		httpapi.WriteErr(w, 400, "users", err.Error())
 		return
 	}
 	if len(body.RoleIDs) > 0 {
-		if err := a.Auth.SetUserRoles(r.Context(), u.ID, body.RoleIDs); err != nil {
-			httpapi.WriteErr(w, 400, "users", err.Error())
+		if err := a.Auth.SetUserRolesAs(r.Context(), actor, u.ID, body.RoleIDs); err != nil {
+			httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 			return
 		}
 	}
@@ -119,6 +134,10 @@ func (a *API) patch(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, 400, "bad_request", "invalid json")
 		return
 	}
+	if err := a.Auth.AssertCanModifyUser(r.Context(), p, id); err != nil {
+		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
+		return
+	}
 	if body.DisplayName != nil {
 		if err := a.Auth.UpdateDisplayName(r.Context(), id, *body.DisplayName); err != nil {
 			httpapi.WriteErr(w, 400, "users", err.Error())
@@ -126,22 +145,14 @@ func (a *API) patch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Disabled != nil {
-		if err := a.Auth.SetDisabled(r.Context(), p.UserID, id, *body.Disabled); err != nil {
-			status := 400
-			if errors.Is(err, auth.ErrLastAdmin) {
-				status = 409
-			}
-			httpapi.WriteErr(w, status, "users", err.Error())
+		if err := a.Auth.SetDisabled(r.Context(), p, id, *body.Disabled); err != nil {
+			httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 			return
 		}
 	}
 	if body.RoleIDs != nil {
-		if err := a.Auth.SetUserRoles(r.Context(), id, body.RoleIDs); err != nil {
-			status := 400
-			if errors.Is(err, auth.ErrLastAdmin) {
-				status = 409
-			}
-			httpapi.WriteErr(w, status, "users", err.Error())
+		if err := a.Auth.SetUserRolesAs(r.Context(), p, id, body.RoleIDs); err != nil {
+			httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 			return
 		}
 	}
@@ -184,12 +195,8 @@ func (a *API) deleteGrant(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) disable(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromRequest(r)
-	if err := a.Auth.SetDisabled(r.Context(), p.UserID, chi.URLParam(r, "id"), true); err != nil {
-		status := 400
-		if errors.Is(err, auth.ErrLastAdmin) {
-			status = 409
-		}
-		httpapi.WriteErr(w, status, "users", err.Error())
+	if err := a.Auth.SetDisabled(r.Context(), p, chi.URLParam(r, "id"), true); err != nil {
+		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 		return
 	}
 	httpapi.WriteOK(w)
@@ -237,6 +244,10 @@ func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
 	id := uuid.NewString()
 	ai := 0
 	if body.Admin {
+		if p == nil || !p.CanManageAdministrators() {
+			httpapi.WriteErr(w, 403, "invite", auth.ErrAdministratorsManage.Error())
+			return
+		}
 		ai = 1
 	}
 	_, err = a.DB.ExecContext(r.Context(), `

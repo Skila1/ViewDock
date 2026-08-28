@@ -102,6 +102,25 @@ paths:
       operationId: putDiscordSettings
       responses:
         "200": { description: Saved }
+  /admin/updates:
+    get:
+      operationId: getUpdates
+      responses:
+        "200": { description: Update status }
+    put:
+      operationId: putUpdates
+      responses:
+        "200": { description: Saved auto-update flag }
+  /admin/updates/check:
+    post:
+      operationId: checkUpdates
+      responses:
+        "200": { description: Registry + changelog check }
+  /admin/updates/apply:
+    post:
+      operationId: applyUpdates
+      responses:
+        "202": { description: Host is pulling the new image }
   /me/preferences:
     get:
       operationId: getPreferences

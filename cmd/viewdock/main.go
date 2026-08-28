@@ -15,11 +15,21 @@ import (
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/log"
 	"github.com/viewdock/viewdock/internal/settings"
+	"github.com/viewdock/viewdock/internal/setup"
+	"github.com/viewdock/viewdock/internal/update"
 	"github.com/viewdock/viewdock/internal/version"
 	"github.com/viewdock/viewdock/web"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "update-swap" {
+		if err := update.RunSwap(); err != nil {
+			_, _ = os.Stderr.WriteString(err.Error() + "\n")
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config.Load()
 	logger := log.New(cfg.LogLevel)
 	slog.SetDefault(logger)
@@ -53,6 +63,11 @@ func main() {
 	srv.Settings = kv
 	app := wire(srv, sqlDB, cfg, logger, kv)
 	app.Auth.SyncDiscordEnv()
+	n, _ := app.Auth.UserCount(context.Background())
+	if err := setup.EnsureBootstrap(context.Background(), kv, cfg, logger, n); err != nil {
+		logger.Error("setup bootstrap", "err", err)
+		os.Exit(1)
+	}
 	defer app.Playback.Close()
 
 	root := chi.NewRouter()
@@ -79,6 +94,19 @@ func main() {
 		if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http", "err", err)
 			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				update.Tick(context.Background(), kv)
+			}
 		}
 	}()
 

@@ -39,6 +39,7 @@ import type {
   ShareUnlockResponse,
   StreamRow,
   SystemInfo,
+  UpdateStatus,
   UploadSession,
   UserGrant,
   UserRow,
@@ -206,6 +207,12 @@ export const api = {
   getDiscordSettings: () => request<DiscordSettings>("/api/v1/admin/integrations/discord"),
   putDiscordSettings: (body: Partial<DiscordSettings> & { client_secret?: string }) =>
     request<DiscordSettings>("/api/v1/admin/integrations/discord", { method: "PUT", body }),
+
+  getUpdates: () => request<UpdateStatus>("/api/v1/admin/updates"),
+  putUpdates: (body: { auto_enabled: boolean }) =>
+    request<UpdateStatus>("/api/v1/admin/updates", { method: "PUT", body }),
+  checkUpdates: () => request<UpdateStatus>("/api/v1/admin/updates/check", { method: "POST", body: {} }),
+  applyUpdates: () => request<{ ok: boolean; message?: string }>("/api/v1/admin/updates/apply", { method: "POST", body: {} }),
 };
 
 export { ApiError } from "./client";

@@ -21,8 +21,8 @@ const (
 	PermMediaDelete     = "media.delete"
 	PermSharesCreate    = "shares.create"
 	PermSharesManage    = "shares.manage"
-	PermStreamsInspect  = "streams.inspect"
-	PermSettingsManage  = "settings.manage"
+	PermStreamsInspect = "streams.inspect"
+	PermSettingsManage = "settings.manage"
 )
 
 var ErrLastAdmin = errors.New("cannot remove the last administrator")
@@ -349,7 +349,10 @@ func (s *Service) UpdateRole(ctx context.Context, id, desc string, perms []strin
 	if err != nil {
 		return Role{}, err
 	}
-	if perms != nil && r.Name != "Administrator" {
+	if perms != nil {
+		if r.IsSystem {
+			return Role{}, errors.New("cannot change permissions on a built-in group")
+		}
 		if err := s.replaceRolePerms(ctx, id, perms, false); err != nil {
 			return Role{}, err
 		}

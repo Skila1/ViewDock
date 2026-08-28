@@ -49,7 +49,8 @@ func TestLastAdminGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetDisabled(context.Background(), "other", admin.ID, true); err != ErrLastAdmin {
+	other := &Principal{Kind: KindUser, UserID: "other", IsAdmin: true}
+	if err := s.SetDisabled(context.Background(), other, admin.ID, true); err != ErrLastAdmin {
 		t.Fatalf("got %v", err)
 	}
 	if err := s.SetUserRoles(context.Background(), admin.ID, []string{RoleUser}); err != ErrLastAdmin {

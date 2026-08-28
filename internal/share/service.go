@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,6 +95,55 @@ func (s *Service) LookupByToken(ctx context.Context, raw string) (id string, sh 
 func (s *Service) Revoke(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE shares SET revoked_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), id)
 	return err
+}
+
+func (s *Service) ValidGuestForShare(ctx context.Context, raw, shareID string) bool {
+	if strings.TrimSpace(raw) == "" || shareID == "" {
+		return false
+	}
+	var gotShare, exp, revoked, shareExp sql.NullString
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT gs.share_id, gs.expires_at, sh.revoked_at, sh.expires_at
+		FROM guest_sessions gs
+		JOIN shares sh ON sh.id = gs.share_id
+		WHERE gs.token_hash = ?
+	`, auth.HashToken(raw)).Scan(&gotShare, &exp, &revoked, &shareExp)
+	if err != nil {
+		return false
+	}
+	if !gotShare.Valid || gotShare.String != shareID {
+		return false
+	}
+	if revoked.Valid && revoked.String != "" {
+		return false
+	}
+	now := time.Now().UTC()
+	if exp.Valid && exp.String != "" {
+		if t, e := time.Parse(time.RFC3339, exp.String); e == nil && now.After(t) {
+			return false
+		}
+	}
+	if shareExp.Valid && shareExp.String != "" {
+		if t, e := time.Parse(time.RFC3339, shareExp.String); e == nil && now.After(t) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) guestActiveForShare(ctx context.Context, raw, shareID string) bool {
+	cut := time.Now().UTC().Add(-90 * time.Second).Format(time.RFC3339)
+	var n int
+	_ = s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM guest_sessions
+		WHERE token_hash = ? AND share_id = ? AND last_seen_at >= ?
+	`, auth.HashToken(raw), shareID, cut).Scan(&n)
+	return n == 1
+}
+
+func (s *Service) touchGuestToken(ctx context.Context, raw string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = s.DB.ExecContext(ctx, `UPDATE guest_sessions SET last_seen_at = ? WHERE token_hash = ?`, now, auth.HashToken(raw))
 }
 
 func (s *Service) MintGuest(ctx context.Context, shareID, ip string) (raw string, exp time.Time, err error) {

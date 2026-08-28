@@ -8,6 +8,7 @@ const links = [
   { to: "/admin/roles", label: "Groups" },
   { to: "/admin/grants", label: "Grants" },
   { to: "/admin/discord", label: "Discord" },
+  { to: "/admin/updates", label: "Updates" },
 ];
 
 export function AdminLayout() {

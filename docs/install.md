@@ -1,40 +1,32 @@
-# Install ViewDock
+# Installation
 
-ViewDock is one container. Media stays on your disk.
-
-## Requirements
-
-- Docker Engine 24+
-- A folder of movies and/or TV files
-- Optional: [TMDB API key](https://www.themoviedb.org/settings/api) for posters and plots
-
-## Quick start
-
-```yaml
-services:
-  viewdock:
-    image: ghcr.io/viewdock/viewdock:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./config:/config
-      - ./cache:/cache
-      - ./transcode:/transcode
-      - /mnt/media:/media:ro
-    environment:
-      PUID: "1000"
-      PGID: "1000"
-    stop_grace_period: 60s
-    restart: unless-stopped
-```
+One command. A whiptail TUI writes a Docker Compose project in `./viewdock` under the current directory (`~/viewdock` from your home directory). Docker publishes port 8080. Optional Cloudflare Tunnel is the public URL. Do not `apt install docker`.
 
 ```bash
-docker compose up -d
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh)"
 ```
 
-Open http://127.0.0.1:8080 and complete the first-run wizard. Library type (`movies`, `tv`, or `mixed`) is required. TMDB can be skipped.
+The wizard does not ask for an install path or a media folder. Run it from the directory that should contain `viewdock`. If that folder is already named `viewdock`, it installs in place. Cloudflared, if enabled, is a systemd service. It does not ask for an IP, a public URL, or Discord credentials.
 
-The public site is [viewdock.dev](https://viewdock.dev). A typical app hostname is `app.viewdock.dev` behind your own reverse proxy or Cloudflare Tunnel (not included in this Compose file).
+Open `http://<host>:8080` (or your tunnel) and create the first local administrator. First-run needs the one-time token from `config/setup.token` (or `VD_SETUP_TOKEN`). Configure Discord later under **Admin → Discord**.
+
+```bash
+cd ~/viewdock
+docker compose ps
+docker compose logs -f
+docker compose down
+docker compose pull && docker compose up -d
+```
+
+Unattended:
+
+```bash
+sudo env VD_UNATTENDED=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh)"
+```
+
+Optional helper: `sudo viewdock status|update|logs|doctor|uninstall` (same directory).
+
+The public site is [viewdock.dev](https://viewdock.dev). A typical app hostname is `app.viewdock.dev` behind your own reverse proxy or Cloudflare Tunnel (not included in Compose).
 
 ## Backup
 

@@ -23,6 +23,7 @@ import (
 	"github.com/viewdock/viewdock/internal/settings"
 	"github.com/viewdock/viewdock/internal/setup"
 	"github.com/viewdock/viewdock/internal/share"
+	"github.com/viewdock/viewdock/internal/update"
 	"github.com/viewdock/viewdock/internal/upload"
 	"github.com/viewdock/viewdock/internal/users"
 )
@@ -103,6 +104,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 			})
 		},
 		play.Routes,
+		update.Routes(kv),
 	)
 	return &app{Auth: authSvc, Playback: play}
 }

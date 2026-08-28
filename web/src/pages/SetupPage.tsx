@@ -19,6 +19,8 @@ export function SetupPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [bootstrapToken, setBootstrapToken] = useState("");
+  const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [libName, setLibName] = useState("Library");
   const [libPath, setLibPath] = useState("");
   const [mediaDir, setMediaDir] = useState(system?.media_dir ?? "");
@@ -28,6 +30,7 @@ export function SetupPage() {
   useEffect(() => {
     void api.setupStatus().then((s) => {
       if (s.step && STEPS.includes(s.step as Step)) setStep(s.step as Step);
+      setBootstrapRequired(Boolean(s.bootstrap_required));
       if (s.media_dir) {
         setMediaDir(s.media_dir);
         setLibPath((prev) => prev || s.media_dir || "");
@@ -43,7 +46,7 @@ export function SetupPage() {
     e.preventDefault();
     setErr("");
     try {
-      await api.setupAdmin({ username, password, display_name: displayName });
+      await api.setupAdmin({ username, password, display_name: displayName, bootstrap_token: bootstrapToken });
       await api.ensureCsrf();
       setStep("library");
     } catch (e2) {
@@ -99,6 +102,22 @@ export function SetupPage() {
           <input className="w-full" placeholder="Admin username" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <input className="w-full" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           <input className="w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          {bootstrapRequired ? (
+            <>
+              <input
+                className="w-full"
+                type="password"
+                autoComplete="off"
+                placeholder="Setup bootstrap token"
+                value={bootstrapToken}
+                onChange={(e) => setBootstrapToken(e.target.value)}
+                required
+              />
+              <p className="text-xs text-dim">
+                Token is in your config directory as <code>setup.token</code>, or set <code>VD_SETUP_TOKEN</code>. It is not shown in the API.
+              </p>
+            </>
+          ) : null}
           <button className="btn-green rounded-full px-4 py-2 text-sm" type="submit">
             Create admin
           </button>

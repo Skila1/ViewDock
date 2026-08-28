@@ -2,7 +2,7 @@
 # Use: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 services:
   viewdock:
-    image: ghcr.io/viewdock/viewdock:nvidia
+    image: ghcr.io/skila1/viewdock:nvidia
     devices:
       - /dev/dri:/dev/dri
     # deploy.resources.reservations.devices:
