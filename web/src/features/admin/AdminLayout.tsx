@@ -16,7 +16,8 @@ const links = [
 ];
 
 export function AdminLayout() {
-  const active = useUploads((s) => s.jobs.filter((j) => j.status === "uploading" || j.status === "processing" || j.status === "queued"));
+  const jobs = useUploads((s) => s.jobs);
+  const active = jobs.filter((j) => j.status === "uploading" || j.status === "processing" || j.status === "queued");
 
   return (
     <div>
