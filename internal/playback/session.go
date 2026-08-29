@@ -56,8 +56,9 @@ type Session struct {
 	mu     sync.Mutex
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
-	killed bool
-	stderr lockedBuf
+	killed      bool
+	cpuFallback bool
+	stderr      lockedBuf
 }
 
 type lockedBuf struct {

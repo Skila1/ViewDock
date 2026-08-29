@@ -1,6 +1,8 @@
 package hwaccel
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/viewdock/viewdock/internal/ffmpeg"
@@ -16,6 +18,10 @@ type Info struct {
 }
 
 func FromDetect(d ffmpeg.DetectResult) Info {
+	return fromDetect(d, vaapiDevice, nvidiaDevice)
+}
+
+func fromDetect(d ffmpeg.DetectResult, hasVAAPI, hasNVIDIA func() bool) Info {
 	info := Info{
 		ZScale:   d.ZScale,
 		Encoders: d.Encoders,
@@ -27,25 +33,57 @@ func FromDetect(d ffmpeg.DetectResult) Info {
 	if info.HWAccel == nil {
 		info.HWAccel = []string{}
 	}
+	compiledVAAPI, compiledNVENC := false, false
 	for _, h := range d.HWAccel {
 		switch strings.ToLower(h) {
 		case "vaapi":
-			info.VAAPI = true
+			compiledVAAPI = true
 		case "cuda", "nvenc", "nvdec":
-			info.NVENC = true
+			compiledNVENC = true
 		}
 	}
 	for _, e := range d.Encoders {
 		el := strings.ToLower(e)
 		if strings.Contains(el, "nvenc") {
-			info.NVENC = true
+			compiledNVENC = true
 		}
 		if strings.Contains(el, "vaapi") {
-			info.VAAPI = true
+			compiledVAAPI = true
 		}
+	}
+	// FFmpeg lists vaapi/nvenc whenever they were compiled in. Only use them
+	// when a device node is actually present or transcode dies immediately.
+	if compiledVAAPI && hasVAAPI() {
+		info.VAAPI = true
+	}
+	if compiledNVENC && hasNVIDIA() {
+		info.NVENC = true
 	}
 	info.Available = info.VAAPI || info.NVENC
 	return info
+}
+
+func vaapiDevice() bool {
+	matches, _ := filepath.Glob("/dev/dri/renderD*")
+	return len(matches) > 0
+}
+
+func nvidiaDevice() bool {
+	for _, p := range []string{"/dev/nvidia0", "/dev/nvidiactl"} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func DeviceFailed(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "device creation failed") ||
+		strings.Contains(s, "no device available") ||
+		strings.Contains(s, "device setup failed") ||
+		strings.Contains(s, "cannot load libcuda") ||
+		strings.Contains(s, "no nvenc capable devices")
 }
 
 func Detect(d ffmpeg.Detector) Info {

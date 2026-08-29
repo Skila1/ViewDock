@@ -32,9 +32,23 @@ func TestRefuse4KHDRWithoutZScale(t *testing.T) {
 	}
 }
 
-func TestDetectVAAPI(t *testing.T) {
-	info := FromDetect(ffmpeg.DetectResult{Encoders: []string{"h264_vaapi"}, HWAccel: []string{"vaapi"}})
-	if !info.VAAPI || !info.Available {
-		t.Fatalf("%+v", info)
+func TestDetectVAAPIRequiresDevice(t *testing.T) {
+	compiled := ffmpeg.DetectResult{Encoders: []string{"h264_vaapi"}, HWAccel: []string{"vaapi"}}
+	none := fromDetect(compiled, func() bool { return false }, func() bool { return false })
+	if none.VAAPI || none.Available {
+		t.Fatalf("compiled-in vaapi without a render node must not be used: %+v", none)
+	}
+	ok := fromDetect(compiled, func() bool { return true }, func() bool { return false })
+	if !ok.VAAPI || !ok.Available {
+		t.Fatalf("%+v", ok)
+	}
+}
+
+func TestDeviceFailed(t *testing.T) {
+	if !DeviceFailed("Device creation failed: -542398533.\nNo device available for decoder") {
+		t.Fatal("expected vaapi device failure")
+	}
+	if DeviceFailed("frame=  12 fps=0.0") {
+		t.Fatal("normal output is not a device failure")
 	}
 }

@@ -258,11 +258,44 @@ func (a *API) waitFFmpeg(s *Session) {
 	killed := s.killed
 	s.mu.Unlock()
 	if err != nil && !killed {
+		stderr := s.stderr.String()
+		if a.fallbackCPU(s, stderr) {
+			return
+		}
 		s.fail("FFMPEG_EXIT")
 		if a.Log != nil {
-			a.Log.Error("ffmpeg exit", "category", "playback", "id", s.ID, "err", err.Error(), "stderr", s.stderr.String())
+			a.Log.Error("ffmpeg exit", "category", "playback", "id", s.ID, "err", err.Error(), "stderr", stderr)
 		}
 	}
+}
+
+func (a *API) fallbackCPU(s *Session, stderr string) bool {
+	if !hwaccel.DeviceFailed(stderr) {
+		return false
+	}
+	s.mu.Lock()
+	if s.cpuFallback {
+		s.mu.Unlock()
+		return false
+	}
+	s.cpuFallback = true
+	s.mu.Unlock()
+	a.HW.VAAPI = false
+	a.HW.NVENC = false
+	a.HW.Available = false
+	s.Encoder = "libx264"
+	s.Reasons = append(s.Reasons, decision.HWFallbackCPU)
+	s.Decision.Reasons = s.Reasons
+	if a.Log != nil {
+		a.Log.Warn("hw fallback cpu", "category", "playback", "id", s.ID, "stderr", stderr)
+	}
+	if err := a.startPipeline(context.Background(), s); err != nil {
+		if a.Log != nil {
+			a.Log.Error("cpu fallback start", "category", "playback", "id", s.ID, "err", err.Error())
+		}
+		return false
+	}
+	return true
 }
 
 func (a *API) sessionJSON(s *Session) map[string]any {
