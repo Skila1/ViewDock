@@ -67,7 +67,7 @@ func (s *Scanner) Attach(ctx context.Context, fileID string, body attachBody) er
 			if p.Title == "" {
 				return errors.New("title or movie_id required")
 			}
-			movieID, err = s.ensureMovie(ctx, tx, libraryID, p, now)
+			movieID, err = s.ensureMovie(ctx, tx, libraryID, p, now, "")
 			if err != nil {
 				return err
 			}

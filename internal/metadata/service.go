@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/scan"
 )
 
 type Artwork interface {
@@ -57,6 +58,7 @@ func (s *Service) TryAutoMatch(ctx context.Context, itemKind, itemID string) err
 	if extra {
 		return nil
 	}
+	title, year, conf = s.refreshFilenameParse(ctx, itemKind, itemID, title, year, conf)
 	if conf != "high" && conf != "medium" && conf != "" {
 		return nil
 	}
@@ -156,6 +158,73 @@ func (s *Service) itemMeta(ctx context.Context, itemKind, itemID string) (title 
 		err = errors.New("unsupported item kind")
 	}
 	return title, year, extra, conf, err
+}
+
+func (s *Service) refreshFilenameParse(ctx context.Context, itemKind, itemID, title string, year int, conf string) (string, int, string) {
+	rel := s.itemRelPath(ctx, itemKind, itemID)
+	if rel == "" {
+		return title, year, conf
+	}
+	p := scan.Parse(rel)
+	if p.Title == "" {
+		return title, year, conf
+	}
+	if p.Confidence != "" {
+		conf = p.Confidence
+	}
+	if p.Title != title || (p.Year > 0 && p.Year != year) {
+		s.persistFilenameTitle(ctx, itemKind, itemID, p.Title, p.Year)
+	}
+	if p.Year > 0 {
+		year = p.Year
+	}
+	return p.Title, year, conf
+}
+
+func (s *Service) itemRelPath(ctx context.Context, itemKind, itemID string) string {
+	var rel string
+	switch itemKind {
+	case "movie":
+		_ = s.DB.QueryRowContext(ctx, `
+			SELECT rel_path FROM media_files WHERE movie_id = ? AND extra_kind = '' LIMIT 1
+		`, itemID).Scan(&rel)
+	case "series":
+		_ = s.DB.QueryRowContext(ctx, `
+			SELECT mf.rel_path FROM media_files mf
+			JOIN media_file_episodes mfe ON mfe.media_file_id = mf.id
+			JOIN episodes e ON e.id = mfe.episode_id
+			WHERE e.series_id = ? LIMIT 1
+		`, itemID).Scan(&rel)
+	}
+	return rel
+}
+
+func (s *Service) persistFilenameTitle(ctx context.Context, itemKind, itemID, title string, year int) {
+	if title == "" || s.locked(ctx, itemKind, itemID, "title") {
+		return
+	}
+	table := "movies"
+	if itemKind == "series" {
+		table = "series"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE `+table+` SET title = ?, sort_title = ?, year = COALESCE(?, year), updated_at = ?
+		WHERE id = ? AND metadata_source = 'filename' AND unmatched = 1
+	`, title, sortTitle(title), nullYear(year), now, itemID)
+	if err != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		_ = library.UpsertFTS(ctx, s.DB, itemKind, itemID, title, year, "")
+	}
+}
+
+func nullYear(y int) any {
+	if y <= 0 {
+		return nil
+	}
+	return y
 }
 
 func (s *Service) locked(ctx context.Context, itemKind, itemID, field string) bool {

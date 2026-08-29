@@ -23,6 +23,8 @@ func TestParseTable(t *testing.T) {
 		{name: "movie parens", file: "The Matrix (1999).mkv", kind: KindMovie, title: "The Matrix", year: 1999, minConf: ConfHigh},
 		{name: "movie dots", file: "Title.2024.1080p.BluRay.mkv", kind: KindMovie, title: "Title", year: 2024, minConf: ConfMedium},
 		{name: "movie dash year", file: "Title-2024.mp4", kind: KindMovie, title: "Title", year: 2024, minConf: ConfMedium},
+		{name: "scene release", file: "Scarface.1983.REMASTERED.1080p.BluRay.DDP5.1.x265.10bit-GalaxyRG265.mkv", kind: KindMovie, title: "Scarface", year: 1983, minConf: ConfMedium},
+		{name: "blade runner 2049", file: "Blade.Runner.2049.2017.1080p.BluRay.mkv", kind: KindMovie, title: "Blade Runner 2049", year: 2017, minConf: ConfMedium},
 		{name: "last year wins", file: "Foo.2010.Bar.2024.mkv", kind: KindMovie, year: 2024},
 		{name: "tv sxxexx", file: "Show.Name.S01E02.mkv", kind: KindEpisode, title: "Show Name", season: 1, episodes: []int{2}, minConf: ConfHigh},
 		{name: "tv 1x02", file: "Show - 1x02.mkv", kind: KindEpisode, title: "Show", season: 1, episodes: []int{2}},

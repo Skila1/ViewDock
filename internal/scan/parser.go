@@ -45,12 +45,14 @@ var (
 
 	reTVBlock   = regexp.MustCompile(`(?i)S(\d{1,2})((?:E\d{1,3})+)`)
 	reTVx       = regexp.MustCompile(`(?i)(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)`)
-	reYearParen = regexp.MustCompile(`\(((?:19|20)\d{2})\)`)
-	reYearToken = regexp.MustCompile(`(?:^|[.\s\-_])((?:19|20)\d{2})(?:$|[.\s\-_])`)
-	reResYear   = regexp.MustCompile(`(?i)((?:19|20)\d{2})\s*[x×]\s*\d{3,4}`)
-	reExtraFile = regexp.MustCompile(`(?i)[-_. ](trailer|behindthescenes|behind-the-scenes|deleted(?:scenes)?|featurette|interview|scene|short|other|extra)s?(?:[-_. ]|$)`)
-	reAnimeAbs  = regexp.MustCompile(`(?i)^(.+?)[\s._-]+(?:ep(?:isode)?[\s._-]*)?(\d{1,4})(?:[\s._-]|[\[(]|$)`)
-	reDigitsP   = regexp.MustCompile(`(?i)^\d{3,4}p$`)
+	reYearParen     = regexp.MustCompile(`\(((?:19|20)\d{2})\)`)
+	reYearAny       = regexp.MustCompile(`(?:19|20)\d{2}`)
+	reResAfter      = regexp.MustCompile(`(?i)^[\s._-]*[x×][\s._-]*\d{3,4}`)
+	reExtraFile     = regexp.MustCompile(`(?i)[-_. ](trailer|behindthescenes|behind-the-scenes|deleted(?:scenes)?|featurette|interview|scene|short|other|extra)s?(?:[-_. ]|$)`)
+	reAnimeAbs      = regexp.MustCompile(`(?i)^(.+?)[\s._-]+(?:ep(?:isode)?[\s._-]*)?(\d{1,4})(?:[\s._-]|[\[(]|$)`)
+	reDigitsP       = regexp.MustCompile(`(?i)^\d{3,4}p$`)
+	reReleaseGroup  = regexp.MustCompile(`(?i)-[A-Za-z][A-Za-z0-9@._]{1,40}$`)
+	reAudioChannels = regexp.MustCompile(`(?i)^(ddp|dd|dts|truehd|atmos|aac|ac3|eac3|flac)?[\s._-]*[57]\.1$`)
 )
 
 var qualityTags = map[string]bool{
@@ -60,8 +62,11 @@ var qualityTags = map[string]bool{
 	"webrip": true, "web-dl": true, "webdl": true, "hdtv": true, "hdrip": true, "dvdrip": true,
 	"x264": true, "x265": true, "h264": true, "h265": true, "hevc": true, "avc": true, "av1": true, "xvid": true,
 	"aac": true, "ac3": true, "dts": true, "truehd": true, "atmos": true, "flac": true, "eac3": true,
+	"ddp": true, "ddp5": true, "ddp51": true, "ddplus": true, "dd": true, "dtsma": true, "dtshd": true,
 	"hdr": true, "hdr10": true, "hdr10+": true, "dv": true, "dovi": true,
 	"remux": true, "proper": true, "repack": true, "internal": true, "extended": true,
+	"remastered": true, "remaster": true, "hybrid": true, "complete": true, "uncut": true,
+	"theatrical": true, "limited": true, "pal": true, "ntsc": true,
 	"multi": true, "dubbed": true, "subbed": true, "subs": true, "eng": true,
 	"10bit": true, "8bit": true, "amzn": true, "nf": true, "dsnp": true, "hmax": true, "atvp": true,
 	"unrated": true, "directors": true, "criterion": true, "imax": true,
@@ -241,8 +246,15 @@ func extractENums(block string) []int {
 }
 
 func parseMovie(name string) (ParseResult, bool) {
+	name = stripReleaseGroup(name)
 	year := lastYear(name)
-	title := cleanTitle(name, year)
+	raw := name
+	if year > 0 {
+		if before, ok := cutBeforeYear(name, year); ok {
+			raw = before
+		}
+	}
+	title := cleanTitle(raw, year)
 	if title == "" {
 		return ParseResult{}, false
 	}
@@ -294,22 +306,60 @@ func parseCore(name string) ParseResult {
 	return ParseResult{Title: cleanTitle(name, 0), Confidence: ConfLow}
 }
 
-func lastYear(name string) int {
-	stripped := reResYear.ReplaceAllString(name, " ")
-	var years []int
-	for _, re := range []*regexp.Regexp{reYearParen, reYearToken} {
-		ms := re.FindAllStringSubmatch(stripped, -1)
-		for _, m := range ms {
-			y, _ := strconv.Atoi(m[1])
-			if y >= 1900 && y <= 2100 {
-				years = append(years, y)
-			}
+func stripReleaseGroup(name string) string {
+	return reReleaseGroup.ReplaceAllString(name, "")
+}
+
+type yearHit struct {
+	year  int
+	start int
+}
+
+func findYears(name string) []yearHit {
+	var hits []yearHit
+	for _, loc := range reYearAny.FindAllStringIndex(name, -1) {
+		if loc[0] > 0 && name[loc[0]-1] >= '0' && name[loc[0]-1] <= '9' {
+			continue
+		}
+		if loc[1] < len(name) && name[loc[1]] >= '0' && name[loc[1]] <= '9' {
+			continue
+		}
+		if reResAfter.MatchString(name[loc[1]:]) {
+			continue
+		}
+		y, _ := strconv.Atoi(name[loc[0]:loc[1]])
+		if y < 1900 || y > 2100 {
+			continue
+		}
+		start := loc[0]
+		if start > 0 && (name[start-1] == '(' || name[start-1] == '[') {
+			start--
+		}
+		hits = append(hits, yearHit{year: y, start: start})
+	}
+	return hits
+}
+
+func cutBeforeYear(name string, year int) (string, bool) {
+	hits := findYears(name)
+	idx := -1
+	for _, h := range hits {
+		if h.year == year {
+			idx = h.start
 		}
 	}
-	if len(years) == 0 {
+	if idx <= 0 {
+		return "", false
+	}
+	return name[:idx], true
+}
+
+func lastYear(name string) int {
+	hits := findYears(name)
+	if len(hits) == 0 {
 		return 0
 	}
-	return years[len(years)-1] // last-year-wins
+	return hits[len(hits)-1].year
 }
 
 func cleanTitle(raw string, year int) string {
@@ -342,6 +392,9 @@ func isQualityToken(f string) bool {
 		return true
 	}
 	if reDigitsP.MatchString(l) {
+		return true
+	}
+	if reAudioChannels.MatchString(l) {
 		return true
 	}
 	return false

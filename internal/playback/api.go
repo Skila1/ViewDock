@@ -25,7 +25,7 @@ import (
 
 const (
 	defaultLease        = 45 * time.Second
-	defaultPlaylistWait = 15 * time.Second
+	defaultPlaylistWait = 45 * time.Second
 	stokenTTL           = 20 * time.Minute
 	hlsCap              = cache.DefaultHLSCap
 )
@@ -103,7 +103,7 @@ func New(d Deps) *API {
 		Locator: d.Locator, Grants: d.Grants, Gate: d.Gate,
 		Prober: d.Prober, FF: d.FF, Progress: d.Progress, Catalog: d.Catalog,
 		Lim:   bandwidth.New(d.Slots),
-		HW:    hwaccel.FromDetect(d.FF.Detect()),
+		HW:    hwaccel.Apply(hwaccel.FromDetect(d.FF.Detect()), d.FF.FFmpeg),
 		HLS:   cache.NewHLS(filepath.Join(cacheDir, "hls"), hlsCap),
 		Art:   cache.NewArtwork(filepath.Join(cacheDir, "artwork"), 0),
 		Subs:  subtitle.New(d.FF),
@@ -112,6 +112,9 @@ func New(d Deps) *API {
 		Lease:        defaultLease,
 		PlaylistWait: defaultPlaylistWait,
 		stop:         make(chan struct{}),
+	}
+	if d.Log != nil {
+		d.Log.Info("hwaccel", "category", "playback", "vaapi", a.HW.VAAPI, "nvenc", a.HW.NVENC, "available", a.HW.Available)
 	}
 	go a.sweep()
 	return a

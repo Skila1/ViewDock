@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { formatClock } from "@/lib/format";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
-import { attachSession, type AttachHandle } from "./attachMedia";
+import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
@@ -126,7 +126,7 @@ export function Player({
           bump("PAUSE");
         }
       } catch (e) {
-        if (e instanceof ApiError && e.status === 410) {
+        if (e instanceof SessionGoneError || (e instanceof ApiError && e.status === 410)) {
           void createAndAttach("GONE");
           return;
         }

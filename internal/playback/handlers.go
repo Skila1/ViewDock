@@ -205,6 +205,9 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	if wait <= 0 {
 		wait = defaultPlaylistWait
 	}
+	if time.Since(s.Created) > wait {
+		wait = 2 * time.Second
+	}
 	deadline := time.Now().Add(wait)
 	for {
 		b, err := os.ReadFile(path)

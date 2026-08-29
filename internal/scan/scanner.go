@@ -221,8 +221,11 @@ func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, a
 		return 0, nil
 	}
 
-	var existing string
+	var existing, existingMovieID string
 	_ = tx.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&existing)
+	if existing != "" {
+		_ = tx.QueryRowContext(ctx, `SELECT COALESCE(movie_id, '') FROM media_files WHERE id = ?`, existing).Scan(&existingMovieID)
+	}
 	added := 0
 	fileID := existing
 	if fileID == "" {
@@ -250,7 +253,7 @@ func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, a
 
 	switch kind {
 	case KindMovie:
-		movieID, err := s.ensureMovie(ctx, tx, libraryID, parsed, now)
+		movieID, err := s.ensureMovie(ctx, tx, libraryID, parsed, now, existingMovieID)
 		if err != nil {
 			return 0, err
 		}
@@ -270,7 +273,11 @@ func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, a
 	return added, nil
 }
 
-func (s *Scanner) ensureMovie(ctx context.Context, tx *sql.Tx, libraryID string, p ParseResult, now string) (string, error) {
+func (s *Scanner) ensureMovie(ctx context.Context, tx *sql.Tx, libraryID string, p ParseResult, now, existingID string) (string, error) {
+	if existingID != "" {
+		s.refreshFilenameMovie(ctx, tx, existingID, p, now)
+		return existingID, nil
+	}
 	var id string
 	q := `SELECT id FROM movies WHERE library_id = ? AND lower(title) = lower(?)`
 	args := []any{libraryID, p.Title}
@@ -302,6 +309,19 @@ func (s *Scanner) ensureMovie(ctx context.Context, tx *sql.Tx, libraryID string,
 	}
 	_ = library.UpsertFTS(ctx, tx, "movie", id, p.Title, p.Year, "")
 	return id, nil
+}
+
+func (s *Scanner) refreshFilenameMovie(ctx context.Context, tx *sql.Tx, id string, p ParseResult, now string) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE movies SET title = ?, year = ?, sort_title = ?, updated_at = ?
+		WHERE id = ? AND metadata_source = 'filename' AND unmatched = 1
+	`, p.Title, nullYear(p.Year), sortTitle(p.Title), now, id)
+	if err != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		_ = library.UpsertFTS(ctx, tx, "movie", id, p.Title, p.Year, "")
+	}
 }
 
 func (s *Scanner) ensureEpisodes(ctx context.Context, tx *sql.Tx, libraryID, fileID string, p ParseResult, now string) error {
@@ -380,12 +400,12 @@ func (s *Scanner) guessExtraMovie(ctx context.Context, tx *sql.Tx, libraryID, re
 		}
 		parent := Parse(base + ".mkv")
 		if parent.Title != "" && parent.Year > 0 {
-			return s.ensureMovie(ctx, tx, libraryID, parent, now)
+			return s.ensureMovie(ctx, tx, libraryID, parent, now, "")
 		}
 		break
 	}
 	if p.Title != "" && p.Year > 0 {
-		return s.ensureMovie(ctx, tx, libraryID, ParseResult{Title: p.Title, Year: p.Year, Confidence: p.Confidence}, now)
+		return s.ensureMovie(ctx, tx, libraryID, ParseResult{Title: p.Title, Year: p.Year, Confidence: p.Confidence}, now, "")
 	}
 	return "", nil
 }

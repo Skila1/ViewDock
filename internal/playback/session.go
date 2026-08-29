@@ -10,6 +10,7 @@ import (
 	"github.com/viewdock/viewdock/internal/capability"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
+	"github.com/viewdock/viewdock/internal/hwaccel"
 	"github.com/viewdock/viewdock/internal/library"
 )
 
@@ -52,6 +53,7 @@ type Session struct {
 	Intro          any
 	NextEpisode    any
 	Encoder        string
+	HW             hwaccel.Info
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd

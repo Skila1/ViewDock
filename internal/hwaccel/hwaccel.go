@@ -1,9 +1,12 @@
 package hwaccel
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 )
@@ -75,6 +78,63 @@ func nvidiaDevice() bool {
 		}
 	}
 	return false
+}
+
+// Apply disables hardware encode when the operator asked for CPU, or when a
+// compiled-in backend cannot actually initialize a device. /dev/dri often
+// exists on machines with no usable GPU; ffmpeg then dies on the first frame.
+func Apply(info Info, ffmpegBin string) Info {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VD_HWACCEL"))) {
+	case "off", "0", "cpu", "none", "software":
+		info.VAAPI = false
+		info.NVENC = false
+		info.Available = false
+		return info
+	case "vaapi":
+		info.NVENC = false
+	case "nvenc", "cuda":
+		info.VAAPI = false
+	}
+	if info.VAAPI && ffmpegBin != "" && !probeVAAPI(ffmpegBin) {
+		info.VAAPI = false
+	}
+	if info.NVENC && ffmpegBin != "" && !probeNVENC(ffmpegBin) {
+		info.NVENC = false
+	}
+	info.Available = info.VAAPI || info.NVENC
+	return info
+}
+
+func probeVAAPI(bin string) bool {
+	matches, _ := filepath.Glob("/dev/dri/renderD*")
+	if len(matches) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"-hide_banner", "-loglevel", "error",
+		"-init_hw_device", "vaapi=va:"+matches[0],
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-frames:v", "1", "-f", "null", "-",
+	)
+	out, err := cmd.CombinedOutput()
+	return err == nil && !DeviceFailed(string(out))
+}
+
+func probeNVENC(bin string) bool {
+	if !nvidiaDevice() {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-c:v", "h264_nvenc", "-frames:v", "1", "-f", "null", "-",
+	)
+	out, err := cmd.CombinedOutput()
+	return err == nil && !DeviceFailed(string(out))
 }
 
 func DeviceFailed(stderr string) bool {

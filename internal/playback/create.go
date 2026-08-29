@@ -96,6 +96,7 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		SlotHeld: needSlot, Created: time.Now(), LastPing: time.Now(),
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
+		HW: a.HW,
 	}
 	if sess.DurationMS == 0 {
 		sess.DurationMS = loc.DurationMS
@@ -233,7 +234,7 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 			StartMS: s.StartMS, AudioIndex: s.AudioIndex, Height: s.Height,
 			SrcWidth: s.Info.Width, SrcHeight: s.Info.Height, HDR: s.Info.HDR,
 			BurnPath: burn, SessionDir: s.Dir, LibraryID: s.LibraryID, AbsPath: s.AbsPath,
-			HW: a.HW, CopyVideo: dec.CopyVideo && !dec.NeedBurn, CopyAudio: dec.CopyAudio,
+			HW: s.HW, CopyVideo: dec.CopyVideo && !dec.NeedBurn, CopyAudio: dec.CopyAudio,
 			Stderr: &s.stderr,
 		})
 		if err != nil {
@@ -280,9 +281,10 @@ func (a *API) fallbackCPU(s *Session, stderr string) bool {
 	}
 	s.cpuFallback = true
 	s.mu.Unlock()
-	a.HW.VAAPI = false
-	a.HW.NVENC = false
-	a.HW.Available = false
+	s.HW.VAAPI = false
+	s.HW.NVENC = false
+	s.HW.Available = false
+	a.HW = s.HW
 	s.Encoder = "libx264"
 	s.Reasons = append(s.Reasons, decision.HWFallbackCPU)
 	s.Decision.Reasons = s.Reasons

@@ -5,6 +5,13 @@ export type AttachHandle = {
   destroy: () => void;
 };
 
+export class SessionGoneError extends Error {
+  constructor() {
+    super("SESSION_GONE");
+    this.name = "SessionGoneError";
+  }
+}
+
 export async function attachSession(
   video: HTMLVideoElement,
   session: PlaybackSession,
@@ -30,6 +37,7 @@ export async function attachSession(
 
   const playlist = sessionUrl(session.urls, "hls", "playlist", "index", "master");
   if (!playlist) throw new Error("session missing HLS url");
+  await waitForPlaylist(playlist, gone);
 
   if (nativeHlsSupported()) {
     video.src = playlist;
@@ -71,4 +79,22 @@ export async function attachSession(
   }
 
   throw new Error("HLS is not supported in this browser");
+}
+
+async function waitForPlaylist(url: string, gone: () => void): Promise<void> {
+  const deadline = Date.now() + 50_000;
+  while (Date.now() < deadline) {
+    const res = await fetch(url, { credentials: "include" });
+    if (res.status === 410) {
+      throw new SessionGoneError();
+    }
+    if (res.ok) {
+      const text = await res.text();
+      if (text.trimStart().startsWith("#EXTM3U")) {
+        return;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new Error("Stream is still starting. Retry in a moment.");
 }

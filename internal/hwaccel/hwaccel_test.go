@@ -44,6 +44,14 @@ func TestDetectVAAPIRequiresDevice(t *testing.T) {
 	}
 }
 
+func TestApplyOffDisablesHW(t *testing.T) {
+	t.Setenv("VD_HWACCEL", "off")
+	info := Apply(Info{VAAPI: true, NVENC: true, Available: true}, "")
+	if info.VAAPI || info.NVENC || info.Available {
+		t.Fatalf("%+v", info)
+	}
+}
+
 func TestDeviceFailed(t *testing.T) {
 	if !DeviceFailed("Device creation failed: -542398533.\nNo device available for decoder") {
 		t.Fatal("expected vaapi device failure")
