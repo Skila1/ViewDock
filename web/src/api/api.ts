@@ -116,7 +116,7 @@ export const api = {
 
   continueWatching: async () => asArray<ProgressRecord>(await request("/api/v1/playback/continue")),
 
-  createSession: (body: {
+  createSession: async (body: {
     item_kind: "movie" | "episode";
     item_id: string;
     media_file_id?: string;
@@ -125,10 +125,11 @@ export const api = {
     audio_index?: number;
     subtitle_index?: number | null;
     client?: ClientProfile;
+    replace_session_id?: string;
   }) =>
     request<PlaybackSession>("/api/v1/playback/sessions", {
       method: "POST",
-      body: { ...body, client: body.client ?? detectClientProfile() },
+      body: { ...body, client: body.client ?? (await detectClientProfile()) },
     }),
   putProgress: (sessionId: string, body: ProgressPut) =>
     request(`/api/v1/playback/sessions/${sessionId}/progress`, { method: "PUT", body }),

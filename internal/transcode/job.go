@@ -29,6 +29,7 @@ type Opts struct {
 	SegmentTime int
 	CopyVideo   bool
 	CopyAudio   bool
+	HEVC        bool
 	Stderr      io.Writer
 }
 
@@ -44,60 +45,13 @@ func Start(ctx context.Context, ff *ffmpeg.Tool, locator library.MediaLocator, o
 	if err := os.MkdirAll(opt.SessionDir, 0o755); err != nil {
 		return nil, err
 	}
-	vf := BuildVF(opt.Height, opt.HDR, opt.HW.ZScale, opt.BurnPath)
-	if err := ValidateChain(vf, opt.SessionDir); err != nil {
-		return nil, err
-	}
 	if ff == nil {
 		ff = ffmpeg.New()
 	}
-	if opt.SegmentTime <= 0 {
-		opt.SegmentTime = 4
+	args, err := BuildArgs(opt)
+	if err != nil {
+		return nil, err
 	}
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	enc, hw := hwaccel.VideoEncoder(opt.HW)
-	if hw == "vaapi" {
-		args = append(args, "-hwaccel", "vaapi")
-	}
-	if opt.StartMS > 0 {
-		args = append(args, "-ss", ffmpeg.FormatTS(opt.StartMS))
-	}
-	args = append(args, "-i", opt.AbsPath)
-	vmap := "0:v:0"
-	if opt.VideoIndex > 0 {
-		vmap = fmt.Sprintf("0:%d", opt.VideoIndex)
-	}
-	amap := "0:a:0"
-	if opt.AudioIndex > 0 {
-		amap = fmt.Sprintf("0:%d", opt.AudioIndex)
-	}
-	args = append(args, "-map", vmap, "-map", amap)
-	if opt.CopyVideo && opt.BurnPath == "" && (opt.Height <= 0 || opt.Height >= opt.SrcHeight) {
-		args = append(args, "-c:v", "copy")
-	} else {
-		if vf != "" {
-			args = append(args, "-vf", vf)
-		}
-		args = append(args, "-c:v", enc)
-		if enc == "libx264" {
-			args = append(args, "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p")
-		}
-	}
-	if opt.CopyAudio {
-		args = append(args, "-c:a", "copy")
-	} else {
-		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "160k")
-	}
-	args = append(args,
-		"-f", "hls",
-		"-hls_time", fmt.Sprintf("%d", opt.SegmentTime),
-		"-hls_playlist_type", "event",
-		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
-		"-hls_flags", "independent_segments+append_list",
-		"-hls_segment_filename", filepath.Join(opt.SessionDir, "seg%d.m4s"),
-		filepath.Join(opt.SessionDir, "index.m3u8"),
-	)
 	cmd := exec.CommandContext(ctx, ff.FFmpeg, args...)
 	setProcGroup(cmd)
 	if opt.Stderr != nil {
@@ -107,6 +61,93 @@ func Start(ctx context.Context, ff *ffmpeg.Tool, locator library.MediaLocator, o
 		return nil, err
 	}
 	return cmd, nil
+}
+
+// BuildArgs is the FFmpeg argv for a transcode or partial-copy HLS job.
+func BuildArgs(opt Opts) ([]string, error) {
+	vf := BuildVF(opt.Height, opt.HDR, opt.HW.ZScale, opt.BurnPath)
+	if err := ValidateChain(vf, opt.SessionDir); err != nil {
+		return nil, err
+	}
+	enc, hw := hwaccel.VideoEncoder(opt.HW)
+	if opt.SegmentTime <= 0 {
+		if hw == "" {
+			opt.SegmentTime = 2
+		} else {
+			opt.SegmentTime = 4
+		}
+	}
+	copyV := opt.CopyVideo && opt.BurnPath == "" && (opt.Height <= 0 || opt.Height >= opt.SrcHeight)
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	if hw == "vaapi" && !copyV {
+		args = append(args, "-hwaccel", "vaapi")
+	}
+	if opt.StartMS > 0 {
+		args = append(args, "-ss", ffmpeg.FormatTS(opt.StartMS))
+	}
+	args = append(args, "-i", opt.AbsPath, "-map_chapters", "-1", "-dn")
+	vmap := "0:v:0"
+	if opt.VideoIndex > 0 {
+		vmap = fmt.Sprintf("0:%d", opt.VideoIndex)
+	}
+	amap := "0:a:0"
+	if opt.AudioIndex > 0 {
+		amap = fmt.Sprintf("0:%d", opt.AudioIndex)
+	}
+	args = append(args, "-map", vmap, "-map", amap)
+	if copyV {
+		args = append(args, "-c:v", "copy")
+		if opt.HEVC {
+			args = append(args, "-tag:v", "hvc1")
+		}
+	} else {
+		if vf != "" {
+			args = append(args, "-vf", vf)
+		}
+		args = append(args, "-c:v", enc)
+		if enc == "libx264" {
+			args = append(args, "-preset", "ultrafast", "-crf", "23",
+				"-pix_fmt", "yuv420p", "-profile:v", "main", "-level", "4.0",
+				"-g", "48", "-keyint_min", "48", "-sc_threshold", "0")
+		}
+	}
+	if opt.CopyAudio {
+		args = append(args, "-c:a", "copy")
+	} else {
+		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "160k")
+	}
+	args = append(args, "-max_muxing_queue_size", "2048")
+	if copyV && opt.HEVC {
+		args = append(args, hlsFMP4(opt.SessionDir, opt.SegmentTime)...)
+	} else {
+		args = append(args, hlsMPEGTS(opt.SessionDir, opt.SegmentTime)...)
+	}
+	return args, nil
+}
+
+func hlsMPEGTS(dir string, seg int) []string {
+	return []string{
+		"-f", "hls",
+		"-hls_time", fmt.Sprintf("%d", seg),
+		"-hls_playlist_type", "event",
+		"-hls_segment_type", "mpegts",
+		"-hls_flags", "independent_segments",
+		"-hls_segment_filename", filepath.Join(dir, "seg%d.ts"),
+		filepath.Join(dir, "index.m3u8"),
+	}
+}
+
+func hlsFMP4(dir string, seg int) []string {
+	return []string{
+		"-f", "hls",
+		"-hls_time", fmt.Sprintf("%d", seg),
+		"-hls_playlist_type", "event",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_flags", "independent_segments",
+		"-hls_segment_filename", filepath.Join(dir, "seg%d.m4s"),
+		filepath.Join(dir, "index.m3u8"),
+	}
 }
 
 func Kill(cmd *exec.Cmd) {

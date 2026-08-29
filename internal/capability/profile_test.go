@@ -31,6 +31,50 @@ func TestExplicitFalseWins(t *testing.T) {
 	}
 }
 
+func TestDecodingInfoMain10OverridesChromeUA(t *testing.T) {
+	p := Profile{
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+		HEVC:      Ptr(true),
+		DecodingInfo: map[string]any{
+			"hevc_main10": map[string]any{"supported": true},
+		},
+	}
+	if !p.HevcOK(true) {
+		t.Fatal("MediaCapabilities Main10 support must allow HEVC Main10 copy")
+	}
+	if p.HevcOK(false) {
+		t.Fatal("Windows Chrome generic HEVC canPlayType is still not enough")
+	}
+}
+
+func TestMain10UncertainFallsBack(t *testing.T) {
+	p := Profile{
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+		HEVC:      Ptr(true),
+	}
+	if p.HevcOK(true) {
+		t.Fatal("Main10 without decodingInfo must not copy")
+	}
+}
+
+func TestEAC3DecodingInfoOnChrome(t *testing.T) {
+	no := Profile{
+		UserAgent:    "Mozilla/5.0 Chrome/120.0.0.0",
+		EAC3:         Ptr(true),
+		DecodingInfo: map[string]any{"eac3": map[string]any{"supported": false}},
+	}
+	if no.Bool("eac3") {
+		t.Fatal("decodingInfo false must win")
+	}
+	yes := Profile{
+		UserAgent:    "Mozilla/5.0 Chrome/120.0.0.0",
+		DecodingInfo: map[string]any{"eac3": map[string]any{"supported": true}},
+	}
+	if !yes.Bool("eac3") {
+		t.Fatal("decodingInfo true must allow EAC3 copy")
+	}
+}
+
 func TestSafariHEVCInferred(t *testing.T) {
 	p := Profile{UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"}
 	if !p.Bool("hevc") {

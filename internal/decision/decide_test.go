@@ -163,3 +163,78 @@ func TestDecideTable(t *testing.T) {
 		})
 	}
 }
+
+func scarface() *ffmpeg.MediaInfo {
+	return &ffmpeg.MediaInfo{
+		VideoCodec: "hevc", AudioCodec: "eac3", Container: "mkv",
+		Width: 1920, Height: 1080, BitDepth: 10,
+		Streams: []ffmpeg.Stream{
+			{Index: 0, Kind: "video", Codec: "hevc", Width: 1920, Height: 1080, BitDepth: 10},
+			{Index: 1, Kind: "audio", Codec: "eac3", Channels: 6},
+		},
+	}
+}
+
+func TestScarfaceClientA_CopyVideoTranscodeAudio(t *testing.T) {
+	got := Decide(Input{
+		Info: scarface(), Quality: "auto", LAN: true,
+		Client: capability.Profile{
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+			HEVCMain10: capability.Ptr(true),
+			EAC3:       capability.Ptr(false),
+			DecodingInfo: map[string]any{
+				"hevc_main10": map[string]any{"supported": true},
+				"eac3":        map[string]any{"supported": false},
+			},
+		},
+	})
+	if got.Mode != ModeTranscodeAud {
+		t.Fatalf("mode %s want %s %v", got.Mode, ModeTranscodeAud, got.Reasons)
+	}
+	if !got.CopyVideo || got.CopyAudio || got.NeedVideoXcode || !got.NeedAudioXcode {
+		t.Fatalf("copy v=%v a=%v xcode v=%v a=%v", got.CopyVideo, got.CopyAudio, got.NeedVideoXcode, got.NeedAudioXcode)
+	}
+	if NeedsVideoSlot(got) {
+		t.Fatal("audio-only transcode must not take a video slot")
+	}
+	if got.Playback != PlaybackPartial {
+		t.Fatalf("playback %s", got.Playback)
+	}
+	if got.Video.Action != ActionCopy || got.Audio.Action != ActionTranscode || got.Audio.To != "aac" {
+		t.Fatalf("actions video=%+v audio=%+v", got.Video, got.Audio)
+	}
+	if !has(got.Reasons, DirectVideoHEVCMain10) || !has(got.Reasons, TranscodeAudioEAC3) {
+		t.Fatalf("reasons %v", got.Reasons)
+	}
+}
+
+func TestScarfaceClientB_FullTranscode(t *testing.T) {
+	got := Decide(Input{
+		Info: scarface(), Quality: "auto", LAN: true,
+		Client: capability.Profile{
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+			HEVC:      capability.Ptr(true),
+			EAC3:      capability.Ptr(false),
+		},
+	})
+	if got.Mode != ModeTranscodeAV {
+		t.Fatalf("mode %s want %s %v", got.Mode, ModeTranscodeAV, got.Reasons)
+	}
+	if got.CopyVideo || got.CopyAudio || !NeedsVideoSlot(got) {
+		t.Fatalf("copy v=%v a=%v slot=%v", got.CopyVideo, got.CopyAudio, NeedsVideoSlot(got))
+	}
+	if got.Playback != PlaybackFull {
+		t.Fatalf("playback %s", got.Playback)
+	}
+	if got.Video.Action != ActionTranscode || got.Video.To != "h264" {
+		t.Fatalf("video %+v", got.Video)
+	}
+}
+
+func TestNeedsVideoSlotMatrix(t *testing.T) {
+	direct := Decide(Input{Info: info("h264", "aac", "mp4", 1920, 1080), Quality: "auto", LAN: true})
+	remux := Decide(Input{Info: info("h264", "aac", "mkv", 1920, 1080), Quality: "auto", LAN: true})
+	if NeedsVideoSlot(direct) || NeedsVideoSlot(remux) {
+		t.Fatal("direct/remux must not take a video slot")
+	}
+}

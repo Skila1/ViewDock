@@ -305,6 +305,7 @@ export interface ClientProfile {
   viewport_w: number;
   viewport_h: number;
   hevc: boolean;
+  hevc_main10?: boolean;
   av1: boolean;
   ac3: boolean;
   eac3: boolean;
@@ -321,6 +322,7 @@ export interface CreateSession {
   audio_index?: number;
   subtitle_index?: number | null;
   client: ClientProfile;
+  replace_session_id?: string;
 }
 
 export interface SessionTrack {
@@ -331,9 +333,21 @@ export interface SessionTrack {
   [key: string]: unknown;
 }
 
+export interface PlaybackStreamAction {
+  codec?: string;
+  action?: string;
+  to?: string;
+  reason?: string;
+}
+
 export interface PlaybackDecision {
   reasons?: string[];
   mode?: string;
+  playback?: string;
+  video?: PlaybackStreamAction;
+  audio?: PlaybackStreamAction;
+  container?: PlaybackStreamAction;
+  hardware?: string;
 }
 
 export interface PlaybackSession {
@@ -506,9 +520,14 @@ export interface InspectorClient extends Partial<ClientProfile> {
 
 export interface InspectorDecision {
   mode?: string;
+  playback?: string;
   delivery?: string;
   quality?: string;
   reasons?: string[];
+  hardware?: string;
+  video?: PlaybackStreamAction;
+  audio?: PlaybackStreamAction;
+  container?: PlaybackStreamAction;
   gpu?: string | null;
   [key: string]: unknown;
 }

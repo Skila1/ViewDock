@@ -1,6 +1,10 @@
 .git
 .github
 .env
+config
+cache
+transcode
+media
 *.db
 *.db-wal
 *.db-shm

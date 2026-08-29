@@ -34,6 +34,23 @@ type Result struct {
 	HEVCRemuxTag   bool     `json:"-"`
 	Refuse         string   `json:"-"`
 	SubAction      string   `json:"-"` // extract|burn|none
+	Playback       string   `json:"playback"`
+	Video          StreamAction `json:"video"`
+	Audio          StreamAction `json:"audio"`
+	Container      StreamAction `json:"container"`
+	Hardware       string   `json:"hardware"`
+}
+
+type StreamAction struct {
+	Codec  string `json:"codec"`
+	Action string `json:"action"`
+	To     string `json:"to,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// NeedsVideoSlot is true only when an expensive video encode is required.
+func NeedsVideoSlot(r Result) bool {
+	return r.NeedVideoXcode
 }
 
 func Decide(in Input) Result {
@@ -70,7 +87,11 @@ func Decide(in Input) Result {
 		acodec = in.Info.AudioCodec
 	}
 
-	vOK, vReason := videoDirect(vcodec, in.Client)
+	bitDepth := in.Info.BitDepth
+	if v != nil && v.BitDepth > 0 {
+		bitDepth = v.BitDepth
+	}
+	vOK, vReason := videoDirect(vcodec, bitDepth, in.Client)
 	aOK, aReason := audioDirect(acodec, in.Client)
 	cOK, cReason := containerDirect(in.Info.Container)
 
@@ -185,7 +206,83 @@ func Decide(in Input) Result {
 	}
 
 	r.Reasons = unique(r.Reasons)
+	r.Playback = playbackLabel(r)
+	r.Video = streamVideo(vcodec, bitDepth, r, vReason)
+	r.Audio = streamAudio(acodec, r, aReason)
+	r.Container = streamContainer(in.Info.Container, r, cReason, cOK)
+	r.Hardware = hardwareLabel(r, in.HW)
 	return r
+}
+
+func playbackLabel(r Result) string {
+	switch r.Mode {
+	case ModeDirect:
+		return PlaybackDirect
+	case ModeRemux:
+		return PlaybackRemux
+	case ModeTranscodeAV:
+		return PlaybackFull
+	case ModeTranscodeVid, ModeTranscodeAud, ModeBurnSubs:
+		if r.NeedVideoXcode && r.NeedAudioXcode {
+			return PlaybackFull
+		}
+		return PlaybackPartial
+	default:
+		return r.Mode
+	}
+}
+
+func streamVideo(codec string, bitDepth int, r Result, reason string) StreamAction {
+	label := codec
+	if isHEVC(codec) && bitDepth >= 10 {
+		label = "hevc_main10"
+	}
+	a := StreamAction{Codec: label, Action: ActionCopy, Reason: reason}
+	if r.NeedVideoXcode {
+		a.Action = ActionTranscode
+		a.To = "h264"
+	} else if r.Mode == ModeDirect {
+		a.Action = ActionDirect
+	}
+	return a
+}
+
+func streamAudio(codec string, r Result, reason string) StreamAction {
+	a := StreamAction{Codec: codec, Action: ActionCopy, Reason: reason}
+	if r.NeedAudioXcode {
+		a.Action = ActionTranscode
+		a.To = "aac"
+	} else if r.Mode == ModeDirect {
+		a.Action = ActionDirect
+	}
+	return a
+}
+
+func streamContainer(container string, r Result, reason string, directOK bool) StreamAction {
+	a := StreamAction{Codec: container, Reason: reason}
+	if r.Mode == ModeDirect && directOK {
+		a.Action = ActionDirect
+		return a
+	}
+	a.Action = ActionRemux
+	a.To = "hls"
+	if reason == "" {
+		a.Reason = RemuxFMP4
+	}
+	return a
+}
+
+func hardwareLabel(r Result, hw hwaccel.Info) string {
+	if !r.NeedVideoXcode {
+		return "Not required"
+	}
+	if hw.VAAPI {
+		return "VAAPI"
+	}
+	if hw.NVENC {
+		return "NVENC"
+	}
+	return "CPU"
 }
 
 func needVideoBesidesBurn(vOK bool, destH, srcH int) bool {
@@ -195,13 +292,20 @@ func needVideoBesidesBurn(vOK bool, destH, srcH int) bool {
 	return destH > 0 && srcH > 0 && destH < srcH
 }
 
-func videoDirect(codec string, c capability.Profile) (bool, string) {
+func videoDirect(codec string, bitDepth int, c capability.Profile) (bool, string) {
 	switch normalizeVideo(codec) {
 	case "h264":
 		return true, DirectVideoH264
 	case "hevc":
-		if c.Bool("hevc") {
-			return true, ""
+		main10 := bitDepth >= 10
+		if c.HevcOK(main10) {
+			if main10 {
+				return true, DirectVideoHEVCMain10
+			}
+			return true, DirectVideoHEVC
+		}
+		if main10 {
+			return false, TranscodeVideoHEVCMain10
 		}
 		return false, TranscodeVideoHEVC
 	case "av1":

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Play, Radio, Share2 } from "lucide-react";
+import { Radio, Share2 } from "lucide-react";
 import { api } from "@/api/api";
+import { WatchActions } from "@/components/media/WatchActions";
 import { ShareModal } from "@/components/share/ShareModal";
 import { filenameTitle } from "@/lib/format";
 import { hasPerm } from "@/lib/perms";
@@ -14,7 +15,10 @@ export function MovieDetailPage() {
   const navigate = useNavigate();
   const [share, setShare] = useState(false);
   const q = useQuery({ queryKey: ["movie", id], queryFn: () => api.getMovie(id), enabled: Boolean(id) });
+  const cont = useQuery({ queryKey: ["continue"], queryFn: api.continueWatching });
   const movie = q.data;
+  const saved = (cont.data ?? []).find((p) => p.item_kind === "movie" && p.item_id === id);
+  const resumeMs = saved?.resume_ms ?? saved?.position_ms ?? 0;
   if (q.isLoading) return <p className="text-sm text-dim">Loading…</p>;
   if (!movie) return <p className="text-sm text-danger">Not found</p>;
 
@@ -36,13 +40,8 @@ export function MovieDetailPage() {
         </div>
         {movie.year ? <p className="text-sm text-dim">{movie.year}</p> : null}
         {movie.overview ? <p className="mt-3 max-w-2xl text-sm text-dim">{movie.overview}</p> : null}
-        <div className="mt-4 flex gap-2">
-          <Link
-            to={`/watch/movie/${movie.id}`}
-            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm text-black"
-          >
-            <Play size={14} /> Play
-          </Link>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <WatchActions kind="movie" id={movie.id} resumeMs={resumeMs} />
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"

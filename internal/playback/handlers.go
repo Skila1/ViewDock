@@ -211,8 +211,8 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(wait)
 	for {
 		b, err := os.ReadFile(path)
-		if err == nil && len(b) > 0 {
-			body := hls.RewritePlaylist(b, a.playlistToken(s))
+		if err == nil && hls.MediaReady(s.Dir, b) {
+			body := hls.WithStartAtZero(hls.RewritePlaylist(b, a.playlistToken(s)))
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(200)
@@ -264,7 +264,7 @@ func (a *API) handleAdminList(w http.ResponseWriter, r *http.Request) {
 	for _, s := range a.Reg.List() {
 		rows = append(rows, inspector.LiveRow{
 			ID: s.ID, ItemKind: s.ItemKind, ItemID: s.ItemID,
-			Mode: s.Mode, Delivery: s.Delivery, Reasons: s.Reasons,
+			Mode: s.Mode, Playback: s.Decision.Playback, Delivery: s.Delivery, Reasons: s.Reasons,
 			UserID: s.UserID, Guest: s.Kind != "user", DurationMS: s.DurationMS,
 		})
 	}
@@ -284,6 +284,19 @@ func (a *API) handleAdminOne(w http.ResponseWriter, r *http.Request) {
 		ID: s.ID, Client: s.Client, Mode: s.Mode, Delivery: s.Delivery,
 		Reasons: s.Reasons, OutHeight: s.Height, Encoder: s.Encoder,
 		GPUAvail: a.HW.Available, VAAPI: a.HW.VAAPI, NVENC: a.HW.NVENC,
+		Playback: s.Decision.Playback, Hardware: s.Decision.Hardware,
+		Video: inspector.StreamCol{
+			Codec: s.Decision.Video.Codec, Action: s.Decision.Video.Action,
+			To: s.Decision.Video.To, Reason: s.Decision.Video.Reason,
+		},
+		Audio: inspector.StreamCol{
+			Codec: s.Decision.Audio.Codec, Action: s.Decision.Audio.Action,
+			To: s.Decision.Audio.To, Reason: s.Decision.Audio.Reason,
+		},
+		Cont: inspector.StreamCol{
+			Codec: s.Decision.Container.Codec, Action: s.Decision.Container.Action,
+			To: s.Decision.Container.To, Reason: s.Decision.Container.Reason,
+		},
 	}
 	if a.HW.VAAPI {
 		in.HWAccel = "vaapi"

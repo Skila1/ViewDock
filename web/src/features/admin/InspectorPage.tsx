@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/api";
+import type { PlaybackStreamAction } from "@/types/api.gen";
 
 function Col({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -18,6 +19,19 @@ function Kv({ label, value }: { label: string; value: unknown }) {
     <div className="mb-1 flex justify-between gap-3 text-xs">
       <span className="text-dim">{label}</span>
       <span className="truncate text-right text-ink">{text}</span>
+    </div>
+  );
+}
+
+function StreamBlock({ title, s }: { title: string; s?: PlaybackStreamAction }) {
+  const action = s?.action ?? "—";
+  const codec = s?.to ? `${s.codec ?? "—"} → ${s.to}` : (s?.codec ?? "—");
+  return (
+    <div className="mb-3">
+      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-dim">{title}</p>
+      <Kv label="codec" value={codec} />
+      <Kv label="action" value={action} />
+      <Kv label="reason" value={s?.reason} />
     </div>
   );
 }
@@ -45,27 +59,30 @@ export function InspectorPage() {
       <p className="mb-3 font-mono text-xs text-dim">{sessionId}</p>
       <div className="grid gap-3 md:grid-cols-3">
         <Col title="Source">
-          <Kv label="path" value={source.path ?? source.filename} />
           <Kv label="container" value={source.container} />
           <Kv label="video" value={source.video_codec} />
           <Kv label="audio" value={source.audio_codec} />
+          <Kv label="bit depth" value={source.bit_depth} />
           <Kv label="size" value={source.width && source.height ? `${source.width}×${source.height}` : undefined} />
           <Kv label="hdr" value={source.hdr} />
-          <Kv label="gpu" value={source.gpu ?? null} />
         </Col>
         <Col title="Client">
           <Kv label="mse" value={client.mse} />
           <Kv label="hls_native" value={client.hls_native} />
           <Kv label="hevc" value={client.hevc} />
-          <Kv label="ac3" value={client.ac3} />
+          <Kv label="hevc_main10" value={client.hevc_main10} />
+          <Kv label="eac3" value={client.eac3} />
           <Kv label="viewport" value={client.viewport_w ? `${client.viewport_w}×${client.viewport_h}` : undefined} />
           <Kv label="ua" value={client.user_agent} />
         </Col>
         <Col title="Decision">
+          <Kv label="playback" value={decision.playback} />
           <Kv label="mode" value={decision.mode} />
           <Kv label="delivery" value={decision.delivery} />
-          <Kv label="quality" value={decision.quality} />
-          <Kv label="gpu" value={decision.gpu ?? null} />
+          <Kv label="hardware" value={decision.hardware} />
+          <StreamBlock title="Container" s={decision.container} />
+          <StreamBlock title="Video" s={decision.video} />
+          <StreamBlock title="Audio" s={decision.audio} />
           <p className="mt-2 text-[11px] text-dim">Reasons</p>
           <ul className="mt-1 space-y-1 text-xs">
             {reasons.length ? reasons.map((r) => <li key={r}>{r}</li>) : <li className="text-dim">None</li>}

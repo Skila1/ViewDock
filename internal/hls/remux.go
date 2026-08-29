@@ -44,6 +44,7 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 	}
 	args = append(args,
 		"-i", src,
+		"-map_chapters", "-1", "-dn",
 		"-map", vmap, "-map", amap,
 		"-c", "copy",
 	)
@@ -70,7 +71,7 @@ func hlsArgs(destDir string, seg int) []string {
 		"-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4",
 		"-hls_fmp4_init_filename", "init.mp4",
-		"-hls_flags", "independent_segments+append_list",
+		"-hls_flags", "independent_segments",
 		"-hls_segment_filename", filepath.Join(destDir, "seg%d.m4s"),
 		filepath.Join(destDir, "index.m3u8"),
 	}

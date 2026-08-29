@@ -15,6 +15,7 @@ type Profile struct {
 	ViewportW     int            `json:"viewport_w"`
 	ViewportH     int            `json:"viewport_h"`
 	HEVC          *bool          `json:"hevc"`
+	HEVCMain10    *bool          `json:"hevc_main10"`
 	AV1           *bool          `json:"av1"`
 	AC3           *bool          `json:"ac3"`
 	EAC3          *bool          `json:"eac3"`
@@ -55,7 +56,9 @@ func (p Profile) Bool(field string) bool {
 	case "hdr":
 		return boolOr(p.HDR, false)
 	case "hevc":
-		return p.hevcOK()
+		return p.HevcOK(false)
+	case "hevc_main10":
+		return p.HevcOK(true)
 	case "av1":
 		return boolOr(p.AV1, inferAV1(p.UserAgent))
 	case "ac3":
@@ -75,21 +78,51 @@ func boolOr(v *bool, inferred bool) bool {
 	return inferred
 }
 
-// hevcOK: explicit false wins. Windows Chrome is never Direct Play on canPlayType alone.
-func (p Profile) hevcOK() bool {
+// HevcOK reports whether the client can decode HEVC. main10 requires a
+// Main10-specific signal (decodingInfo / hevc_main10). canPlayType alone
+// is not enough on Windows Chrome.
+func (p Profile) HevcOK(main10 bool) bool {
+	if main10 {
+		if p.HEVCMain10 != nil && !*p.HEVCMain10 {
+			return false
+		}
+		if dec := decodingSupported(p.DecodingInfo, "hevc_main10"); dec != nil {
+			return *dec
+		}
+		if p.HEVCMain10 != nil {
+			return *p.HEVCMain10
+		}
+		if IsSafari(p.UserAgent) {
+			return p.hevcGeneric()
+		}
+		return false
+	}
+	return p.hevcGeneric()
+}
+
+func (p Profile) hevcGeneric() bool {
 	if p.HEVC != nil && !*p.HEVC {
 		return false
 	}
-	if IsWindowsChrome(p.UserAgent) {
-		return false
+	if dec := decodingSupported(p.DecodingInfo, "hevc"); dec != nil {
+		return *dec
 	}
 	if p.HEVC != nil {
+		if IsWindowsChrome(p.UserAgent) {
+			return false
+		}
 		return *p.HEVC
 	}
 	return inferHEVC(p.UserAgent)
 }
 
 func (p Profile) ac3OK() bool {
+	if p.AC3 != nil && !*p.AC3 {
+		return false
+	}
+	if dec := decodingSupported(p.DecodingInfo, "ac3"); dec != nil {
+		return *dec
+	}
 	if IsChrome(p.UserAgent) || IsFirefox(p.UserAgent) {
 		return false
 	}
@@ -100,6 +133,12 @@ func (p Profile) ac3OK() bool {
 }
 
 func (p Profile) eac3OK() bool {
+	if p.EAC3 != nil && !*p.EAC3 {
+		return false
+	}
+	if dec := decodingSupported(p.DecodingInfo, "eac3"); dec != nil {
+		return *dec
+	}
 	if IsChrome(p.UserAgent) || IsFirefox(p.UserAgent) {
 		return false
 	}
@@ -107,6 +146,25 @@ func (p Profile) eac3OK() bool {
 		return *p.EAC3
 	}
 	return false
+}
+
+func decodingSupported(info map[string]any, key string) *bool {
+	if info == nil {
+		return nil
+	}
+	raw, ok := info[key]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case bool:
+		return Ptr(v)
+	case map[string]any:
+		if s, ok := v["supported"].(bool); ok {
+			return Ptr(s)
+		}
+	}
+	return nil
 }
 
 func (p Profile) HLSAttach() string {

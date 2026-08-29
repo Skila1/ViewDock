@@ -3,18 +3,21 @@ package decision
 const (
 	DirectUnprobed     = "DIRECT_UNPROBED"
 	DirectPlay         = "DIRECT_PLAY"
-	DirectVideoH264    = "DIRECT_VIDEO_H264"
-	DirectAudioAAC     = "DIRECT_AUDIO_AAC"
-	DirectAudioMP3     = "DIRECT_AUDIO_MP3"
-	DirectContainerMP4 = "DIRECT_CONTAINER_MP4"
+	DirectVideoH264       = "DIRECT_VIDEO_H264"
+	DirectVideoHEVC       = "DIRECT_VIDEO_HEVC"
+	DirectVideoHEVCMain10 = "DIRECT_VIDEO_HEVC_MAIN10"
+	DirectAudioAAC        = "DIRECT_AUDIO_AAC"
+	DirectAudioMP3        = "DIRECT_AUDIO_MP3"
+	DirectContainerMP4    = "DIRECT_CONTAINER_MP4"
 
 	RemuxContainerMKV = "REMUX_CONTAINER_MKV"
 	RemuxContainer    = "REMUX_CONTAINER"
 	RemuxFMP4         = "REMUX_FMP4_HLS"
 	RemuxHEVCTag      = "REMUX_HEVC_HVC1"
 
-	TranscodeVideoHEVC   = "TRANSCODE_VIDEO_HEVC_UNSUPPORTED"
-	TranscodeVideoAV1    = "TRANSCODE_VIDEO_AV1_UNSUPPORTED"
+	TranscodeVideoHEVC       = "TRANSCODE_VIDEO_HEVC_UNSUPPORTED"
+	TranscodeVideoHEVCMain10 = "TRANSCODE_VIDEO_HEVC_MAIN10_UNSUPPORTED"
+	TranscodeVideoAV1        = "TRANSCODE_VIDEO_AV1_UNSUPPORTED"
 	TranscodeVideo       = "TRANSCODE_VIDEO_CODEC"
 	TranscodeVideoHDR    = "TRANSCODE_VIDEO_HDR"
 	TranscodeAudioTrueHD = "TRANSCODE_AUDIO_TRUEHD"
@@ -53,4 +56,15 @@ const (
 const (
 	DeliveryDirect = "direct"
 	DeliveryHLS    = "hls"
+)
+
+const (
+	PlaybackDirect   = "Direct Play"
+	PlaybackRemux    = "Remux"
+	PlaybackPartial  = "Partial Transcode"
+	PlaybackFull     = "Full Transcode"
+	ActionCopy       = "COPY"
+	ActionTranscode  = "TRANSCODE"
+	ActionDirect     = "DIRECT"
+	ActionRemux      = "REMUX"
 )

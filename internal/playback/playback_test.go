@@ -66,7 +66,7 @@ func testAPI(t *testing.T, loc *mockLocator, p progress.Store) *API {
 			Width: 1920, Height: 1080, Size: 1000,
 			Streams: []ffmpeg.Stream{{Index: 0, Kind: "video", Codec: "h264"}, {Index: 1, Kind: "audio", Codec: "aac"}},
 		}},
-		FF: &ffmpeg.Tool{FFmpeg: "ffmpeg", FFprobe: "ffprobe"},
+		FF:       &ffmpeg.Tool{FFmpeg: "ffmpeg", FFprobe: "ffprobe"},
 		Progress: p, CacheDir: t.TempDir(), Slots: 2,
 	})
 	t.Cleanup(a.Close)
@@ -236,6 +236,96 @@ func TestLease410(t *testing.T) {
 	}
 }
 
+func TestCreateExplicitStartZeroIgnoresResume(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	if err := db.Migrate(path); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.Open(path, 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	if _, err := sqlDB.Exec(`INSERT INTO users(id, username, password_hash, display_name, email, is_admin, disabled, pin_hash, created_at, updated_at)
+		VALUES ('u1','u','x','U','',0,0,'','t','t')`); err != nil {
+		t.Fatal(err)
+	}
+	media := filepath.Join(t.TempDir(), "v.mp4")
+	_ = os.WriteFile(media, bytes.Repeat([]byte("A"), 64), 0o644)
+	loc := &mockLocator{file: &library.LocatedFile{
+		ID: "f1", LibraryID: "lib", AbsPath: media, ItemKind: "movie", ItemID: "m1",
+		Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Width: 1920, Height: 1080, DurationMS: 7_200_000,
+	}}
+	store := progress.New(sqlDB)
+	if err := store.Put(context.Background(), "u1", "movie", "m1", "f1", 55*60*1000, 7_200_000); err != nil {
+		t.Fatal(err)
+	}
+	api := testAPI(t, loc, store)
+	r := chi.NewRouter()
+	r.Route("/api/v1", api.Routes)
+	h := withUser(&auth.Principal{Kind: auth.KindUser, UserID: "u1"}, r)
+
+	body, _ := json.Marshal(map[string]any{"item_kind": "movie", "item_id": "m1", "start_ms": 0, "client": map[string]any{"mse": true}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/sessions", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:9"
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create %d %s", rec.Code, rec.Body.String())
+	}
+	var sess map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &sess)
+	got, _ := sess["seekable_from_ms"].(float64)
+	if got != 0 {
+		t.Fatalf("explicit start 0 should not resume, got seekable_from_ms=%v body=%s", sess["seekable_from_ms"], rec.Body.String())
+	}
+}
+
+func TestCreateOmitsStartUsesResume(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	if err := db.Migrate(path); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.Open(path, 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	if _, err := sqlDB.Exec(`INSERT INTO users(id, username, password_hash, display_name, email, is_admin, disabled, pin_hash, created_at, updated_at)
+		VALUES ('u1','u','x','U','',0,0,'','t','t')`); err != nil {
+		t.Fatal(err)
+	}
+	media := filepath.Join(t.TempDir(), "v.mp4")
+	_ = os.WriteFile(media, bytes.Repeat([]byte("A"), 64), 0o644)
+	loc := &mockLocator{file: &library.LocatedFile{
+		ID: "f1", LibraryID: "lib", AbsPath: media, ItemKind: "movie", ItemID: "m1",
+		Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Width: 1920, Height: 1080, DurationMS: 7_200_000,
+	}}
+	store := progress.New(sqlDB)
+	if err := store.Put(context.Background(), "u1", "movie", "m1", "f1", 55*60*1000, 7_200_000); err != nil {
+		t.Fatal(err)
+	}
+	api := testAPI(t, loc, store)
+	r := chi.NewRouter()
+	r.Route("/api/v1", api.Routes)
+	h := withUser(&auth.Principal{Kind: auth.KindUser, UserID: "u1"}, r)
+
+	body, _ := json.Marshal(map[string]any{"item_kind": "movie", "item_id": "m1", "client": map[string]any{"mse": true}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/sessions", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:9"
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create %d %s", rec.Code, rec.Body.String())
+	}
+	var sess map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &sess)
+	got, _ := sess["seekable_from_ms"].(float64)
+	if got != float64(55*60*1000) {
+		t.Fatalf("omitted start_ms should resume, got seekable_from_ms=%v body=%s", sess["seekable_from_ms"], rec.Body.String())
+	}
+}
+
 func TestMissingFile404(t *testing.T) {
 	api := testAPI(t, &mockLocator{}, nil)
 	r := chi.NewRouter()
@@ -276,7 +366,20 @@ func TestPlaylistPendingNot410(t *testing.T) {
 		t.Fatalf("body %s", rec.Body.String())
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte("#EXTM3U\nseg0.m4s\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte("#EXTM3U\n#EXT-X-TARGETDURATION:4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/s1/index.m3u8?stoken=tok", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("header-only playlist must stay pending, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte("#EXTM3U\n#EXTINF:2.0,\nseg0.m4s\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seg0.m4s"), []byte("seg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rec = httptest.NewRecorder()
@@ -300,7 +403,7 @@ func TestPlaylistPendingNot410(t *testing.T) {
 
 type allowGate struct{}
 
-func (allowGate) AllowStream(context.Context, string, string, string) error     { return nil }
+func (allowGate) AllowStream(context.Context, string, string, string) error    { return nil }
 func (allowGate) CanStreamMedia(context.Context, string, string, string) error { return nil }
 func (allowGate) Heartbeat(context.Context, string) error                      { return nil }
 func (allowGate) Release(context.Context, string)                              {}

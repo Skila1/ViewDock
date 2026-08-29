@@ -77,7 +77,8 @@ type API struct {
 	Lease        time.Duration
 	PlaylistWait time.Duration
 
-	stop   chan struct{}
+	slotMu   sync.Mutex
+	stop     chan struct{}
 	stopOnce sync.Once
 }
 
@@ -152,8 +153,28 @@ func (s *API) HLSRoutes(r chi.Router) {
 
 func (s *API) HLSHandler() http.Handler {
 	r := chi.NewRouter()
+	if s.Log != nil {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				ww := &hlsStatus{ResponseWriter: w, code: 200}
+				next.ServeHTTP(ww, req)
+				s.Log.Info("http", "method", req.Method, "path", req.URL.Path,
+					"status", ww.code, "category", "hls")
+			})
+		})
+	}
 	s.HLSRoutes(r)
 	return r
+}
+
+type hlsStatus struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *hlsStatus) WriteHeader(code int) {
+	w.code = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (a *API) sweep() {

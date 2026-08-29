@@ -14,12 +14,24 @@ type Source struct {
 	Size       int64  `json:"size"`
 }
 
+type StreamCol struct {
+	Codec  string `json:"codec"`
+	Action string `json:"action"`
+	To     string `json:"to,omitempty"`
+	Reason string `json:"reason"`
+}
+
 type DecisionCol struct {
-	Mode     string   `json:"mode"`
-	Delivery string   `json:"delivery"`
-	Reasons  []string `json:"reasons"`
-	Height   int      `json:"height"`
-	Encoder  string   `json:"encoder,omitempty"`
+	Playback  string    `json:"playback"`
+	Mode      string    `json:"mode"`
+	Delivery  string    `json:"delivery"`
+	Reasons   []string  `json:"reasons"`
+	Height    int       `json:"height"`
+	Encoder   string    `json:"encoder,omitempty"`
+	Container StreamCol `json:"container"`
+	Video     StreamCol `json:"video"`
+	Audio     StreamCol `json:"audio"`
+	Hardware  string    `json:"hardware"`
 }
 
 type GPU struct {
@@ -31,11 +43,11 @@ type GPU struct {
 }
 
 type DTO struct {
-	ID       string              `json:"id"`
-	Source   Source              `json:"source"`
-	Client   capability.Profile  `json:"client"`
-	Decision DecisionCol         `json:"decision"`
-	GPU      *GPU                `json:"gpu"`
+	ID       string             `json:"id"`
+	Source   Source             `json:"source"`
+	Client   capability.Profile `json:"client"`
+	Decision DecisionCol        `json:"decision"`
+	GPU      *GPU               `json:"gpu"`
 }
 
 type Input struct {
@@ -59,6 +71,11 @@ type Input struct {
 	VAAPI      bool
 	NVENC      bool
 	HWAccel    string
+	Playback   string
+	Hardware   string
+	Video      StreamCol
+	Audio      StreamCol
+	Cont       StreamCol
 }
 
 func Build(in Input) DTO {
@@ -71,12 +88,16 @@ func Build(in Input) DTO {
 		},
 		Client: in.Client,
 		Decision: DecisionCol{
-			Mode: in.Mode, Delivery: in.Delivery, Reasons: in.Reasons,
-			Height: in.OutHeight, Encoder: in.Encoder,
+			Playback: in.Playback, Mode: in.Mode, Delivery: in.Delivery, Reasons: in.Reasons,
+			Height: in.OutHeight, Encoder: in.Encoder, Hardware: in.Hardware,
+			Container: in.Cont, Video: in.Video, Audio: in.Audio,
 		},
 	}
 	if in.Reasons == nil {
 		d.Decision.Reasons = []string{}
+	}
+	if d.Decision.Hardware == "" {
+		d.Decision.Hardware = "Not required"
 	}
 	if in.GPUAvail {
 		d.GPU = &GPU{
@@ -92,6 +113,7 @@ type LiveRow struct {
 	ItemKind   string   `json:"item_kind"`
 	ItemID     string   `json:"item_id"`
 	Mode       string   `json:"mode"`
+	Playback   string   `json:"playback,omitempty"`
 	Delivery   string   `json:"delivery"`
 	Reasons    []string `json:"reasons"`
 	UserID     string   `json:"user_id,omitempty"`

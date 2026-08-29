@@ -566,6 +566,7 @@ components:
         viewport_w: { type: integer }
         viewport_h: { type: integer }
         hevc: { type: boolean }
+        hevc_main10: { type: boolean }
         av1: { type: boolean }
         ac3: { type: boolean }
         eac3: { type: boolean }
@@ -580,10 +581,15 @@ components:
         item_kind: { type: string, enum: [movie, episode] }
         item_id: { type: string }
         media_file_id: { type: string }
-        start_ms: { type: integer }
+        start_ms:
+          type: integer
+          description: >
+            Position to start playback. 0 starts from the beginning.
+            Omit the field to resume the viewer's saved progress.
         quality: { type: string }
         audio_index: { type: integer }
         subtitle_index: { type: integer, nullable: true }
+        replace_session_id: { type: string }
         client:
           $ref: "#/components/schemas/ClientProfile"
     PlaybackSession:
@@ -615,6 +621,11 @@ components:
               type: array
               items: { type: string }
             mode: { type: string }
+            playback: { type: string }
+            hardware: { type: string }
+            video: { type: object, additionalProperties: true }
+            audio: { type: object, additionalProperties: true }
+            container: { type: object, additionalProperties: true }
         intro:
           type: object
           nullable: true

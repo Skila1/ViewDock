@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Play, Radio, Share2 } from "lucide-react";
+import { Radio, Share2 } from "lucide-react";
 import { api } from "@/api/api";
+import { WatchActions } from "@/components/media/WatchActions";
 import { ShareModal } from "@/components/share/ShareModal";
-import { filenameTitle } from "@/lib/format";
+import { filenameTitle, formatClock } from "@/lib/format";
 import { hasPerm } from "@/lib/perms";
 import { useAuth } from "@/store/auth";
 
@@ -14,6 +15,12 @@ export function SeriesDetailPage() {
   const navigate = useNavigate();
   const [share, setShare] = useState(false);
   const q = useQuery({ queryKey: ["series", id], queryFn: () => api.getSeries(id), enabled: Boolean(id) });
+  const nextEp = useQuery({
+    queryKey: ["next-episode", id],
+    queryFn: () => api.nextEpisode(id),
+    enabled: Boolean(id),
+  });
+  const cont = useQuery({ queryKey: ["continue"], queryFn: api.continueWatching });
   const series = q.data;
   const seasons = series?.seasons ?? [];
   const [season, setSeason] = useState<number>(1);
@@ -29,6 +36,14 @@ export function SeriesDetailPage() {
   if (!series) return <p className="text-sm text-danger">Not found</p>;
 
   const firstEp = episodes[0];
+  const playEp = nextEp.data ?? firstEp;
+  const saved = (cont.data ?? []).find((p) => p.item_kind === "episode" && p.item_id === playEp?.id);
+  const resumeMs = saved?.resume_ms ?? saved?.position_ms ?? 0;
+  const resumeById = new Map(
+    (cont.data ?? [])
+      .filter((p) => p.item_kind === "episode")
+      .map((p) => [p.item_id, p.resume_ms ?? p.position_ms ?? 0]),
+  );
 
   return (
     <div>
@@ -48,21 +63,14 @@ export function SeriesDetailPage() {
             ) : null}
           </div>
           {series.overview ? <p className="max-w-2xl text-sm text-dim">{series.overview}</p> : null}
-          <div className="mt-4 flex gap-2">
-            {firstEp ? (
-              <Link
-                to={`/watch/episode/${firstEp.id}`}
-                className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm text-black"
-              >
-                <Play size={14} /> Play
-              </Link>
-            ) : null}
-            {firstEp ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {playEp ? <WatchActions kind="episode" id={playEp.id} resumeMs={resumeMs} /> : null}
+            {playEp ? (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
                 onClick={async () => {
-                  const room = await api.createWTRoom({ item_kind: "episode", item_id: firstEp.id });
+                  const room = await api.createWTRoom({ item_kind: "episode", item_id: playEp.id });
                   const code = room.code || room.invite_code || room.id;
                   navigate(`/together/${code}`);
                 }}
@@ -99,23 +107,30 @@ export function SeriesDetailPage() {
       ) : null}
 
       <ul className="divide-y divide-line rounded-md border border-line">
-        {episodes.map((ep) => (
-          <li key={ep.id}>
-            <Link to={`/watch/episode/${ep.id}`} className="flex items-center gap-3 px-3 py-2 hover:bg-raised">
-              <span className="w-12 shrink-0 text-xs text-dim">
-                S{ep.season}E{ep.number}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm">{filenameTitle(ep.title || `E${ep.number}`)}</span>
-              {ep.unmatched ? (
-                <span className="rounded bg-[var(--chip)] px-1.5 py-0.5 text-[10px] text-[var(--chip-text)]">
-                  Unmatched
+        {episodes.map((ep) => {
+          const epResume = resumeById.get(ep.id) ?? 0;
+          const to = epResume > 5000 ? `/watch/episode/${ep.id}?t=${Math.floor(epResume)}` : `/watch/episode/${ep.id}?t=0`;
+          return (
+            <li key={ep.id}>
+              <Link to={to} className="flex items-center gap-3 px-3 py-2 hover:bg-raised">
+                <span className="w-12 shrink-0 text-xs text-dim">
+                  S{ep.season}E{ep.number}
                 </span>
-              ) : null}
-            </Link>
-          </li>
-        ))}
+                <span className="min-w-0 flex-1 truncate text-sm">{filenameTitle(ep.title || `E${ep.number}`)}</span>
+                {epResume > 5000 ? (
+                  <span className="shrink-0 text-[11px] text-dim">{formatClock(epResume)}</span>
+                ) : null}
+                {ep.unmatched ? (
+                  <span className="rounded bg-[var(--chip)] px-1.5 py-0.5 text-[10px] text-[var(--chip-text)]">
+                    Unmatched
+                  </span>
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
-      <ShareModal open={share} onOpenChange={setShare} itemKind="episode" itemId={firstEp?.id ?? series.id} />
+      <ShareModal open={share} onOpenChange={setShare} itemKind="episode" itemId={playEp?.id ?? series.id} />
     </div>
   );
 }

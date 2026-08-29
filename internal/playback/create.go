@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,15 +23,16 @@ import (
 )
 
 type createBody struct {
-	ItemKind      string              `json:"item_kind"`
-	ItemID        string              `json:"item_id"`
-	MediaFileID   string              `json:"media_file_id"`
-	StartMS       int64               `json:"start_ms"`
-	Quality       string              `json:"quality"`
-	AudioIndex    int                 `json:"audio_index"`
-	SubtitleIndex *int                `json:"subtitle_index"`
-	Client        capability.Profile  `json:"client"`
-	ShareToken    string              `json:"share_token"` // ignored — not auth
+	ItemKind         string             `json:"item_kind"`
+	ItemID           string             `json:"item_id"`
+	MediaFileID      string             `json:"media_file_id"`
+	StartMS          *int64             `json:"start_ms"`
+	Quality          string             `json:"quality"`
+	AudioIndex       int                `json:"audio_index"`
+	SubtitleIndex    *int               `json:"subtitle_index"`
+	Client           capability.Profile `json:"client"`
+	ShareToken       string             `json:"share_token"` // ignored — not auth
+	ReplaceSessionID string             `json:"replace_session_id"`
 }
 
 func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -70,16 +72,25 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	needSlot := dec.Mode != decision.ModeDirect && dec.Mode != decision.ModeRemux
+	needSlot := decision.NeedsVideoSlot(dec)
+	a.slotMu.Lock()
+	a.supersedePlayback(p, body.ItemKind, body.ItemID, body.ReplaceSessionID)
 	if needSlot {
 		if err := a.Lim.TryAcquire(); err != nil {
+			a.slotMu.Unlock()
 			httpapi.WriteErr(w, http.StatusTooManyRequests, "LOAD_429", "transcode slots full")
 			return
 		}
 	}
+	a.slotMu.Unlock()
 
-	start := body.StartMS
-	if start <= 0 && p.IsUser() && a.Progress != nil {
+	// Omit start_ms to resume saved progress. Explicit 0 means the beginning.
+	var start int64
+	if body.StartMS != nil {
+		if *body.StartMS > 0 {
+			start = *body.StartMS
+		}
+	} else if p.IsUser() && a.Progress != nil {
 		if rec, err := a.Progress.Get(r.Context(), p.UserID, body.ItemKind, body.ItemID); err == nil {
 			start = rec.ResumeMS
 		}
@@ -96,7 +107,7 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		SlotHeld: needSlot, Created: time.Now(), LastPing: time.Now(),
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
-		HW: a.HW,
+		HW:          a.HW,
 	}
 	if sess.DurationMS == 0 {
 		sess.DurationMS = loc.DurationMS
@@ -137,7 +148,7 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if a.Log != nil {
 		a.Log.Info("playback session", "category", "playback", "id", sess.ID, "mode", sess.Mode,
 			"delivery", sess.Delivery, "item", sess.ItemKind+"/"+sess.ItemID, "path", sess.AbsPath,
-			"reasons", sess.Reasons)
+			"start_ms", sess.StartMS, "reasons", sess.Reasons)
 	}
 	httpapi.WriteJSON(w, 200, a.sessionJSON(sess))
 }
@@ -235,6 +246,7 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 			SrcWidth: s.Info.Width, SrcHeight: s.Info.Height, HDR: s.Info.HDR,
 			BurnPath: burn, SessionDir: s.Dir, LibraryID: s.LibraryID, AbsPath: s.AbsPath,
 			HW: s.HW, CopyVideo: dec.CopyVideo && !dec.NeedBurn, CopyAudio: dec.CopyAudio,
+			HEVC:   s.Info != nil && decisionHEVC(s.Info.VideoCodec),
 			Stderr: &s.stderr,
 		})
 		if err != nil {
@@ -318,7 +330,11 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		"id": s.ID, "delivery": s.Delivery, "hls_attach": s.HLSAttach,
 		"urls": urls, "qualities": qualities,
 		"audio": a.audioTracks(s.Info), "subtitles": a.subTracks(s.Info),
-		"decision": map[string]any{"mode": s.Mode, "reasons": s.Reasons},
+		"decision": map[string]any{
+			"mode": s.Mode, "playback": s.Decision.Playback, "reasons": s.Reasons,
+			"video": s.Decision.Video, "audio": s.Decision.Audio, "container": s.Decision.Container,
+			"hardware": s.Decision.Hardware,
+		},
 		"intro": s.Intro, "next_episode": s.NextEpisode,
 		"duration_ms": s.DurationMS, "seekable_from_ms": s.SeekableFromMS,
 	}
@@ -362,6 +378,33 @@ func (a *API) subTracks(info *ffmpeg.MediaInfo) []map[string]any {
 		out = []map[string]any{}
 	}
 	return out
+}
+
+func (a *API) supersedePlayback(p *auth.Principal, itemKind, itemID, replaceID string) {
+	if p == nil {
+		return
+	}
+	if replaceID != "" {
+		if s := a.Reg.Get(replaceID); s != nil && s.owns(p.Kind, p.ID()) {
+			a.Reg.Delete(replaceID)
+			a.kill(s)
+		}
+	}
+	for _, s := range a.Reg.List() {
+		if s == nil || !s.owns(p.Kind, p.ID()) {
+			continue
+		}
+		if s.ItemKind != itemKind || s.ItemID != itemID {
+			continue
+		}
+		a.Reg.Delete(s.ID)
+		a.kill(s)
+	}
+}
+
+func decisionHEVC(codec string) bool {
+	c := strings.ToLower(codec)
+	return c == "hevc" || c == "h265" || c == "hvc1" || c == "hev1"
 }
 
 func (a *API) guestQuality(ctx context.Context, guestID string) string {
