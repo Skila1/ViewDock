@@ -37,7 +37,7 @@ export async function attachSession(
 
   const playlist = sessionUrl(session.urls, "hls", "playlist", "index", "master");
   if (!playlist) throw new Error("session missing HLS url");
-  await waitForPlaylist(playlist, gone);
+  await waitForPlaylist(playlist);
 
   if (nativeHlsSupported()) {
     video.src = playlist;
@@ -81,7 +81,7 @@ export async function attachSession(
   throw new Error("HLS is not supported in this browser");
 }
 
-async function waitForPlaylist(url: string, gone: () => void): Promise<void> {
+async function waitForPlaylist(url: string): Promise<void> {
   const deadline = Date.now() + 50_000;
   while (Date.now() < deadline) {
     const res = await fetch(url, { credentials: "include" });
