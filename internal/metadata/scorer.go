@@ -55,7 +55,7 @@ func UniqueWinner(scored []Scored) (SearchResult, bool) {
 	if len(scored) == 0 || scored[0].Score < AutoMatchMin {
 		return SearchResult{}, false
 	}
-	if len(scored) > 1 && scored[1].Score >= AutoMatchMin {
+	if len(scored) > 1 && scored[1].Score >= AutoMatchMin && scored[0].Score-scored[1].Score < 5 {
 		return SearchResult{}, false
 	}
 	return scored[0].Candidate, true

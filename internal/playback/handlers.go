@@ -50,20 +50,18 @@ func (a *API) authorized(r *http.Request, s *Session, p *auth.Principal) bool {
 	}
 	s.mu.Lock()
 	ok := tok == s.Stoken && time.Now().Before(s.StokenExp)
+	if ok {
+		// Sliding expiry — do not rotate. The player keeps the create-session URL.
+		s.StokenExp = time.Now().Add(stokenTTL)
+	}
 	s.mu.Unlock()
 	return ok
 }
 
-func (a *API) rotateStoken(s *Session) string {
-	tok, err := auth.RandomToken(24)
-	if err != nil {
-		return s.Stoken
-	}
+func (a *API) playlistToken(s *Session) string {
 	s.mu.Lock()
-	s.Stoken = tok
-	s.StokenExp = time.Now().Add(stokenTTL)
-	s.mu.Unlock()
-	return tok
+	defer s.mu.Unlock()
+	return s.Stoken
 }
 
 func (a *API) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -203,17 +201,43 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(s.Dir, "index.m3u8")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		httpapi.WriteJSON(w, http.StatusGone, map[string]any{"code": "SESSION_GONE", "resume_ms": s.snapshotResume()})
-		return
+	wait := a.PlaylistWait
+	if wait <= 0 {
+		wait = defaultPlaylistWait
 	}
-	tok := a.rotateStoken(s)
-	body := hls.RewritePlaylist(b, tok)
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(200)
-	_, _ = w.Write(body)
+	deadline := time.Now().Add(wait)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil && len(b) > 0 {
+			body := hls.RewritePlaylist(b, a.playlistToken(s))
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(200)
+			_, _ = w.Write(body)
+			return
+		}
+		s.mu.Lock()
+		failed, failCode := s.Failed, s.FailCode
+		s.mu.Unlock()
+		if failed {
+			httpapi.WriteJSON(w, http.StatusGone, map[string]any{"code": failCode, "resume_ms": s.snapshotResume()})
+			return
+		}
+		if time.Now().After(deadline) {
+			w.Header().Set("Retry-After", "1")
+			httpapi.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"code": "PLAYLIST_PENDING", "resume_ms": s.snapshotResume(),
+			})
+			return
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (a *API) handleSegment(w http.ResponseWriter, r *http.Request) {

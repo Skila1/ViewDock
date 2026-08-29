@@ -38,7 +38,7 @@ func (s *Service) handleMatch(w http.ResponseWriter, r *http.Request, kind, id s
 }
 
 func (s *Service) handleDrain(w http.ResponseWriter, r *http.Request) {
-	if err := s.DrainQueue(r.Context()); err != nil {
+	if err := s.RunOnce(r.Context()); err != nil {
 		httpapi.WriteErr(w, 500, "metadata", err.Error())
 		return
 	}

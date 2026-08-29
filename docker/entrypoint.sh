@@ -12,8 +12,13 @@ if [ "$(id -u)" = "0" ]; then
   fi
   usermod -u "$PUID" -g "$PGID" viewdock 2>/dev/null || true
 
-  # Directory inodes only — never walk HLS trees, never chown /media.
-  chown "$PUID:$PGID" /config /cache /transcode 2>/dev/null || true
+  # Directory inodes only — never walk HLS trees or media files.
+  mkdir -p /config/uploads
+  chown "$PUID:$PGID" /config /cache /transcode /config/uploads 2>/dev/null || true
+  if [ -d /media ]; then
+    chown "$PUID:$PGID" /media 2>/dev/null || true
+    chmod u+rwx /media 2>/dev/null || true
+  fi
 
   extra=""
   if [ -d /dev/dri ]; then

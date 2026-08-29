@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -33,6 +34,7 @@ type app struct {
 	Auth     *auth.Service
 	Playback *playback.API
 	Uploads  *upload.Service
+	Meta     *metadata.Service
 }
 
 func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Logger, kv *settings.Store) *app {
@@ -44,6 +46,8 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	libs.SetScan(sc)
 	art := artwork.New(sqlDB, cfg.CacheDir, ff, metadata.NewClient(kv))
 	meta := metadata.New(sqlDB, kv, art)
+	sc.OnIdle = func() { go func() { _ = meta.RunOnce(context.Background()) }() }
+	meta.Start(context.Background())
 	up := upload.New(sqlDB, libs, sc, ff, filepath.Join(cfg.ConfigDir, "uploads"))
 	srch := search.New(sqlDB)
 	cols := collections.New(sqlDB, libs)
@@ -51,6 +55,9 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	shareAPI := share.NewAPI(shareSvc, authSvc)
 	usersAPI := users.New(sqlDB, authSvc)
 	setupAPI := setup.New(authSvc, kv, libs, sc, ff)
+	kickMeta := func() { meta.NotifyKey(context.Background()) }
+	authSvc.OnTMDBKey = kickMeta
+	setupAPI.OnTMDBKey = kickMeta
 	prog := progress.New(sqlDB)
 	play := playback.New(playback.Deps{
 		Cfg: cfg, DB: sqlDB, Log: logger,
@@ -108,5 +115,5 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		play.Routes,
 		update.Routes(kv),
 	)
-	return &app{Auth: authSvc, Playback: play, Uploads: up}
+	return &app{Auth: authSvc, Playback: play, Uploads: up, Meta: meta}
 }

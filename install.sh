@@ -609,7 +609,8 @@ cmd_install() {
 
   install_docker
   mkdir -p "${PREFIX}/config" "${PREFIX}/config/uploads" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
-  chmod 0777 "${PREFIX}/update" || true
+  chmod 0777 "${PREFIX}/update" "${PREFIX}/media" "${PREFIX}/config/uploads" || true
+  chown 1000:1000 "${PREFIX}/media" "${PREFIX}/config/uploads" 2>/dev/null || true
   mkdir -p "${CFG_MEDIAHOST}"
   local dockergid="0"
   if [[ -S /var/run/docker.sock ]]; then

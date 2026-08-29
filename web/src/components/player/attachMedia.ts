@@ -36,7 +36,7 @@ export async function attachSession(
     const onError = () => {
       void fetch(playlist, { credentials: "include" }).then((res) => {
         if (res.status === 410) gone();
-      });
+      }).catch(() => undefined);
     };
     video.addEventListener("error", onError);
     return {
@@ -60,7 +60,7 @@ export async function attachSession(
     hls.loadSource(playlist);
     hls.attachMedia(video);
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data.response?.code === 410) gone();
+      if (data.fatal && data.response?.code === 410) gone();
     });
     return {
       destroy() {

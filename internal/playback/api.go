@@ -24,9 +24,10 @@ import (
 )
 
 const (
-	defaultLease  = 45 * time.Second
-	stokenTTL     = 20 * time.Minute
-	hlsCap        = cache.DefaultHLSCap
+	defaultLease        = 45 * time.Second
+	defaultPlaylistWait = 15 * time.Second
+	stokenTTL           = 20 * time.Minute
+	hlsCap              = cache.DefaultHLSCap
 )
 
 // Deps is how cmd wires the playback engine. Locator and Gate are the
@@ -72,8 +73,9 @@ type API struct {
 	Art      *cache.Artwork
 	Subs     *subtitle.Extractor
 	WT       *watchtogether.Hub
-	Reg      *Registry
-	Lease    time.Duration
+	Reg          *Registry
+	Lease        time.Duration
+	PlaylistWait time.Duration
 
 	stop   chan struct{}
 	stopOnce sync.Once
@@ -106,9 +108,10 @@ func New(d Deps) *API {
 		Art:   cache.NewArtwork(filepath.Join(cacheDir, "artwork"), 0),
 		Subs:  subtitle.New(d.FF),
 		WT:    watchtogether.New(d.Locator, d.Grants, d.Gate),
-		Reg:   NewRegistry(),
-		Lease: defaultLease,
-		stop:  make(chan struct{}),
+		Reg:          NewRegistry(),
+		Lease:        defaultLease,
+		PlaylistWait: defaultPlaylistWait,
+		stop:         make(chan struct{}),
 	}
 	go a.sweep()
 	return a

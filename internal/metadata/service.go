@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/viewdock/viewdock/internal/library"
@@ -19,6 +20,7 @@ type Service struct {
 	DB   *sql.DB
 	TMDB *Client
 	Art  Artwork
+	mu   sync.Mutex
 }
 
 func New(db *sql.DB, keys KeyStore, art Artwork) *Service {
@@ -38,7 +40,7 @@ func (s *Service) NotifyKey(ctx context.Context) {
 	if !s.HasKey(ctx) {
 		return
 	}
-	go func() { _ = s.DrainQueue(context.Background()) }()
+	go func() { _ = s.RunOnce(context.Background()) }()
 }
 
 func (s *Service) TryAutoMatch(ctx context.Context, itemKind, itemID string) error {

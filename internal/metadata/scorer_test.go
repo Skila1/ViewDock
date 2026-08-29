@@ -24,6 +24,18 @@ func TestScoreUniqueWinner(t *testing.T) {
 	}
 }
 
+func TestScoreClearWinnerDespiteSecondAboveThreshold(t *testing.T) {
+	cands := []SearchResult{
+		{ID: 1, Title: "Dune", ReleaseDate: "2021-10-22"},
+		{ID: 2, Title: "Dune", ReleaseDate: "2020-01-01"},
+	}
+	scored := Score("Dune", 2021, cands)
+	win, ok := UniqueWinner(scored)
+	if !ok || win.ID != 1 {
+		t.Fatalf("want 2021 Dune as unique winner, got %+v ok=%v scored=%+v", win, ok, scored)
+	}
+}
+
 func TestScoreNoUniqueWhenTie(t *testing.T) {
 	cands := []SearchResult{
 		{ID: 1, Title: "Foo Bar", ReleaseDate: "2020-01-01"},

@@ -8,7 +8,8 @@ export function formatClock(ms: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function filenameTitle(title: string): string {
+export function filenameTitle(title: string | null | undefined): string {
+  if (!title) return "";
   return title.replace(/\.[a-z0-9]{2,4}$/i, "").trim() || title;
 }
 

@@ -40,12 +40,13 @@ type User struct {
 }
 
 type Service struct {
-	DB       *sql.DB
-	Sessions *session.Store
-	Settings *settings.Store
-	Audit    *audit.Log
-	Cfg      config.Config
-	Grants   *GrantStore
+	DB        *sql.DB
+	Sessions  *session.Store
+	Settings  *settings.Store
+	Audit     *audit.Log
+	Cfg       config.Config
+	Grants    *GrantStore
+	OnTMDBKey func()
 }
 
 func New(db *sql.DB, cfg config.Config, kv *settings.Store, aud *audit.Log) *Service {

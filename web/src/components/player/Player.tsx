@@ -54,6 +54,7 @@ export function Player({
   const [dur, setDur] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const hideTimer = useRef<number>(0);
+  const goneAt = useRef(0);
 
   const bump = useCallback((ev: PlayerEvent) => {
     const next = reducePlayer(phaseRef.current, ev);
@@ -83,6 +84,11 @@ export function Player({
     async (reason: "START" | "QUALITY" | "GONE") => {
       const video = videoRef.current;
       if (!video) return;
+      if (reason === "GONE") {
+        const now = Date.now();
+        if (now - goneAt.current < 2500) return;
+        goneAt.current = now;
+      }
       if (reason === "QUALITY") bump("QUALITY");
       else if (reason === "GONE") bump("GONE");
       else bump("START");

@@ -61,6 +61,9 @@ func (s *Service) handleAdminSitePut(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteErr(w, 500, "settings", err.Error())
 			return
 		}
+		if s.OnTMDBKey != nil {
+			s.OnTMDBKey()
+		}
 	}
 	httpapi.WriteJSON(w, 200, s.siteSettings(r))
 }

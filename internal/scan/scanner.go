@@ -32,6 +32,8 @@ type Scanner struct {
 	DB     *sql.DB
 	Libs   *library.Service
 	Prober ffmpeg.Prober
+	// OnIdle runs after a library scan finishes (success or failure).
+	OnIdle func()
 
 	mu   sync.Mutex
 	runs map[string]bool
@@ -107,6 +109,9 @@ func (s *Scanner) runScan(libraryID, runID string) {
 		UPDATE scan_runs SET status = ?, finished_at = ?, files_seen = ?, files_added = ?, error = ?
 		WHERE id = ?
 	`, status, time.Now().UTC().Format(time.RFC3339), seen, added, errText, runID)
+	if s.OnIdle != nil {
+		s.OnIdle()
+	}
 }
 
 func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, added int, err error) {
@@ -549,6 +554,9 @@ func (s *Scanner) IngestFile(ctx context.Context, libraryID, absPath string) err
 		if err := s.DB.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&fileID); err == nil {
 			_ = media.PersistProbe(ctx, s.DB, s.Prober, fileID)
 		}
+	}
+	if s.OnIdle != nil {
+		s.OnIdle()
 	}
 	return nil
 }

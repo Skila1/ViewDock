@@ -27,11 +27,11 @@ curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | s
 | `./config` | `/config` | SQLite only |
 | `./cache` | `/cache` | artwork + HLS |
 | `./transcode` | `/transcode` | in-flight jobs |
-| media folder | `/media` | writable so Admin uploads can land here; never chowned recursively |
+| media folder | `/media` | writable so Admin uploads can land here. Entrypoint chowns the directory inode only; it never walks files |
 
 ## User
 
-`PUID` / `PGID` map the process user. Entrypoint chowns **directory inodes** of `/config`, `/cache`, `/transcode` only. `/media` is never walked.
+`PUID` / `PGID` map the process user. Entrypoint chowns **directory inodes** of `/config`, `/cache`, `/transcode`, `/config/uploads`, and `/media` only. Media files are never walked.
 
 If `/dev/dri` exists and the process starts as root, those device GIDs are added as supplementary groups.
 

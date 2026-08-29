@@ -251,6 +251,53 @@ func TestMissingFile404(t *testing.T) {
 	}
 }
 
+func TestPlaylistPendingNot410(t *testing.T) {
+	dir := t.TempDir()
+	api := testAPI(t, &mockLocator{}, nil)
+	api.PlaylistWait = 40 * time.Millisecond
+	sess := &Session{
+		ID: "s1", Kind: "user", UserID: "u1", Dir: dir,
+		Stoken: "tok", StokenExp: time.Now().Add(time.Hour),
+		Created: time.Now(), LastPing: time.Now(),
+	}
+	api.Reg.Put(sess)
+
+	r := chi.NewRouter()
+	api.HLSRoutes(r)
+	h := withUser(&auth.Principal{Kind: auth.KindUser, UserID: "u1"}, r)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/s1/index.m3u8?stoken=tok", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 pending, got %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "PLAYLIST_PENDING") {
+		t.Fatalf("body %s", rec.Body.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte("#EXTM3U\nseg0.m4s\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/s1/index.m3u8?stoken=tok", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("want 200 after playlist exists, got %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "stoken=tok") {
+		t.Fatalf("expected same stoken, got %s", rec.Body.String())
+	}
+
+	api.Reg.Delete("s1")
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/s1/index.m3u8?stoken=tok", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("want 410 after session gone, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 type allowGate struct{}
 
 func (allowGate) AllowStream(context.Context, string, string, string) error     { return nil }

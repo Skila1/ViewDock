@@ -15,11 +15,12 @@ import (
 )
 
 type API struct {
-	Auth     *auth.Service
-	Settings *settings.Store
-	Libs     library.LibrarySetup
-	Scan     library.ScanStart
-	FF       ffmpeg.Detector
+	Auth      *auth.Service
+	Settings  *settings.Store
+	Libs      library.LibrarySetup
+	Scan      library.ScanStart
+	FF        ffmpeg.Detector
+	OnTMDBKey func()
 }
 
 func New(a *auth.Service, kv *settings.Store, libs library.LibrarySetup, scan library.ScanStart, ff ffmpeg.Detector) *API {
@@ -173,6 +174,9 @@ func (a *API) tmdb(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if !body.Skip && body.APIKey != "" {
 		_ = a.Settings.Set(r.Context(), "tmdb.api_key", body.APIKey)
+		if a.OnTMDBKey != nil {
+			a.OnTMDBKey()
+		}
 	}
 	_ = a.Settings.Set(r.Context(), "setup.tmdb", "1")
 	httpapi.WriteOK(w)
