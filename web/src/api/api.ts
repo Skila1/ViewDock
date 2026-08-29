@@ -220,6 +220,44 @@ export const api = {
     request<UpdateStatus>("/api/v1/admin/updates", { method: "PUT", body }),
   checkUpdates: () => request<UpdateStatus>("/api/v1/admin/updates/check", { method: "POST", body: {} }),
   applyUpdates: () => request<{ ok: boolean; message?: string }>("/api/v1/admin/updates/apply", { method: "POST", body: {} }),
+
+  listAPIKeys: async () => asArray<APIKeyRow>(await request("/api/v1/admin/api-keys")),
+  listAPIKeyScopes: async () => asArray<APIKeyScope>(await request("/api/v1/admin/api-keys/scopes")),
+  createAPIKey: (body: { name: string; scopes: string[] }) =>
+    request<APIKeyRow>("/api/v1/admin/api-keys", { method: "POST", body }),
+  revokeAPIKey: (id: string) => request(`/api/v1/admin/api-keys/${id}`, { method: "DELETE" }),
+  listLogs: (q: { level?: string; category?: string; q?: string; limit?: number; after?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.level) p.set("level", q.level);
+    if (q.category) p.set("category", q.category);
+    if (q.q) p.set("q", q.q);
+    if (q.limit) p.set("limit", String(q.limit));
+    if (q.after) p.set("after", q.after);
+    return request<{ items: LogRow[]; next?: string }>(`/api/v1/admin/logs?${p.toString()}`);
+  },
+};
+
+export type APIKeyRow = {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  created_at: string;
+  last_used_at?: string;
+  secret?: string;
+  note?: string;
+};
+
+export type APIKeyScope = { name: string; description: string };
+
+export type LogRow = {
+  id: string;
+  created_at: string;
+  level: string;
+  category: string;
+  message: string;
+  details?: Record<string, unknown>;
+  actor_id?: string;
 };
 
 export { ApiError } from "./client";

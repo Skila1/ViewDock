@@ -18,6 +18,7 @@ import (
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/library"
 	"github.com/viewdock/viewdock/internal/metadata"
+	"github.com/viewdock/viewdock/internal/oplog"
 	"github.com/viewdock/viewdock/internal/playback"
 	"github.com/viewdock/viewdock/internal/progress"
 	"github.com/viewdock/viewdock/internal/scan"
@@ -35,6 +36,7 @@ type app struct {
 	Playback *playback.API
 	Uploads  *upload.Service
 	Meta     *metadata.Service
+	Logs     *oplog.Store
 }
 
 func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Logger, kv *settings.Store) *app {
@@ -44,6 +46,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	libs := library.NewService(sqlDB, authSvc.Grants, ff, ff, cfg.CacheDir)
 	sc := scan.New(sqlDB, libs, ff)
 	libs.SetScan(sc)
+	logs := oplog.New(sqlDB)
 	art := artwork.New(sqlDB, cfg.CacheDir, ff, metadata.NewClient(kv))
 	meta := metadata.New(sqlDB, kv, art)
 	sc.OnIdle = func() { go func() { _ = meta.RunOnce(context.Background()) }() }
@@ -114,6 +117,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		},
 		play.Routes,
 		update.Routes(kv),
+		logs.Routes,
 	)
-	return &app{Auth: authSvc, Playback: play, Uploads: up, Meta: meta}
+	return &app{Auth: authSvc, Playback: play, Uploads: up, Meta: meta, Logs: logs}
 }

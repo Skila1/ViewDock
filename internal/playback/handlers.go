@@ -220,6 +220,9 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		failed, failCode := s.Failed, s.FailCode
 		s.mu.Unlock()
 		if failed {
+			if a.Log != nil {
+				a.Log.Warn("playlist failed", "category", "playback", "id", s.ID, "code", failCode, "stderr", s.stderr.String())
+			}
 			httpapi.WriteJSON(w, http.StatusGone, map[string]any{"code": failCode, "resume_ms": s.snapshotResume()})
 			return
 		}

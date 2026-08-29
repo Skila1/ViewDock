@@ -3,6 +3,7 @@ package transcode
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ type Opts struct {
 	SegmentTime int
 	CopyVideo   bool
 	CopyAudio   bool
+	Stderr      io.Writer
 }
 
 func Start(ctx context.Context, ff *ffmpeg.Tool, locator library.MediaLocator, opt Opts) (*exec.Cmd, error) {
@@ -98,6 +100,9 @@ func Start(ctx context.Context, ff *ffmpeg.Tool, locator library.MediaLocator, o
 	)
 	cmd := exec.CommandContext(ctx, ff.FFmpeg, args...)
 	setProcGroup(cmd)
+	if opt.Stderr != nil {
+		cmd.Stderr = opt.Stderr
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package hls
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ type RemuxOpts struct {
 	VideoIndex  int
 	HEVC        bool
 	SegmentTime int
+	Stderr      io.Writer
 }
 
 func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxOpts) (*exec.Cmd, error) {
@@ -52,6 +54,9 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 	cmd := exec.CommandContext(ctx, ff.FFmpeg, args...)
 	ffmpegSetGroup(cmd)
 	cmd.Dir = destDir
+	if opt.Stderr != nil {
+		cmd.Stderr = opt.Stderr
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

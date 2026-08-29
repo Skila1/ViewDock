@@ -23,6 +23,7 @@ type Principal struct {
 	Username       string
 	CanDownload    bool
 	PINLocked      bool
+	APIKey         bool
 	Permissions    []string
 	Roles          []string
 }

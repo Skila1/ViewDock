@@ -29,6 +29,12 @@ func GuestAllowlisted(path string) bool {
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tok := cookieOrBearer(r, SessionCookie); tok != "" {
+			if strings.HasPrefix(tok, APIKeyPrefix) {
+				if p := s.lookupAPIKey(r.Context(), tok); p != nil {
+					next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
+					return
+				}
+			}
 			row, err := s.Sessions.Lookup(r.Context(), tok)
 			if err == nil {
 				u, err := s.GetUser(r.Context(), row.UserID)
@@ -172,6 +178,10 @@ func (s *Service) SetupGate(next http.Handler) http.Handler {
 func (s *Service) CSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if SafeMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if p := FromRequest(r); p != nil && p.APIKey {
 			next.ServeHTTP(w, r)
 			return
 		}

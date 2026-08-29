@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"sync"
@@ -56,6 +57,31 @@ type Session struct {
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
 	killed bool
+	stderr lockedBuf
+}
+
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (w *lockedBuf) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.b.Len() > 16<<10 {
+		return len(p), nil
+	}
+	return w.b.Write(p)
+}
+
+func (w *lockedBuf) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := w.b.String()
+	if len(s) > 4000 {
+		return s[len(s)-4000:]
+	}
+	return s
 }
 
 func (s *Session) owns(pKind, pID string) bool {

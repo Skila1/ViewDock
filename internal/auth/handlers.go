@@ -30,6 +30,7 @@ func (s *Service) Routes(r chi.Router) {
 	r.With(RequireUser).Get("/me/identities", s.handleIdentities)
 	r.With(RequireUser).Delete("/me/identities/discord", s.handleUnlinkDiscord)
 	mountAdminRBAC(s, r)
+	s.mountAPIKeys(r)
 }
 
 func (s *Service) handleCSRF(w http.ResponseWriter, r *http.Request) {

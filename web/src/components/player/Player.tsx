@@ -7,6 +7,7 @@ import {
   SkipForward,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
@@ -27,6 +28,7 @@ type Props = {
   shareToken?: string;
   guestItem?: { kind: string; id: string };
   onEnded?: () => void;
+  onClose?: () => void;
 };
 
 export function Player({
@@ -38,6 +40,7 @@ export function Player({
   shareToken,
   guestItem,
   onEnded,
+  onClose,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const attachRef = useRef<AttachHandle | null>(null);
@@ -114,7 +117,12 @@ export function Player({
         try {
           await video.play();
           bump("PLAY");
-        } catch {
+        } catch (playErr) {
+          if (playErr instanceof DOMException && playErr.name === "NotSupportedError") {
+            setErr("This stream could not start. Exit and try again, or check Admin → Logs.");
+            bump("ERROR");
+            return;
+          }
           bump("PAUSE");
         }
       } catch (e) {
@@ -248,10 +256,11 @@ export function Player({
           setMuted(v.muted);
         }
       }
+      if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pos]);
+  }, [onClose, pos]);
 
   const duration = dur || session?.duration_ms || 0;
   const qualities = session?.qualities ?? [];
@@ -295,6 +304,19 @@ export function Player({
             <p className="truncate text-sm font-medium text-white">{title}</p>
             <p className="text-[11px] text-white/55">{phase}</p>
           </div>
+          {onClose ? (
+            <button
+              type="button"
+              className="pointer-events-auto rounded-full bg-black/50 p-2 text-white"
+              aria-label="Exit player"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+            >
+              <X size={20} />
+            </button>
+          ) : null}
         </div>
 
         <div className="pointer-events-auto absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
@@ -372,8 +394,18 @@ export function Player({
       </div>
 
       {err ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
           <p className="max-w-md text-center text-sm text-danger">{err}</p>
+          <div className="flex gap-3">
+            <button type="button" className="rounded-md bg-accent px-3 py-1.5 text-sm text-black" onClick={() => void createAndAttach("START")}>
+              Retry
+            </button>
+            {onClose ? (
+              <button type="button" className="rounded-md border border-white/30 px-3 py-1.5 text-sm text-white" onClick={onClose}>
+                Exit
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

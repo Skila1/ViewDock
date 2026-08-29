@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { api } from "@/api/api";
 import { Player } from "@/components/player/Player";
 import { useAuth } from "@/store/auth";
@@ -9,6 +9,7 @@ type Props = { guest?: boolean };
 
 export function TogetherPage({ guest }: Props) {
   const { token = "", code = "" } = useParams();
+  const navigate = useNavigate();
   const { guest: caps, setGuest } = useAuth();
   const [invite, setInvite] = useState<WTInvite | null>(null);
   const [meta, setMeta] = useState<ShareMeta | null>(null);
@@ -110,6 +111,7 @@ export function TogetherPage({ guest }: Props) {
       togetherCode={code}
       shareToken={guest ? token : undefined}
       guestItem={guest ? guestItem : undefined}
+      onClose={() => navigate(-1)}
     />
   );
 }

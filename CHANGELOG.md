@@ -9,3 +9,5 @@
 - SQLite, one container. Media stays on your disk. First-run prints an 8-character setup token in the console and logs after the server is listening.
 - `.env` only has `VD_PORT` and `VD_PUBLIC_URL`. Trusted proxies include local/Docker and Cloudflare. Public URL and TMDB are also under Admin → Settings.
 - Administrators can upload videos (max 10 GB) under Admin → Uploads. Staging is `/config/uploads`. `/media` is read-write so finished files can land in the library.
+- Admin → API keys issues `vd_…` bearer tokens (SoundDock-style). Admin → Logs stores application and playback events and is readable over the REST API.
+- The player has an exit control. HLS waits for the first playlist instead of looping 410s.

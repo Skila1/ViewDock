@@ -64,6 +64,10 @@ func main() {
 	srv := httpapi.New(cfg, sqlDB, logger, webFS)
 	srv.Settings = kv
 	app := wire(srv, sqlDB, cfg, logger, kv)
+	logger = log.Tee(logger, app.Logs, cfg.LogLevel)
+	slog.SetDefault(logger)
+	app.Playback.Log = logger
+	srv.Log = logger
 	app.Auth.SyncDiscordEnv()
 	n, _ := app.Auth.UserCount(context.Background())
 	if err := setup.EnsureBootstrap(context.Background(), kv, cfg, logger, n); err != nil {
@@ -117,6 +121,9 @@ func main() {
 				update.Tick(context.Background(), kv)
 				if app != nil && app.Uploads != nil {
 					app.Uploads.Sweep(context.Background())
+				}
+				if app != nil && app.Logs != nil {
+					app.Logs.Sweep(context.Background())
 				}
 			}
 		}

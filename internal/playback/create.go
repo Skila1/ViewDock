@@ -124,12 +124,20 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 				a.Lim.Release()
 			}
 			a.HLS.Remove(sess.ID)
+			if a.Log != nil {
+				a.Log.Error("pipeline start", "category", "playback", "err", err.Error(), "path", sess.AbsPath)
+			}
 			httpapi.WriteErr(w, 500, "ffmpeg", err.Error())
 			return
 		}
 	}
 
 	a.Reg.Put(sess)
+	if a.Log != nil {
+		a.Log.Info("playback session", "category", "playback", "id", sess.ID, "mode", sess.Mode,
+			"delivery", sess.Delivery, "item", sess.ItemKind+"/"+sess.ItemID, "path", sess.AbsPath,
+			"reasons", sess.Reasons)
+	}
 	httpapi.WriteJSON(w, 200, a.sessionJSON(sess))
 }
 
@@ -213,6 +221,7 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 	if dec.Mode == decision.ModeRemux {
 		cmd, err := hls.Remux(pctx, a.FF, s.AbsPath, s.Dir, hls.RemuxOpts{
 			StartMS: s.StartMS, AudioIndex: s.AudioIndex, HEVC: dec.HEVCRemuxTag,
+			Stderr: &s.stderr,
 		})
 		if err != nil {
 			cancel()
@@ -225,6 +234,7 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 			SrcWidth: s.Info.Width, SrcHeight: s.Info.Height, HDR: s.Info.HDR,
 			BurnPath: burn, SessionDir: s.Dir, LibraryID: s.LibraryID, AbsPath: s.AbsPath,
 			HW: a.HW, CopyVideo: dec.CopyVideo && !dec.NeedBurn, CopyAudio: dec.CopyAudio,
+			Stderr: &s.stderr,
 		})
 		if err != nil {
 			cancel()
@@ -249,6 +259,9 @@ func (a *API) waitFFmpeg(s *Session) {
 	s.mu.Unlock()
 	if err != nil && !killed {
 		s.fail("FFMPEG_EXIT")
+		if a.Log != nil {
+			a.Log.Error("ffmpeg exit", "category", "playback", "id", s.ID, "err", err.Error(), "stderr", s.stderr.String())
+		}
 	}
 }
 

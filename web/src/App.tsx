@@ -10,6 +10,8 @@ import { SettingsPage } from "@/features/admin/SettingsPage";
 import { GrantsPage } from "@/features/admin/GrantsPage";
 import { RolesPage } from "@/features/admin/RolesPage";
 import { UpdatesPage } from "@/features/admin/UpdatesPage";
+import { APIKeysPage } from "@/features/admin/APIKeysPage";
+import { LogsPage } from "@/features/admin/LogsPage";
 import { UploadsPage } from "@/features/admin/UploadsPage";
 import { UsersPage } from "@/features/admin/UsersPage";
 import { AdminPage } from "@/pages/AdminPage";
@@ -98,6 +100,8 @@ export function App() {
                   <Route path="grants" element={<GrantsPage />} />
                   <Route path="uploads" element={<UploadsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
+                  <Route path="api-keys" element={<APIKeysPage />} />
+                  <Route path="logs" element={<LogsPage />} />
                   <Route path="discord" element={<DiscordPage />} />
                   <Route path="updates" element={<UpdatesPage />} />
                 </Route>

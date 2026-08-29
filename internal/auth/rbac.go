@@ -23,6 +23,7 @@ const (
 	PermSharesManage    = "shares.manage"
 	PermStreamsInspect = "streams.inspect"
 	PermSettingsManage = "settings.manage"
+	PermLogsRead       = "logs.read"
 )
 
 var ErrLastAdmin = errors.New("cannot remove the last administrator")

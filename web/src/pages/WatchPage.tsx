@@ -40,6 +40,11 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
             .catch(() => navigate(-1));
         }
       }}
+      onClose={() => {
+        if (kind === "movie") navigate(`/movies/${id}`);
+        else if (episode.data?.series_id) navigate(`/tv/${episode.data.series_id}`);
+        else navigate(-1);
+      }}
     />
   );
 }
