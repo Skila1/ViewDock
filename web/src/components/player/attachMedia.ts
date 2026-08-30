@@ -44,7 +44,9 @@ export async function attachSession(
     video.setAttribute("webkit-playsinline", "");
     video.setAttribute("x-webkit-airplay", "allow");
     video.playsInline = true;
-    video.controls = true;
+    // Native Safari controls use the HLS window as duration and treat EVENT
+    // playlists as live. Keep Apple's decoder; use our clock and seek bar.
+    video.controls = false;
     video.src = playlist;
     const onError = () => {
       void fetch(playlist, { credentials: "include" }).then((res) => {
@@ -54,6 +56,9 @@ export async function attachSession(
     video.addEventListener("error", onError);
     try {
       await waitCanPlay(video, () => aborted);
+      if (video.currentTime > 0.25) {
+        video.currentTime = 0;
+      }
     } catch (err) {
       video.removeEventListener("error", onError);
       throw err;

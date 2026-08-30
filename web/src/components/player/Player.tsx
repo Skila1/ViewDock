@@ -13,13 +13,12 @@ import {
 import { api, ApiError } from "@/api/api";
 import { nativeHlsSupported } from "@/api/profile";
 import { cn } from "@/lib/cn";
-import { enterNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
 import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
-import { canSeekInWindow, seekableBounds } from "./seekWindow";
+import { canSeekInWindow, holdNativeStart, seekableBounds } from "./seekWindow";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
 
@@ -67,6 +66,8 @@ export function Player({
   const attachBusyRef = useRef(false);
   const originRef = useRef(startMs);
   const [buffering, setBuffering] = useState(true);
+  const attachedAtRef = useRef(0);
+  const lastStablePosRef = useRef(startMs);
 
   const bump = useCallback((ev: PlayerEvent) => {
     const next = reducePlayer(phaseRef.current, ev);
@@ -138,6 +139,12 @@ export function Player({
           void createAndAttach("GONE");
         });
         bump("ATTACHED");
+        attachedAtRef.current = Date.now();
+        lastStablePosRef.current = originRef.current;
+        if (nativeHlsSupported()) {
+          video.controls = false;
+          if (video.currentTime > 0.25) video.currentTime = 0;
+        }
         const later = pendingSeekRef.current;
         if (later != null && Math.abs(later - originRef.current) > 2500) {
           attachBusyRef.current = false;
@@ -148,6 +155,9 @@ export function Player({
         pendingSeekRef.current = null;
         try {
           await video.play();
+          if (nativeHlsSupported() && video.currentTime > 0.25) {
+            video.currentTime = 0;
+          }
           setBuffering(false);
           bump("PLAY");
         } catch (playErr) {
@@ -221,7 +231,13 @@ export function Player({
     if (!video) return;
     const onTime = () => {
       if (pendingSeekRef.current != null || attachBusyRef.current) return;
-      const ms = originRef.current + video.currentTime * 1000;
+      const origin = originRef.current;
+      const rel = video.currentTime || 0;
+      const ms = origin + rel * 1000;
+      if (nativeHlsSupported() && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
+        return;
+      }
+      lastStablePosRef.current = ms;
       setPos(ms);
       resumeRef.current = ms;
     };
@@ -323,12 +339,14 @@ export function Player({
     const target = Math.max(0, movieDur > 0 ? Math.min(ms, movieDur) : ms);
     setPos(target);
     resumeRef.current = target;
+    lastStablePosRef.current = target;
     const bounds = !attachBusyRef.current ? seekableBounds(video) : {};
     const inWindow = canSeekInWindow({
       targetMs: target,
       originMs: origin,
       seekableStartSec: bounds.startSec,
       seekableEndSec: bounds.endSec,
+      ignoreSeekableStart: nativeHlsSupported(),
     });
     if (!inWindow || attachBusyRef.current) {
       pendingSeekRef.current = target;
@@ -399,7 +417,6 @@ export function Player({
     phase === "switchingQuality" ||
     phase === "recreating";
   const showSpinner = !err && (buffering || attaching);
-  const applePlayer = nativeHlsSupported();
 
   return (
     <div
@@ -411,9 +428,8 @@ export function Player({
         ref={videoRef}
         className="h-full w-full object-contain"
         playsInline
-        controls={applePlayer}
         preload="auto"
-        onClick={applePlayer ? undefined : (e) => {
+        onClick={(e) => {
           e.stopPropagation();
           togglePlay();
         }}
@@ -460,11 +476,8 @@ export function Player({
         </div>
 
         <div
-          className="pointer-events-auto absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
-          style={{
-            bottom: applePlayer ? "max(3.25rem, calc(var(--sab) + 2.75rem))" : 0,
-            paddingBottom: applePlayer ? "0.5rem" : "max(1rem, var(--sab))",
-          }}
+          className="pointer-events-auto absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
+          style={{ paddingBottom: "max(1rem, var(--sab))" }}
         >
           <input
             type="range"
@@ -475,29 +488,25 @@ export function Player({
             className="mb-3 h-8 w-full accent-[var(--accent)]"
           />
           <div className="flex flex-wrap items-center gap-3">
-            {applePlayer ? null : (
-              <button type="button" onClick={togglePlay} className="tap text-white" aria-label="Play pause">
-                {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
-              </button>
-            )}
+            <button type="button" onClick={togglePlay} className="tap text-white" aria-label="Play pause">
+              {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+            </button>
             <span className="text-xs tabular-nums text-white/80">
               {formatClock(pos)} / {formatClock(duration)}
             </span>
-            {applePlayer ? null : (
-              <button
-                type="button"
-                className="tap text-white"
-                onClick={() => {
-                  const v = videoRef.current;
-                  if (!v) return;
-                  v.muted = !v.muted;
-                  setMuted(v.muted);
-                }}
-                aria-label="Mute"
-              >
-                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-              </button>
-            )}
+            <button
+              type="button"
+              className="tap text-white"
+              onClick={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                v.muted = !v.muted;
+                setMuted(v.muted);
+              }}
+              aria-label="Mute"
+            >
+              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
             <div className="ml-auto flex items-center gap-2">
               {session?.next_episode ? (
                 <button
@@ -526,12 +535,7 @@ export function Player({
                 className="tap text-white"
                 aria-label="Fullscreen"
                 onClick={() => {
-                  const video = videoRef.current;
-                  if (applePlayer && video && enterNativeFullscreen(video)) {
-                    setFs(true);
-                    return;
-                  }
-                  const root = video?.parentElement;
+                  const root = videoRef.current?.parentElement;
                   if (!document.fullscreenElement) {
                     void root?.requestFullscreen();
                     setFs(true);

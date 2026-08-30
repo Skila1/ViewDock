@@ -37,11 +37,12 @@ func RewritePlaylist(body []byte, stoken string) []byte {
 
 // WithStartAtZero inserts EXT-X-START so players do not jump to the live
 // edge of an in-progress EVENT playlist (ffmpeg still appending segments).
+// PRECISE helps Safari/iOS honor the offset instead of chasing the frontier.
 func WithStartAtZero(body []byte) []byte {
 	if bytes.Contains(body, []byte("#EXT-X-START:")) {
 		return body
 	}
-	const tag = "#EXT-X-START:TIME-OFFSET=0"
+	const tag = "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"
 	lines := bytes.Split(body, []byte("\n"))
 	out := make([][]byte, 0, len(lines)+1)
 	inserted := false

@@ -25,7 +25,7 @@ func TestRewriteStoken(t *testing.T) {
 func TestWithStartAtZero(t *testing.T) {
 	in := []byte("#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n")
 	out := string(WithStartAtZero(in))
-	if !strings.Contains(out, "#EXT-X-START:TIME-OFFSET=0") {
+	if !strings.Contains(out, "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES") {
 		t.Fatalf("missing start: %s", out)
 	}
 	if strings.Count(out, "#EXT-X-START:") != 1 {
