@@ -22,7 +22,34 @@ export function fullscreenStrategy(): FullscreenStrategy {
   return isIOSDevice() ? "avkit" : "element";
 }
 
-/** Custom chrome must never use EVENT/window video.duration as the movie length. */
+/**
+ * REAL DEVICE VALIDATED:
+ * iPhone + hls.js + ManagedMediaSource
+ * → webkitEnterFullscreen → AVKit → native seek → webkitendfullscreen
+ * → same blob currentSrc → same backend session → native seek position preserved.
+ *
+ * A prior currentTime=0 observation was not reproduced and is not an
+ * architectural limitation. Do not restore currentTime on fullscreen exit.
+ */
+export const IOS_AVKIT_MMS_VALIDATED = {
+  engine: "hls-mms",
+  enter: "webkitEnterFullscreen",
+  seek: "avkit_native",
+  exit: "webkitendfullscreen",
+  same_blob: true,
+  same_session: true,
+  seek_position_preserved: true,
+  restore_currentTime_on_exit: false,
+} as const;
+
+/**
+ * Duration clocks are expected to differ while generation/append is in progress:
+ * - movie_duration_ms: ffprobe movie length (session.duration_ms)
+ * - playlist listed duration: sum of generated HLS EXTINF segments
+ * - video.duration / seekable: media currently exposed/appended through MMS
+ *
+ * Custom chrome must never use EVENT/window video.duration as the movie length.
+ */
 export function movieDurationMs(session: PlaybackSession | null | undefined, fallbackMs = 0): number {
   const probed = session?.duration_ms ?? 0;
   if (probed > 0) return probed;
@@ -37,6 +64,12 @@ export function debugPlaybackEnabled(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Temporary helper for the Play Debug button. */
+export function withVdDebug(to: string): string {
+  if (/[?&]vd_debug=/.test(to)) return to;
+  return to.includes("?") ? `${to}&vd_debug=1` : `${to}?vd_debug=1`;
 }
 
 export function inferDiagnosticOwner(

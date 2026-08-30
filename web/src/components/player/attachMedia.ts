@@ -1,7 +1,9 @@
 import { nativeHlsSupported, sessionUrl } from "@/api/profile";
 import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/airplay";
-import { noteAttach, setAttachMeta } from "@/playback/attachTrace";
+import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMeta } from "@/playback/attachTrace";
+import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
+import { captureSeekHold, seekHoldAction } from "@/playback/seekHold";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
@@ -49,6 +51,7 @@ export async function attachSession(
   if (!playlist) throw new Error("session missing HLS url");
   const playlistMeta = await waitForPlaylist(playlist);
   setAttachMeta(video, {
+    playlistUrl: playlist,
     playlistType: playlistMeta.type,
     playlistDurationMs: playlistMeta.durationMs,
   });
@@ -70,7 +73,7 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, () => aborted, gone);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone);
   }
   return attachNativeHls(video, playlist, () => aborted, gone);
 }
@@ -87,17 +90,19 @@ async function attachWithHls(
   video: HTMLVideoElement,
   playlist: string,
   Hls: typeof import("hls.js").default,
+  session: PlaybackSession,
   isAborted: () => boolean,
   gone: () => void,
 ): Promise<AttachHandle> {
+  const movieSec = movieDurationSec(session.duration_ms);
   const hls = new Hls({
     enableWorker: true,
     preferManagedMediaSource: true,
     lowLatencyMode: false,
     startPosition: 0,
     liveDurationInfinity: false,
-    liveSyncDurationCount: 30,
-    liveMaxLatencyDurationCount: Infinity,
+    liveSyncDurationCount: 1,
+    liveMaxLatencyDurationCount: 3,
     maxLiveSyncPlaybackRate: 1,
     maxBufferLength: 30,
     maxMaxBufferLength: 90,
@@ -107,7 +112,24 @@ async function attachWithHls(
     },
   });
   let fatalErr: Error | null = null;
-  const onHlsError = (_e: unknown, data: { fatal?: boolean; type?: string; details?: string; response?: { code?: number } }) => {
+  const onHlsError = (_e: unknown, data: import("hls.js").ErrorData) => {
+    noteHlsError(video, {
+      type: data.type,
+      details: data.details,
+      fatal: data.fatal,
+      reason: data.reason,
+      error: data.error,
+      response: data.response,
+      frag: data.frag
+        ? {
+            sn: typeof data.frag.sn === "number" ? data.frag.sn : undefined,
+            start: data.frag.start,
+            duration: data.frag.duration,
+            url: data.frag.url,
+            relurl: data.frag.relurl,
+          }
+        : undefined,
+    });
     if (data.fatal && data.response?.code === 410) gone();
     if (data.fatal) {
       fatalErr = new Error(data.details || data.type || "hls error");
@@ -116,18 +138,116 @@ async function attachWithHls(
   hls.on(Hls.Events.ERROR, onHlsError);
   hls.on(Hls.Events.MEDIA_ATTACHING, () => noteAttach(video, "hls:MEDIA_ATTACHING"));
   hls.on(Hls.Events.MEDIA_ATTACHED, () => noteAttach(video, "hls:MEDIA_ATTACHED"));
+  hls.on(Hls.Events.MEDIA_DETACHING, () => noteAttach(video, "hls:MEDIA_DETACHING"));
   hls.on(Hls.Events.MANIFEST_LOADING, () => noteAttach(video, "hls:MANIFEST_LOADING"));
   hls.on(Hls.Events.MANIFEST_PARSED, () => noteAttach(video, "hls:MANIFEST_PARSED"));
+  const hlsQuiet = (name: string, extra?: string) => {
+    if (!isFsWindow(video) && !name.includes("FLUSH") && name !== "FRAG_CHANGED") return;
+    noteAttach(video, `hls:${name}`, extra);
+  };
+  hls.on(Hls.Events.FRAG_LOADING, (_e, data) => hlsQuiet("FRAG_LOADING", `sn=${data.frag?.sn}`));
+  hls.on(Hls.Events.FRAG_LOADED, (_e, data) => hlsQuiet("FRAG_LOADED", `sn=${data.frag?.sn}`));
+  hls.on(Hls.Events.FRAG_BUFFERED, (_e, data) => hlsQuiet("FRAG_BUFFERED", `sn=${data.frag?.sn}`));
+  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => noteAttach(video, "hls:FRAG_CHANGED", `sn=${data.frag?.sn} start=${data.frag?.start}`));
+  hls.on(Hls.Events.LEVEL_LOADING, () => hlsQuiet("LEVEL_LOADING"));
+  let playlistEdge = 0;
+  let playlistEndlist = false;
+  let seekHold: number | null = null;
+  let seekHoldAt = 0;
+  let lastKeepAt = 0;
+  const runSeekHold = (why: string) => {
+    const now = video.currentTime;
+    const action = seekHoldAction({
+      requestedSec: seekHold,
+      nowSec: now,
+      playlistEdgeSec: playlistEdge,
+      movieSec,
+      endlist: playlistEndlist,
+      heldForMs: seekHoldAt ? Date.now() - seekHoldAt : 0,
+    });
+    if (action === "keep" && seekHold != null && Date.now() - lastKeepAt > 280) {
+      lastKeepAt = Date.now();
+      noteCurrentTimeWrite(video, seekHold, `seek_hold_keep:${why}`, session.id);
+      video.currentTime = seekHold;
+      noteAttach(video, "seek_hold_keep", `t=${seekHold} edge=${playlistEdge} via=${why}`);
+    } else if (action === "apply" && seekHold != null) {
+      const target = seekHold;
+      seekHold = null;
+      noteCurrentTimeWrite(video, target, `seek_hold_apply:${why}`, session.id);
+      video.currentTime = target;
+      noteAttach(video, "seek_hold_apply", `t=${target} edge=${playlistEdge}`);
+    } else if (action === "timeout" || action === "clear") {
+      noteAttach(video, `seek_hold_${action}`, `hold=${seekHold} edge=${playlistEdge}`);
+      seekHold = null;
+    }
+  };
+  const onAvkitSeeking = () => {
+    const captured = captureSeekHold(video.currentTime, playlistEdge, movieSec);
+    if (captured != null) {
+      seekHold = captured;
+      seekHoldAt = Date.now();
+      noteAttach(video, "seek_hold_begin", `t=${captured} edge=${playlistEdge}`);
+      return;
+    }
+    runSeekHold("seeking");
+  };
+  video.addEventListener("seeking", onAvkitSeeking);
+  hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
+    playlistEdge = data.details?.edge ?? data.details?.totalduration ?? playlistEdge;
+    playlistEndlist = Boolean(data.details && data.details.live === false);
+    noteAttach(video, "hls:LEVEL_LOADED", `details=${data.details?.totalduration ?? ""} edge=${playlistEdge} endSN=${data.details?.endSN ?? ""}`);
+    runSeekHold("LEVEL_LOADED");
+  });
+  hls.on(Hls.Events.BUFFER_APPENDING, () => hlsQuiet("BUFFER_APPENDING"));
+  hls.on(Hls.Events.BUFFER_APPENDED, () => hlsQuiet("BUFFER_APPENDED"));
+  hls.on(Hls.Events.BUFFER_FLUSHING, (_e, data) =>
+    noteAttach(video, "hls:BUFFER_FLUSHING", `${data.startOffset ?? ""}-${data.endOffset ?? ""}`),
+  );
+  hls.on(Hls.Events.BUFFER_FLUSHED, () => noteAttach(video, "hls:BUFFER_FLUSHED"));
+  let mediaSourceRef: MediaSource | null = null;
+  const mediaSourceOf = () => {
+    if (mediaSourceRef) return mediaSourceRef;
+    const fromHls = (hls as unknown as { mediaSource?: MediaSource | null }).mediaSource;
+    if (fromHls) return fromHls;
+    const obj = video.srcObject;
+    if (obj && typeof (obj as MediaSource).duration === "number") return obj as MediaSource;
+    return null;
+  };
+  const pinMovieDuration = (why: string) => {
+    if (movieSec == null) return;
+    const ms = mediaSourceOf();
+    if (pinOpenMediaSource(ms, movieSec)) {
+      setAttachMeta(video, { pinnedDurationSec: movieSec });
+      noteAttach(video, "mms_duration_pin", `${why} sec=${movieSec} video.duration=${video.duration}`);
+    }
+  };
   const hookMediaSource = () => {
-    const ms = (hls as unknown as { mediaSource?: EventTarget & { readyState?: string } }).mediaSource;
+    const ms = mediaSourceOf();
     if (!ms?.addEventListener || (ms as { _vdHooked?: boolean })._vdHooked) return;
     (ms as { _vdHooked?: boolean })._vdHooked = true;
-    ms.addEventListener("sourceopen", () => noteAttach(video, "sourceopen", ms.readyState));
+    ms.addEventListener("sourceopen", () => {
+      noteAttach(video, "sourceopen", ms.readyState);
+      pinMovieDuration("sourceopen");
+    });
     ms.addEventListener("sourceclose", () => noteAttach(video, "sourceclose", ms.readyState));
     ms.addEventListener("sourceended", () => noteAttach(video, "sourceended", ms.readyState));
+    ms.addEventListener("startstreaming", () => noteAttach(video, "mms:startstreaming"));
+    ms.addEventListener("endstreaming", () => noteAttach(video, "mms:endstreaming"));
+    pinMovieDuration("hook");
   };
-  hls.on(Hls.Events.MEDIA_ATTACHING, hookMediaSource);
-  hls.on(Hls.Events.MEDIA_ATTACHED, hookMediaSource);
+  hls.on(Hls.Events.MEDIA_ATTACHING, (_e, data) => {
+    if (data.mediaSource) mediaSourceRef = data.mediaSource;
+    hookMediaSource();
+  });
+  hls.on(Hls.Events.MEDIA_ATTACHED, (_e, data) => {
+    if (data.mediaSource) mediaSourceRef = data.mediaSource;
+    hookMediaSource();
+    pinMovieDuration("MEDIA_ATTACHED");
+  });
+  hls.on(Hls.Events.LEVEL_LOADED, () => pinMovieDuration("LEVEL_LOADED"));
+  hls.on(Hls.Events.BUFFER_APPENDED, () => pinMovieDuration("BUFFER_APPENDED"));
+  const onDurPin = () => pinMovieDuration("durationchange");
+  video.addEventListener("durationchange", onDurPin);
   video.addEventListener("loadedmetadata", () => noteAttach(video, "video:loadedmetadata", `duration=${video.duration}`), { once: true });
   // MMS sourceopen requires disableRemotePlayback. Do not add an HLS
   // <source> sibling — Safari plays that inline and fights hls.js.
@@ -135,8 +255,14 @@ async function attachWithHls(
   setAttachMeta(video, { airplayPolicy: "skipped_intentional_dual_owner" });
   noteAttach(video, "disableRemotePlayback", "true");
   noteAttach(video, "airplay_sibling", "skipped_intentional_dual_owner");
-  hls.attachMedia(video);
-  noteAttach(video, "hls.attachMedia");
+  if (movieSec != null) {
+    hls.attachMedia({ media: video, overrides: { duration: movieSec } });
+    setAttachMeta(video, { pinnedDurationSec: movieSec });
+    noteAttach(video, "hls.attachMedia", `duration_override=${movieSec}`);
+  } else {
+    hls.attachMedia(video);
+    noteAttach(video, "hls.attachMedia");
+  }
   hls.loadSource(playlist);
   noteAttach(video, "hls.loadSource");
   try {
@@ -154,6 +280,8 @@ async function attachWithHls(
   return {
     engine: "hlsjs",
     destroy() {
+      video.removeEventListener("seeking", onAvkitSeeking);
+      video.removeEventListener("durationchange", onDurPin);
       hls.destroy();
       video.removeAttribute("src");
       video.querySelectorAll("source").forEach((el) => el.remove());
@@ -178,7 +306,10 @@ async function attachNativeHls(
   video.addEventListener("error", onError);
   try {
     await waitCanPlay(video, isAborted);
-    if (video.currentTime > 0.25) video.currentTime = 0;
+    if (video.currentTime > 0.25) {
+      noteCurrentTimeWrite(video, 0, "attachNativeHls.resetAfterCanPlay");
+      video.currentTime = 0;
+    }
   } catch (err) {
     video.removeEventListener("error", onError);
     throw err;

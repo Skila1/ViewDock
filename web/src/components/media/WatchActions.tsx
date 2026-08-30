@@ -1,6 +1,7 @@
 import { Link } from "react-router";
-import { Play, RotateCcw } from "lucide-react";
+import { Bug, Play, RotateCcw } from "lucide-react";
 import { formatClock } from "@/lib/format";
+import { withVdDebug } from "@/playback/policy";
 
 type Props = {
   kind: "movie" | "episode";
@@ -36,6 +37,12 @@ export function WatchActions({ kind, id, resumeMs }: Props) {
           <Play size={14} /> Play
         </Link>
       )}
+      <Link
+        to={withVdDebug(`${watch}?t=0`)}
+        className="tap inline-flex items-center gap-1 rounded-md border border-dashed border-amber-400/70 px-3 text-sm text-amber-200"
+      >
+        <Bug size={14} /> Play Debug
+      </Link>
     </div>
   );
 }

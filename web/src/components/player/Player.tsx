@@ -14,7 +14,7 @@ import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
 import { enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
-import { noteAttach } from "@/playback/attachTrace";
+import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
 import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
@@ -72,6 +72,10 @@ export function Player({
   const [buffering, setBuffering] = useState(true);
   const attachedAtRef = useRef(0);
   const lastStablePosRef = useRef(startMs);
+  const fsExitAtRef = useRef(0);
+  const playingAtFsExitRef = useRef(false);
+  const userPausedRef = useRef(false);
+  const suppressReplaceUntilRef = useRef(0);
   const genRef = useRef(0);
   const engineRef = useRef<PlaybackEngine | null>(null);
   const [engine, setEngine] = useState<PlaybackEngine | null>(null);
@@ -113,6 +117,10 @@ export function Player({
       if (attachBusyRef.current && reason === "QUALITY") {
         return;
       }
+      if (reason === "QUALITY" && Date.now() < suppressReplaceUntilRef.current) {
+        noteAttach(video, "session_replace_suppressed_after_fs", `start_ms=${Math.floor(pendingSeekRef.current ?? resumeRef.current)}`);
+        return;
+      }
       if (reason === "QUALITY") bump("QUALITY");
       else if (reason === "GONE") bump("GONE");
       else bump("START");
@@ -125,6 +133,7 @@ export function Player({
         pendingSeekRef.current = null;
         resumeRef.current = startAt;
         const replaceId = sessionRef.current?.id;
+        noteAttach(video, "session_replace_begin", `reason=${reason} outgoing=${replaceId ?? ""} start_ms=${startAt}`);
         await endRemote();
         teardownAttach();
         if (genRef.current !== gen) return;
@@ -144,7 +153,9 @@ export function Player({
           return;
         }
         sessionRef.current = sess;
+        noteAttach(video, "session_created", `reason=${reason} id=${sess.id} replace=${replaceId ?? ""}`);
         originRef.current = sess.seekable_from_ms ?? startAt;
+        setAttachMeta(video, { originMs: originRef.current, sessionId: sess.id });
         setSession(sess);
         const predicted: PlaybackEngine = sess.delivery === "direct" ? "direct" : sess.hls_attach === "native" ? "native-hls" : "hlsjs";
         engineRef.current = predicted;
@@ -179,7 +190,10 @@ export function Player({
         lastStablePosRef.current = originRef.current;
         if (attachRef.current.engine === "native-hls") {
           video.controls = false;
-          if (video.currentTime > 0.25) video.currentTime = 0;
+          if (video.currentTime > 0.25) {
+            noteCurrentTimeWrite(video, 0, "createAndAttach.nativeHlsReset", sess.id);
+            video.currentTime = 0;
+          }
         }
         const later = pendingSeekRef.current;
         if (later != null && Math.abs(later - originRef.current) > 2500) {
@@ -192,6 +206,7 @@ export function Player({
         try {
           await video.play();
           if (engineRef.current === "native-hls" && video.currentTime > 0.25) {
+            noteCurrentTimeWrite(video, 0, "createAndAttach.nativeHlsResetAfterPlay", sess.id);
             video.currentTime = 0;
           }
           setBuffering(false);
@@ -292,7 +307,18 @@ export function Player({
       if (!attachBusyRef.current) setBuffering(false);
       bump("PLAY");
     };
-    const onPause = () => bump("PAUSE");
+    const onPause = () => {
+      bump("PAUSE");
+      if (
+        playingAtFsExitRef.current &&
+        !userPausedRef.current &&
+        fsExitAtRef.current > 0 &&
+        Date.now() - fsExitAtRef.current < 1200
+      ) {
+        noteAttach(video, "webkit_pause_after_fs_resumed", `t=${video.currentTime.toFixed(3)}`);
+        void video.play().then(() => bump("PLAY")).catch(() => {});
+      }
+    };
     const onWaiting = () => setBuffering(true);
     const onCanPlay = () => {
       if (!attachBusyRef.current && pendingSeekRef.current == null) setBuffering(false);
@@ -301,6 +327,12 @@ export function Player({
       bump("ENDED");
       onEnded?.();
     };
+    const domEv = [
+      "play", "playing", "pause", "waiting", "stalled", "seeking", "seeked",
+      "timeupdate", "durationchange", "loadedmetadata", "loadeddata", "canplay",
+      "emptied", "abort", "suspend", "progress", "ratechange",
+    ];
+    const onDom = (e: Event) => noteMediaDom(video, e.type);
     video.addEventListener("timeupdate", onTime);
     video.addEventListener("durationchange", onDur);
     video.addEventListener("play", onPlay);
@@ -309,6 +341,7 @@ export function Player({
     video.addEventListener("canplay", onCanPlay);
     video.addEventListener("playing", onCanPlay);
     video.addEventListener("ended", onEnded);
+    for (const name of domEv) video.addEventListener(name, onDom);
     return () => {
       video.removeEventListener("timeupdate", onTime);
       video.removeEventListener("durationchange", onDur);
@@ -318,6 +351,7 @@ export function Player({
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("playing", onCanPlay);
       video.removeEventListener("ended", onEnded);
+      for (const name of domEv) video.removeEventListener(name, onDom);
     };
   }, [bump, onEnded]);
 
@@ -354,8 +388,17 @@ export function Player({
     const sync = () => {
       setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
     };
-    const onFs = () => setFs(true);
+    const onFs = () => {
+      noteLogical(video, "webkitbeginfullscreen", originRef.current, sessionRef.current?.id);
+      setFs(true);
+    };
     const onFsEnd = () => {
+      playingAtFsExitRef.current = !video.paused;
+      fsExitAtRef.current = Date.now();
+      suppressReplaceUntilRef.current = Date.now() + 2500;
+      window.clearTimeout(seekTimer.current);
+      noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
+      noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
       setFs(false);
       setPageFs(false);
     };
@@ -378,20 +421,22 @@ export function Player({
     const root = video?.parentElement;
     if (!video) return;
     if (document.fullscreenElement || isNativeFullscreen(video) || pageFs) {
+      noteMedia(video, "fullscreen_exit_tap", sessionRef.current?.id);
       if (document.fullscreenElement) void document.exitFullscreen();
       exitNativeFullscreen(video);
+      noteMedia(video, "webkitExitFullscreen", sessionRef.current?.id);
       setPageFs(false);
       setFs(false);
       return;
     }
     if (fullscreenStrategy() === "avkit") {
-      noteAttach(video, "fullscreen_tap", `src=${video.currentSrc} t=${video.currentTime} session=${sessionRef.current?.id ?? ""}`);
+      noteMedia(video, "fullscreen_tap", sessionRef.current?.id);
       if (enterNativeFullscreen(video)) {
-        noteAttach(video, "webkitEnterFullscreen", "called");
+        noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
         setFs(true);
         return;
       }
-      noteAttach(video, "webkitEnterFullscreen", "failed_page_fs_fallback");
+      noteMedia(video, "webkitEnterFullscreen_failed_page_fs", sessionRef.current?.id);
       setPageFs(true);
       setFs(true);
       return;
@@ -414,16 +459,27 @@ export function Player({
     }
   };
 
-  const togglePlay = () => {
+  const togglePlay = (via: "chrome" | "keyboard" | "video_click" = "chrome") => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
+    if (video.paused) {
+      userPausedRef.current = false;
+      noteUserControl(video, "play", via);
+      void video.play();
+    } else {
+      userPausedRef.current = true;
+      noteUserControl(video, "pause", via);
+      viewDockPause(video, `togglePlay:${via}`);
+    }
   };
 
-  const seek = (ms: number) => {
+  const seek = (ms: number, source = "unknown") => {
     const video = videoRef.current;
     if (!video) return;
+    if (source === "slider" && Date.now() < suppressReplaceUntilRef.current) {
+      noteAttach(video, "slider_seek_ignored_after_fs", `ms=${ms}`);
+      return;
+    }
     const origin = originRef.current;
     const movieDur = sessionRef.current?.duration_ms ?? 0;
     const target = Math.max(0, movieDur > 0 ? Math.min(ms, movieDur) : ms);
@@ -439,6 +495,7 @@ export function Player({
       ignoreSeekableStart: engineRef.current === "native-hls",
     });
     if (!inWindow || attachBusyRef.current) {
+      noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: false, origin }));
       pendingSeekRef.current = target;
       setBuffering(true);
       if (attachBusyRef.current) return;
@@ -449,10 +506,19 @@ export function Player({
       return;
     }
     pendingSeekRef.current = null;
-    video.currentTime = Math.max(0, (target - origin) / 1000);
+    const rel = Math.max(0, (target - origin) / 1000);
+    noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: true, rel }));
+    noteCurrentTimeWrite(video, rel, "Player.seek", sessionRef.current?.id);
+    video.currentTime = rel;
   };
 
   const changeQuality = (q: string) => {
+    if (q === qualityRef.current) return;
+    if (Date.now() < suppressReplaceUntilRef.current) {
+      const video = videoRef.current;
+      if (video) noteAttach(video, "quality_change_ignored_after_fs", q);
+      return;
+    }
     qualityRef.current = q;
     const video = videoRef.current;
     resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
@@ -471,7 +537,7 @@ export function Player({
         seek(remote.positionMs);
       }
       if (remote.playing && video.paused) void video.play();
-      if (!remote.playing && !video.paused) video.pause();
+      if (!remote.playing && !video.paused) viewDockPause(video, "watchtogether.remote_pause");
     },
   });
 
@@ -480,7 +546,7 @@ export function Player({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "Space") {
         e.preventDefault();
-        togglePlay();
+        togglePlay("keyboard");
       }
       if (e.key === "f") toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
       if (e.key === "ArrowRight") seek(pos + 10_000);
@@ -523,7 +589,7 @@ export function Player({
         preload="auto"
         onClick={(e) => {
           e.stopPropagation();
-          togglePlay();
+          togglePlay("video_click");
         }}
       />
 
@@ -580,11 +646,11 @@ export function Player({
             min={0}
             max={Math.max(1, duration)}
             value={Math.min(pos, duration)}
-            onChange={(e) => seek(Number(e.target.value))}
+            onChange={(e) => seek(Number(e.target.value), "slider")}
             className="mb-3 h-8 w-full accent-[var(--accent)]"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={togglePlay} className="tap text-white" aria-label="Play pause">
+            <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
               {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
             </button>
             <span className="text-xs tabular-nums text-white/80">

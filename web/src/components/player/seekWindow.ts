@@ -1,3 +1,5 @@
+import { noteCurrentTimeWrite } from "@/playback/attachTrace";
+
 /** True if the movie timestamp can be seeked inside the current HLS/MSE window. */
 export function canSeekInWindow(opts: {
   targetMs: number;
@@ -52,6 +54,7 @@ export function holdNativeStart(
   });
   if (pin == null) return false;
   if (Math.abs((video.currentTime || 0) - pin) < 0.5) return false;
+  noteCurrentTimeWrite(video, pin, "holdNativeStart.pin");
   video.currentTime = pin;
   return true;
 }

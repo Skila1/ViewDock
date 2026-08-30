@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { noteAttach, readAttachTrace } from "@/playback/attachTrace";
+import { useEffect, useRef, useState } from "react";
+import { noteAttach, noteDisplayingFsChange, noteMedia, readAttachTrace } from "@/playback/attachTrace";
 import { inferDiagnosticOwner, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
 
@@ -22,6 +22,23 @@ function ranges(r: TimeRanges): string {
     out.push(`${r.start(i).toFixed(2)}-${r.end(i).toFixed(2)}`);
   }
   return out.join(", ") || "none";
+}
+
+function durationClocks(
+  video: HTMLVideoElement | null,
+  session: PlaybackSession | null,
+  trace: ReturnType<typeof readAttachTrace>,
+) {
+  const latest = trace.playlistSnaps[trace.playlistSnaps.length - 1];
+  return {
+    movie_duration_ms: session?.duration_ms ?? null,
+    playlist_listed_sec: latest?.sumExtinfSec ?? null,
+    playlist_segment_count: latest?.segmentCount ?? null,
+    video_duration: video && Number.isFinite(video.duration) ? video.duration : video?.duration ?? null,
+    seekable: video ? ranges(video.seekable) : "",
+    pinned_media_duration_sec: trace.pinnedDurationSec ?? null,
+    note: "movie_duration_ms is ffprobe. playlist_listed is generated HLS. video.duration/seekable should match the pinned movie length in AVKit. Playlist listed can still grow while remux runs.",
+  };
 }
 
 function sourceDetails(video: HTMLVideoElement | null) {
@@ -50,7 +67,8 @@ function snapshot(video: HTMLVideoElement | null, session: PlaybackSession | nul
     hls_attach: session?.hls_attach,
     movie_duration_ms: session?.duration_ms,
     video_duration: video && Number.isFinite(video.duration) ? video.duration : String(video?.duration ?? ""),
-    hls_listed_duration_ms: trace.playlistDurationMs ?? null,
+    duration_clocks: durationClocks(video, session, trace),
+    initial_hls_listed_duration_ms: trace.playlistDurationMs ?? null,
     playlist_type: trace.playlistType ?? null,
     seekable_from_ms: session?.seekable_from_ms,
     origin_ms: originMs,
@@ -81,17 +99,61 @@ function snapshot(video: HTMLVideoElement | null, session: PlaybackSession | nul
       ? [...video.querySelectorAll("source")].map((el) => el.type).join(",")
       : "",
     source_detail: sourceDetails(video),
+    fullscreen_trace: trace.fullscreenSnaps,
+    logical_positions: trace.logicalPositions,
+    currentTime_writes: trace.currentTimeWrites,
+    playlist_snaps: trace.playlistSnaps,
+    network_abort_summary: trace.abortSummary,
+    last_user_control: trace.userControls[trace.userControls.length - 1] ?? null,
+    viewdock_pause_calls: trace.viewdockPauses,
+    pause_attributions: trace.pauseAttributions,
+    hls_errors: trace.hlsErrors,
+    fs_window_log: trace.windowEvents.slice(-80),
     attach_log: trace.events.slice(-40),
   };
   return rows;
 }
 
+function copyDump(text: string, pre: HTMLElement | null): boolean {
+  try {
+    if (pre) {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      if (document.execCommand("copy")) {
+        sel?.removeAllRanges();
+        return true;
+      }
+      sel?.removeAllRanges();
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;width:2em;height:2em;opacity:0.01;border:none;padding:0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function PlaybackDiagnostics({ video, session, engine, originMs }: Props) {
   const [rows, setRows] = useState(() => snapshot(video, session, engine, originMs));
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+  const preRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
-    const tick = () => setRows(snapshot(video, session, engine, originMs));
+    const tick = () => {
+      if (video) noteDisplayingFsChange(video, session?.id);
+      setRows(snapshot(video, session, engine, originMs));
+    };
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
@@ -99,20 +161,14 @@ export function PlaybackDiagnostics({ video, session, engine, originMs }: Props)
 
   useEffect(() => {
     if (!video) return;
-    const mark = (ev: string) => {
-      noteAttach(
-        video,
-        ev,
-        `src=${video.currentSrc} t=${video.currentTime} rs=${video.readyState} fs=${String((video as AppleVideo).webkitDisplayingFullscreen)}`,
-      );
-    };
+    const mark = (ev: string) => noteMedia(video, ev, session?.id);
     const onBegin = () => mark("webkitbeginfullscreen");
     const onEnd = () => mark("webkitendfullscreen");
     const onMode = () => mark("webkitpresentationmodechanged");
     video.addEventListener("webkitbeginfullscreen", onBegin);
     video.addEventListener("webkitendfullscreen", onEnd);
     video.addEventListener("webkitpresentationmodechanged", onMode);
-    const mo = new MutationObserver(() => mark("source_children_changed"));
+    const mo = new MutationObserver(() => noteAttach(video, "source_children_changed", `count=${video.querySelectorAll("source").length}`));
     mo.observe(video, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "type"] });
     return () => {
       video.removeEventListener("webkitbeginfullscreen", onBegin);
@@ -120,7 +176,7 @@ export function PlaybackDiagnostics({ video, session, engine, originMs }: Props)
       video.removeEventListener("webkitpresentationmodechanged", onMode);
       mo.disconnect();
     };
-  }, [video]);
+  }, [video, session?.id]);
 
   const text = JSON.stringify(rows, null, 2);
 
@@ -133,18 +189,30 @@ export function PlaybackDiagnostics({ video, session, engine, originMs }: Props)
         <span className="font-medium">vd_debug</span>
         <button
           type="button"
-          className="rounded border border-white/30 px-1.5 py-0.5"
-          onClick={() => {
-            void navigator.clipboard.writeText(text).then(() => {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            });
+          className="tap min-h-8 min-w-[4.5rem] rounded border border-white/30 px-2 py-1"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const ok = copyDump(text, preRef.current);
+            if (!ok && window.isSecureContext && navigator.clipboard?.writeText) {
+              void navigator.clipboard.writeText(text).then(
+                () => {
+                  setCopied("ok");
+                  window.setTimeout(() => setCopied(null), 1500);
+                },
+                () => setCopied("fail"),
+              );
+              return;
+            }
+            setCopied(ok ? "ok" : "fail");
+            window.setTimeout(() => setCopied(null), 1500);
           }}
         >
-          {copied ? "copied" : "copy"}
+          {copied === "ok" ? "copied" : copied === "fail" ? "failed" : "copy"}
         </button>
       </div>
-      <pre className="whitespace-pre-wrap break-all">{text}</pre>
+      <pre ref={preRef} className="whitespace-pre-wrap break-all">{text}</pre>
     </div>
   );
 }
