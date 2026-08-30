@@ -1,7 +1,11 @@
-import { mseHlsAvailable, nativeHlsSupported, sessionUrl } from "@/api/profile";
+import { nativeHlsSupported, sessionUrl } from "@/api/profile";
+import { isAppleWebKitPlayer } from "@/lib/device";
+import { addAirPlayAlternate, disableRemotePlaybackForMms } from "@/playback/airplay";
+import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
+  engine: PlaybackEngine;
   destroy: () => void;
 };
 
@@ -22,11 +26,14 @@ export async function attachSession(
     if (!aborted) onGone();
   };
 
+  prepareVideo(video);
+
   if (session.delivery === "direct") {
     const src = sessionUrl(session.urls, "file", "direct", "media");
     if (!src) throw new Error("session missing urls.file");
     video.src = src;
     return {
+      engine: "direct",
       destroy() {
         aborted = true;
         video.removeAttribute("src");
@@ -39,25 +46,16 @@ export async function attachSession(
   if (!playlist) throw new Error("session missing HLS url");
   await waitForPlaylist(playlist);
 
-  prepareVideo(video);
-
-  // iOS native HLS (AVPlayer) treats EVENT playlists as LIVE until EXT-X-ENDLIST.
-  // iOS 17.1+ exposes ManagedMediaSource; hls.js uses that and we keep a VOD clock.
   const { default: Hls } = await import("hls.js");
-  if (Hls.isSupported() || mseHlsAvailable()) {
-    try {
-      return await attachWithHls(video, playlist, Hls, () => aborted, gone);
-    } catch (err) {
-      if (aborted || !nativeHlsSupported()) throw err;
-      // HEVC fMP4 can fail on ManagedMediaSource; last resort is AVPlayer.
-      return attachNativeHls(video, playlist, () => aborted, gone);
-    }
-  }
-  if (nativeHlsSupported()) {
-    return attachNativeHls(video, playlist, () => aborted, gone);
-  }
+  const engine = selectEngine(session.delivery, {
+    hlsJsSupported: Hls.isSupported(),
+    nativeHls: nativeHlsSupported(),
+  });
 
-  throw new Error("HLS is not supported in this browser");
+  if (engine === "hlsjs") {
+    return attachWithHls(video, playlist, Hls, () => aborted, gone);
+  }
+  return attachNativeHls(video, playlist, () => aborted, gone);
 }
 
 function prepareVideo(video: HTMLVideoElement) {
@@ -65,26 +63,6 @@ function prepareVideo(video: HTMLVideoElement) {
   video.playsInline = true;
   video.setAttribute("playsinline", "");
   video.setAttribute("webkit-playsinline", "");
-  video.setAttribute("x-webkit-airplay", "allow");
-}
-
-/** Safari opens MMS if remote playback is disabled *or* an HLS source exists.
- *  Keep the HLS sibling so AirPlay / webkitEnterFullscreen can hand off to AVKit.
- *  https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/ */
-function addNativeHlsSource(video: HTMLVideoElement, playlist: string) {
-  let src = video.querySelector<HTMLSourceElement>("source[data-vd-hls]");
-  if (!src) {
-    src = document.createElement("source");
-    src.setAttribute("data-vd-hls", "1");
-    video.appendChild(src);
-  }
-  src.type = "application/x-mpegURL";
-  src.src = playlist;
-  video.disableRemotePlayback = false;
-  video.removeAttribute("disableremoteplayback");
-}
-
-function removeNativeHlsSource(video: HTMLVideoElement) {
   video.querySelectorAll("source[data-vd-hls]").forEach((el) => el.remove());
 }
 
@@ -119,8 +97,14 @@ async function attachWithHls(
     }
   };
   hls.on(Hls.Events.ERROR, onHlsError);
+  // MMS sourceopen requires disableRemotePlayback or an AirPlay sibling.
+  // Set the flag first so attach can open; add the sibling after hls.js
+  // inserts its blob <source>, then re-enable remote playback.
+  disableRemotePlaybackForMms(video);
   hls.attachMedia(video);
-  addNativeHlsSource(video, playlist);
+  if (isAppleWebKitPlayer()) {
+    addAirPlayAlternate(video, playlist);
+  }
   hls.loadSource(playlist);
   try {
     await waitHlsBuffered(
@@ -130,15 +114,17 @@ async function attachWithHls(
       Hls,
     );
   } catch (err) {
-    removeNativeHlsSource(video);
     hls.destroy();
     if (fatalErr) throw fatalErr;
     throw err;
   }
   return {
+    engine: "hlsjs",
     destroy() {
-      removeNativeHlsSource(video);
       hls.destroy();
+      video.removeAttribute("src");
+      video.querySelectorAll("source").forEach((el) => el.remove());
+      video.load();
     },
   };
 }
@@ -165,6 +151,7 @@ async function attachNativeHls(
     throw err;
   }
   return {
+    engine: "native-hls",
     destroy() {
       video.removeEventListener("error", onError);
       video.removeAttribute("src");

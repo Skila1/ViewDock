@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -213,8 +214,12 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		b, err := os.ReadFile(path)
 		if err == nil && hls.MediaReady(s.Dir, b) {
 			body := hls.WithStartAtZero(hls.RewritePlaylist(b, a.playlistToken(s)))
+			snap := hls.Inspect(body)
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-VD-Playlist-Type", snap.Type)
+			w.Header().Set("X-VD-Playlist-Duration-Ms", strconv.FormatInt(snap.PlaylistDurationMS, 10))
+			w.Header().Set("X-VD-Movie-Duration-Ms", strconv.FormatInt(s.DurationMS, 10))
 			w.WriteHeader(200)
 			_, _ = w.Write(body)
 			return

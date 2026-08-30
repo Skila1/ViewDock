@@ -79,3 +79,20 @@ func TestBuildArgs_BothTranscode(t *testing.T) {
 		t.Fatalf("want full transcode: %v", args)
 	}
 }
+
+func TestBuildArgs_HLSIsGrowingEvent(t *testing.T) {
+	args, err := BuildArgs(Opts{
+		AbsPath: "/media/x.mkv", SessionDir: "/cache/s1",
+		CopyVideo: false, CopyAudio: false, SrcHeight: 1080,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSeq(args, "-hls_playlist_type", "event") {
+		t.Fatalf("in-progress movies must be EVENT, got %v", args)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "vod") {
+		t.Fatal("do not advertise VOD while FFmpeg is still appending")
+	}
+}

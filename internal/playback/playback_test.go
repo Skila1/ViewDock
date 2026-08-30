@@ -348,7 +348,7 @@ func TestPlaylistPendingNot410(t *testing.T) {
 	sess := &Session{
 		ID: "s1", Kind: "user", UserID: "u1", Dir: dir,
 		Stoken: "tok", StokenExp: time.Now().Add(time.Hour),
-		Created: time.Now(), LastPing: time.Now(),
+		Created: time.Now(), LastPing: time.Now(), DurationMS: 7_200_000,
 	}
 	api.Reg.Put(sess)
 
@@ -390,6 +390,12 @@ func TestPlaylistPendingNot410(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "stoken=tok") {
 		t.Fatalf("expected same stoken, got %s", rec.Body.String())
+	}
+	if rec.Header().Get("X-VD-Movie-Duration-Ms") != "7200000" {
+		t.Fatalf("movie duration header %q", rec.Header().Get("X-VD-Movie-Duration-Ms"))
+	}
+	if rec.Header().Get("X-VD-Playlist-Duration-Ms") != "2000" {
+		t.Fatalf("playlist window header %q", rec.Header().Get("X-VD-Playlist-Duration-Ms"))
 	}
 
 	api.Reg.Delete("s1")

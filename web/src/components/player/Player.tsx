@@ -11,13 +11,14 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
-import { usingNativeHls } from "@/api/profile";
 import { cn } from "@/lib/cn";
-import { enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen } from "@/lib/device";
+import { enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
+import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
 import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
+import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { canSeekInWindow, holdNativeStart, seekableBounds } from "./seekWindow";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
@@ -70,6 +71,10 @@ export function Player({
   const [buffering, setBuffering] = useState(true);
   const attachedAtRef = useRef(0);
   const lastStablePosRef = useRef(startMs);
+  const genRef = useRef(0);
+  const engineRef = useRef<PlaybackEngine | null>(null);
+  const [engine, setEngine] = useState<PlaybackEngine | null>(null);
+  const debug = debugPlaybackEnabled();
 
   const bump = useCallback((ev: PlayerEvent) => {
     const next = reducePlayer(phaseRef.current, ev);
@@ -111,6 +116,7 @@ export function Player({
       else if (reason === "GONE") bump("GONE");
       else bump("START");
       attachBusyRef.current = true;
+      const gen = genRef.current;
       setBuffering(true);
       setErr(null);
       try {
@@ -120,6 +126,7 @@ export function Player({
         const replaceId = sessionRef.current?.id;
         await endRemote();
         teardownAttach();
+        if (genRef.current !== gen) return;
         const sess = await api.createSession({
           item_kind: itemKind,
           item_id: itemId,
@@ -127,6 +134,14 @@ export function Player({
           quality: qualityRef.current,
           replace_session_id: replaceId,
         });
+        if (genRef.current !== gen) {
+          try {
+            await api.endSession(sess.id);
+          } catch {
+            /* superseded */
+          }
+          return;
+        }
         sessionRef.current = sess;
         originRef.current = sess.seekable_from_ms ?? startAt;
         setSession(sess);
@@ -140,10 +155,16 @@ export function Player({
           setResumeMs(ms);
           void createAndAttach("GONE");
         });
+        if (genRef.current !== gen) {
+          teardownAttach();
+          return;
+        }
+        engineRef.current = attachRef.current.engine;
+        setEngine(attachRef.current.engine);
         bump("ATTACHED");
         attachedAtRef.current = Date.now();
         lastStablePosRef.current = originRef.current;
-        if (usingNativeHls()) {
+        if (attachRef.current.engine === "native-hls") {
           video.controls = false;
           if (video.currentTime > 0.25) video.currentTime = 0;
         }
@@ -157,7 +178,7 @@ export function Player({
         pendingSeekRef.current = null;
         try {
           await video.play();
-          if (usingNativeHls() && video.currentTime > 0.25) {
+          if (engineRef.current === "native-hls" && video.currentTime > 0.25) {
             video.currentTime = 0;
           }
           setBuffering(false);
@@ -194,17 +215,19 @@ export function Player({
         setErr(e instanceof Error ? e.message : "playback failed");
         bump("ERROR");
       } finally {
-        attachBusyRef.current = false;
+        if (genRef.current === gen) attachBusyRef.current = false;
       }
     },
     [bump, itemId, itemKind, setPhase, setResumeMs, setSession],
   );
 
   useEffect(() => {
+    genRef.current += 1;
     resumeRef.current = startMs;
     setResumeMs(startMs);
     void createAndAttach("START");
     return () => {
+      genRef.current += 1;
       const sess = sessionRef.current;
       const video = videoRef.current;
       const origin = sess?.seekable_from_ms ?? originRef.current;
@@ -236,7 +259,7 @@ export function Player({
       const origin = originRef.current;
       const rel = video.currentTime || 0;
       const ms = origin + rel * 1000;
-      if (usingNativeHls() && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
+      if (engineRef.current === "native-hls" && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
         return;
       }
       lastStablePosRef.current = ms;
@@ -349,8 +372,7 @@ export function Player({
       setFs(false);
       return;
     }
-    // iPhone has no element Fullscreen API. AVKit only opens from this tap.
-    if (isIOSDevice() || usingNativeHls()) {
+    if (fullscreenStrategy() === "avkit") {
       if (enterNativeFullscreen(video)) {
         setFs(true);
         return;
@@ -399,7 +421,7 @@ export function Player({
       originMs: origin,
       seekableStartSec: bounds.startSec,
       seekableEndSec: bounds.endSec,
-      ignoreSeekableStart: usingNativeHls(),
+      ignoreSeekableStart: engineRef.current === "native-hls",
     });
     if (!inWindow || attachBusyRef.current) {
       pendingSeekRef.current = target;
@@ -429,8 +451,9 @@ export function Player({
     onRemote: (remote) => {
       const video = videoRef.current;
       if (!video) return;
-      if (Math.abs(video.currentTime * 1000 - remote.positionMs) > 1500) {
-        video.currentTime = remote.positionMs / 1000;
+      const movieMs = originRef.current + (video.currentTime || 0) * 1000;
+      if (Math.abs(movieMs - remote.positionMs) > 1500) {
+        seek(remote.positionMs);
       }
       if (remote.playing && video.paused) void video.play();
       if (!remote.playing && !video.paused) video.pause();
@@ -460,9 +483,7 @@ export function Player({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, pos]);
 
-  const duration = (session?.duration_ms && session.duration_ms > 0)
-    ? session.duration_ms
-    : (Number.isFinite(dur) && dur > 0 ? dur : 0);
+  const duration = movieDurationMs(session, dur);
   const qualities = session?.qualities ?? [];
   const attaching =
     phase === "creatingSession" ||
@@ -485,12 +506,15 @@ export function Player({
         className="h-full w-full object-contain"
         playsInline
         preload="auto"
-        x-webkit-airplay="allow"
         onClick={(e) => {
           e.stopPropagation();
           togglePlay();
         }}
       />
+
+      {debug ? (
+        <PlaybackDiagnostics video={videoRef.current} session={session} engine={engine} originMs={originRef.current} />
+      ) : null}
 
       {togetherCode || wt.room ? (
         <WatchTogetherOverlay
