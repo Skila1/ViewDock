@@ -13,6 +13,7 @@ import {
 import { api, ApiError } from "@/api/api";
 import { nativeHlsSupported } from "@/api/profile";
 import { cn } from "@/lib/cn";
+import { enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
@@ -56,6 +57,7 @@ export function Player({
   const [showUi, setShowUi] = useState(true);
   const [muted, setMuted] = useState(false);
   const [fs, setFs] = useState(false);
+  const [pageFs, setPageFs] = useState(false);
   const [pos, setPos] = useState(0);
   const [dur, setDur] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -310,19 +312,70 @@ export function Player({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !nativeHlsSupported()) return;
+    if (!video) return;
     video.setAttribute("playsinline", "");
     video.setAttribute("webkit-playsinline", "");
     video.setAttribute("x-webkit-airplay", "allow");
+    const sync = () => {
+      setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
+    };
     const onFs = () => setFs(true);
-    const onFsEnd = () => setFs(false);
+    const onFsEnd = () => {
+      setFs(false);
+      setPageFs(false);
+    };
     video.addEventListener("webkitbeginfullscreen", onFs);
     video.addEventListener("webkitendfullscreen", onFsEnd);
+    video.addEventListener("webkitpresentationmodechanged", sync);
+    document.addEventListener("fullscreenchange", sync);
     return () => {
       video.removeEventListener("webkitbeginfullscreen", onFs);
       video.removeEventListener("webkitendfullscreen", onFsEnd);
+      video.removeEventListener("webkitpresentationmodechanged", sync);
+      document.removeEventListener("fullscreenchange", sync);
     };
-  }, []);
+  }, [pageFs]);
+
+  const toggleFullscreen = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const video = videoRef.current;
+    const root = video?.parentElement;
+    if (!video) return;
+    if (document.fullscreenElement || isNativeFullscreen(video) || pageFs) {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      exitNativeFullscreen(video);
+      setPageFs(false);
+      setFs(false);
+      return;
+    }
+    // iOS consumes the tap if we await requestFullscreen first; call WebKit sync.
+    if (isIOSDevice() || nativeHlsSupported()) {
+      if (enterNativeFullscreen(video)) {
+        setFs(true);
+        return;
+      }
+      setPageFs(true);
+      setFs(true);
+      return;
+    }
+    const req = root?.requestFullscreen?.() ?? video.requestFullscreen?.();
+    if (req) {
+      void req.then(() => setFs(true)).catch(() => {
+        if (enterNativeFullscreen(video)) setFs(true);
+        else {
+          setPageFs(true);
+          setFs(true);
+        }
+      });
+      return;
+    }
+    if (enterNativeFullscreen(video)) setFs(true);
+    else {
+      setPageFs(true);
+      setFs(true);
+    }
+  };
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -391,7 +444,7 @@ export function Player({
         e.preventDefault();
         togglePlay();
       }
-      if (e.key === "f") void videoRef.current?.parentElement?.requestFullscreen();
+      if (e.key === "f") toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
       if (e.key === "ArrowRight") seek(pos + 10_000);
       if (e.key === "ArrowLeft") seek(Math.max(0, pos - 10_000));
       if (e.key === "m") {
@@ -420,7 +473,10 @@ export function Player({
 
   return (
     <div
-      className="relative h-dvh w-dvw overflow-hidden bg-black overscroll-none"
+      className={cn(
+        "relative h-dvh w-dvw overflow-hidden bg-black overscroll-none",
+        pageFs && "player-page-fs",
+      )}
       onMouseMove={reveal}
       onClick={reveal}
     >
@@ -534,16 +590,7 @@ export function Player({
                 type="button"
                 className="tap text-white"
                 aria-label="Fullscreen"
-                onClick={() => {
-                  const root = videoRef.current?.parentElement;
-                  if (!document.fullscreenElement) {
-                    void root?.requestFullscreen();
-                    setFs(true);
-                  } else {
-                    void document.exitFullscreen();
-                    setFs(false);
-                  }
-                }}
+                onClick={toggleFullscreen}
               >
                 {fs ? <Minimize size={18} /> : <Maximize size={18} />}
               </button>
