@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { PlaybackEngine } from "@/playback/policy";
+import { noteAttach, readAttachTrace } from "@/playback/attachTrace";
+import { inferDiagnosticOwner, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
 
 type AppleVideo = HTMLVideoElement & {
@@ -23,18 +24,38 @@ function ranges(r: TimeRanges): string {
   return out.join(", ") || "none";
 }
 
+function sourceDetails(video: HTMLVideoElement | null) {
+  if (!video) return [];
+  return [...video.querySelectorAll("source")].map((el) => ({
+    type: el.type || el.getAttribute("type") || "",
+    src: (el.getAttribute("src") || "").slice(0, 96),
+    data_vd_hls: el.getAttribute("data-vd-hls"),
+    data_vd_airplay: el.getAttribute("data-vd-airplay"),
+  }));
+}
+
 function snapshot(video: HTMLVideoElement | null, session: PlaybackSession | null, engine: PlaybackEngine | null, originMs: number) {
   const apple = video as AppleVideo | null;
-  const rows: Record<string, string | number | boolean | null | undefined> = {
+  const trace = readAttachTrace(video);
+  const owner = inferDiagnosticOwner(video, session, engine);
+  const rows: Record<string, unknown> = {
     user_agent: typeof navigator !== "undefined" ? navigator.userAgent : "",
     platform: typeof navigator !== "undefined" ? navigator.platform : "",
-    engine,
+    engine: owner,
+    attach_engine: engine,
+    engine_reason: trace.engineReason ?? null,
+    hls_js_supported: trace.hlsJsSupported ?? null,
     session_id: session?.id,
     delivery: session?.delivery,
     hls_attach: session?.hls_attach,
-    duration_ms: session?.duration_ms,
+    movie_duration_ms: session?.duration_ms,
+    video_duration: video && Number.isFinite(video.duration) ? video.duration : String(video?.duration ?? ""),
+    hls_listed_duration_ms: trace.playlistDurationMs ?? null,
+    playlist_type: trace.playlistType ?? null,
     seekable_from_ms: session?.seekable_from_ms,
     origin_ms: originMs,
+    seekable_window: video ? ranges(video.seekable) : "",
+    buffered: video ? ranges(video.buffered) : "",
     video_action: session?.decision?.video?.action,
     audio_action: session?.decision?.audio?.action,
     playback: session?.decision?.playback,
@@ -44,21 +65,23 @@ function snapshot(video: HTMLVideoElement | null, session: PlaybackSession | nul
     networkState: video?.networkState,
     paused: video?.paused,
     ended: video?.ended,
-    duration: video && Number.isFinite(video.duration) ? video.duration : String(video?.duration),
     currentTime: video?.currentTime,
-    seekable: video ? ranges(video.seekable) : "",
-    buffered: video ? ranges(video.buffered) : "",
     webkitDisplayingFullscreen: apple?.webkitDisplayingFullscreen,
     webkitPresentationMode: apple?.webkitPresentationMode,
     webkitSupportsFullscreen: apple?.webkitSupportsFullscreen,
     disableRemotePlayback: video?.disableRemotePlayback,
+    airplay_policy: trace.airplayPolicy ?? "none",
+    airplay_alternate: Boolean(video?.querySelector("source[data-vd-airplay]")),
     managedMediaSource: typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined",
     mediaSource: typeof MediaSource !== "undefined",
+    mms_available: trace.mmsAvailable ?? null,
+    mse_available: trace.mseAvailable ?? null,
     source_children: video?.querySelectorAll("source").length ?? 0,
     source_types: video
       ? [...video.querySelectorAll("source")].map((el) => el.type).join(",")
       : "",
-    airplay_alternate: Boolean(video?.querySelector("source[data-vd-airplay]")),
+    source_detail: sourceDetails(video),
+    attach_log: trace.events.slice(-40),
   };
   return rows;
 }
@@ -73,6 +96,31 @@ export function PlaybackDiagnostics({ video, session, engine, originMs }: Props)
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [video, session, engine, originMs]);
+
+  useEffect(() => {
+    if (!video) return;
+    const mark = (ev: string) => {
+      noteAttach(
+        video,
+        ev,
+        `src=${video.currentSrc} t=${video.currentTime} rs=${video.readyState} fs=${String((video as AppleVideo).webkitDisplayingFullscreen)}`,
+      );
+    };
+    const onBegin = () => mark("webkitbeginfullscreen");
+    const onEnd = () => mark("webkitendfullscreen");
+    const onMode = () => mark("webkitpresentationmodechanged");
+    video.addEventListener("webkitbeginfullscreen", onBegin);
+    video.addEventListener("webkitendfullscreen", onEnd);
+    video.addEventListener("webkitpresentationmodechanged", onMode);
+    const mo = new MutationObserver(() => mark("source_children_changed"));
+    mo.observe(video, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "type"] });
+    return () => {
+      video.removeEventListener("webkitbeginfullscreen", onBegin);
+      video.removeEventListener("webkitendfullscreen", onEnd);
+      video.removeEventListener("webkitpresentationmodechanged", onMode);
+      mo.disconnect();
+    };
+  }, [video]);
 
   const text = JSON.stringify(rows, null, 2);
 

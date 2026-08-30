@@ -2,6 +2,7 @@ import { isIOSDevice } from "@/lib/device";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type PlaybackEngine = "direct" | "hlsjs" | "native-hls";
+export type DiagnosticOwner = "hls-mms" | "hls-mse" | "native-hls" | "direct-file";
 export type FullscreenStrategy = "avkit" | "element";
 
 export type EngineCaps = {
@@ -36,4 +37,24 @@ export function debugPlaybackEnabled(): boolean {
   } catch {
     return false;
   }
+}
+
+export function inferDiagnosticOwner(
+  video: HTMLVideoElement | null,
+  session: PlaybackSession | null | undefined,
+  engine: PlaybackEngine | null,
+): DiagnosticOwner | null {
+  if (engine === "direct" || session?.delivery === "direct") return "direct-file";
+  if (engine === "hlsjs" || session?.hls_attach === "mse") return mseOwner();
+  if (engine === "native-hls" || session?.hls_attach === "native") return "native-hls";
+  const src = video?.currentSrc ?? "";
+  if (src.startsWith("blob:")) return mseOwner();
+  if (src.includes(".m3u8")) return "native-hls";
+  return null;
+}
+
+function mseOwner(): DiagnosticOwner {
+  const g = globalThis as { ManagedMediaSource?: unknown; MediaSource?: unknown };
+  if (typeof g.ManagedMediaSource !== "undefined") return "hls-mms";
+  return "hls-mse";
 }

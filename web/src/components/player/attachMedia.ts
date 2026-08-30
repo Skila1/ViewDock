@@ -1,5 +1,6 @@
 import { nativeHlsSupported, sessionUrl } from "@/api/profile";
 import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/airplay";
+import { noteAttach, setAttachMeta } from "@/playback/attachTrace";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
 
@@ -19,6 +20,7 @@ export async function attachSession(
   video: HTMLVideoElement,
   session: PlaybackSession,
   onGone: () => void,
+  onEngine?: (engine: PlaybackEngine) => void,
 ): Promise<AttachHandle> {
   let aborted = false;
   const gone = () => {
@@ -26,11 +28,13 @@ export async function attachSession(
   };
 
   prepareVideo(video);
+  noteAttach(video, "prepareVideo");
 
   if (session.delivery === "direct") {
     const src = sessionUrl(session.urls, "file", "direct", "media");
     if (!src) throw new Error("session missing urls.file");
     video.src = src;
+    onEngine?.("direct");
     return {
       engine: "direct",
       destroy() {
@@ -43,13 +47,27 @@ export async function attachSession(
 
   const playlist = sessionUrl(session.urls, "hls", "playlist", "index", "master");
   if (!playlist) throw new Error("session missing HLS url");
-  await waitForPlaylist(playlist);
+  const playlistMeta = await waitForPlaylist(playlist);
+  setAttachMeta(video, {
+    playlistType: playlistMeta.type,
+    playlistDurationMs: playlistMeta.durationMs,
+  });
+  noteAttach(video, "playlist_ready", `type=${playlistMeta.type || "?"} listed_ms=${playlistMeta.durationMs ?? "?"}`);
 
   const { default: Hls } = await import("hls.js");
   const engine = selectEngine(session.delivery, {
     hlsJsSupported: Hls.isSupported(),
     nativeHls: nativeHlsSupported(),
   });
+  const reason = `${engine} hlsJsSupported=${Hls.isSupported()} nativeHls=${nativeHlsSupported()} hls_attach=${session.hls_attach ?? ""}`;
+  setAttachMeta(video, {
+    engineReason: reason,
+    hlsJsSupported: Hls.isSupported(),
+    mmsAvailable: typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined",
+    mseAvailable: typeof MediaSource !== "undefined",
+  });
+  noteAttach(video, "engine_selected", reason);
+  onEngine?.(engine);
 
   if (engine === "hlsjs") {
     return attachWithHls(video, playlist, Hls, () => aborted, gone);
@@ -96,11 +114,31 @@ async function attachWithHls(
     }
   };
   hls.on(Hls.Events.ERROR, onHlsError);
+  hls.on(Hls.Events.MEDIA_ATTACHING, () => noteAttach(video, "hls:MEDIA_ATTACHING"));
+  hls.on(Hls.Events.MEDIA_ATTACHED, () => noteAttach(video, "hls:MEDIA_ATTACHED"));
+  hls.on(Hls.Events.MANIFEST_LOADING, () => noteAttach(video, "hls:MANIFEST_LOADING"));
+  hls.on(Hls.Events.MANIFEST_PARSED, () => noteAttach(video, "hls:MANIFEST_PARSED"));
+  const hookMediaSource = () => {
+    const ms = (hls as unknown as { mediaSource?: EventTarget & { readyState?: string } }).mediaSource;
+    if (!ms?.addEventListener || (ms as { _vdHooked?: boolean })._vdHooked) return;
+    (ms as { _vdHooked?: boolean })._vdHooked = true;
+    ms.addEventListener("sourceopen", () => noteAttach(video, "sourceopen", ms.readyState));
+    ms.addEventListener("sourceclose", () => noteAttach(video, "sourceclose", ms.readyState));
+    ms.addEventListener("sourceended", () => noteAttach(video, "sourceended", ms.readyState));
+  };
+  hls.on(Hls.Events.MEDIA_ATTACHING, hookMediaSource);
+  hls.on(Hls.Events.MEDIA_ATTACHED, hookMediaSource);
+  video.addEventListener("loadedmetadata", () => noteAttach(video, "video:loadedmetadata", `duration=${video.duration}`), { once: true });
   // MMS sourceopen requires disableRemotePlayback. Do not add an HLS
   // <source> sibling — Safari plays that inline and fights hls.js.
   disableRemotePlaybackForMms(video);
+  setAttachMeta(video, { airplayPolicy: "skipped_intentional_dual_owner" });
+  noteAttach(video, "disableRemotePlayback", "true");
+  noteAttach(video, "airplay_sibling", "skipped_intentional_dual_owner");
   hls.attachMedia(video);
+  noteAttach(video, "hls.attachMedia");
   hls.loadSource(playlist);
+  noteAttach(video, "hls.loadSource");
   try {
     await waitHlsBuffered(
       hls as unknown as { on: (ev: string, cb: () => void) => void; off: (ev: string, cb: () => void) => void },
@@ -155,7 +193,7 @@ async function attachNativeHls(
   };
 }
 
-async function waitForPlaylist(url: string): Promise<void> {
+async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs?: number }> {
   const deadline = Date.now() + 50_000;
   while (Date.now() < deadline) {
     const res = await fetch(url, { credentials: "include" });
@@ -165,7 +203,11 @@ async function waitForPlaylist(url: string): Promise<void> {
     if (res.ok) {
       const text = await res.text();
       if (text.includes("#EXTINF") || /seg\d+\.(m4s|ts)/.test(text)) {
-        return;
+        const listed = Number(res.headers.get("X-VD-Playlist-Duration-Ms"));
+        return {
+          type: res.headers.get("X-VD-Playlist-Type") || undefined,
+          durationMs: Number.isFinite(listed) && listed > 0 ? listed : undefined,
+        };
       }
     }
     await new Promise((r) => setTimeout(r, 800));

@@ -14,6 +14,7 @@ import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
 import { enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
+import { noteAttach } from "@/playback/attachTrace";
 import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
@@ -145,16 +146,28 @@ export function Player({
         sessionRef.current = sess;
         originRef.current = sess.seekable_from_ms ?? startAt;
         setSession(sess);
+        const predicted: PlaybackEngine = sess.delivery === "direct" ? "direct" : sess.hls_attach === "native" ? "native-hls" : "hlsjs";
+        engineRef.current = predicted;
+        setEngine(predicted);
         if (sess.duration_ms && sess.duration_ms > 0) setDur(sess.duration_ms);
         setPos(originRef.current);
         bump("SESSION_CREATED");
-        attachRef.current = await attachSession(video, sess, () => {
-          const ms = originRef.current + (video.currentTime || 0) * 1000;
-          resumeRef.current = ms;
-          pendingSeekRef.current = ms;
-          setResumeMs(ms);
-          void createAndAttach("GONE");
-        });
+        attachRef.current = await attachSession(
+          video,
+          sess,
+          () => {
+            const ms = originRef.current + (video.currentTime || 0) * 1000;
+            resumeRef.current = ms;
+            pendingSeekRef.current = ms;
+            setResumeMs(ms);
+            void createAndAttach("GONE");
+          },
+          (eng) => {
+            if (genRef.current !== gen) return;
+            engineRef.current = eng;
+            setEngine(eng);
+          },
+        );
         if (genRef.current !== gen) {
           teardownAttach();
           return;
@@ -372,10 +385,13 @@ export function Player({
       return;
     }
     if (fullscreenStrategy() === "avkit") {
+      noteAttach(video, "fullscreen_tap", `src=${video.currentSrc} t=${video.currentTime} session=${sessionRef.current?.id ?? ""}`);
       if (enterNativeFullscreen(video)) {
+        noteAttach(video, "webkitEnterFullscreen", "called");
         setFs(true);
         return;
       }
+      noteAttach(video, "webkitEnterFullscreen", "failed_page_fs_fallback");
       setPageFs(true);
       setFs(true);
       return;
