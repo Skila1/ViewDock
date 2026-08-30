@@ -50,9 +50,16 @@ export function ProfilePage() {
           Signed in as {me?.username}
           {me?.roles?.length ? ` · ${me.roles.join(", ")}` : null}
         </p>
-        <Link to="/settings/connected" className="mt-1 inline-block text-sm text-accent">
-          Connected services
-        </Link>
+        <div className="mt-2 flex flex-wrap gap-3 text-sm">
+          <Link to="/settings/connected" className="text-accent">
+            Connected services
+          </Link>
+          {me?.is_admin ? (
+            <Link to="/admin" className="text-accent">
+              Admin
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <form onSubmit={saveProfile} className="space-y-2">
@@ -192,7 +199,7 @@ export function ProfilePage() {
         <h2 className="mb-2 text-sm font-medium">Sessions</h2>
         <ul className="divide-y divide-line rounded-md border border-line">
           {(sessions.data ?? []).map((sess) => (
-            <li key={sess.id} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+            <li key={sess.id} className="flex flex-col gap-2 px-3 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
               <span>
                 {sess.current ? <span className="text-accent">This device · </span> : null}
                 {sess.ip || "unknown IP"}

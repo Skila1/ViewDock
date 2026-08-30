@@ -23,13 +23,18 @@ export function AdminLayout() {
 
   return (
     <div>
-      <nav className="mb-4 flex flex-wrap gap-3 text-sm">
+      <nav className="h-scroll mb-4 flex gap-1 pb-1 text-sm">
         {links.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
             end={l.end}
-            className={({ isActive }) => cn("text-dim", isActive && "text-ink")}
+            className={({ isActive }) =>
+              cn(
+                "tap shrink-0 rounded-full px-3 text-dim",
+                isActive && "bg-overlay text-ink",
+              )
+            }
           >
             {l.label}
           </NavLink>

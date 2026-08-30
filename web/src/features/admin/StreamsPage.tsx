@@ -9,7 +9,8 @@ export function StreamsPage() {
   return (
     <div>
       <h1 className="mb-3 text-base font-medium">Streams</h1>
-      <table className="w-full text-left text-sm">
+      <div className="h-scroll">
+      <table className="w-full min-w-[520px] text-left text-sm">
         <thead className="text-xs text-dim">
           <tr>
             <th className="py-1 font-normal">Session</th>
@@ -36,6 +37,7 @@ export function StreamsPage() {
           })}
         </tbody>
       </table>
+      </div>
       {rows.length === 0 ? <p className="mt-3 text-xs text-dim">No live sessions.</p> : null}
     </div>
   );

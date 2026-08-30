@@ -28,10 +28,10 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-bg p-6">
+    <div className="flex min-h-dvh items-center justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
       <form onSubmit={onSubmit} className="w-full max-w-xs space-y-3 rounded-2xl border border-line bg-raised p-6">
-        <Logo className="h-12 w-12" />
-        <h1 className="text-lg font-semibold tracking-tight">ViewDock</h1>
+        <Logo className="mx-auto h-24 w-24" />
+        <h1 className="text-center text-lg font-semibold tracking-tight">ViewDock</h1>
         <input
           autoComplete="username"
           placeholder="Username"
@@ -48,13 +48,13 @@ export function LoginPage() {
           className="w-full"
         />
         {err ? <p className="text-xs text-danger">{err}</p> : null}
-        <button type="submit" className="btn-green w-full rounded-full py-2 text-sm">
+        <button type="submit" className="btn-green tap w-full rounded-full text-sm">
           Sign in
         </button>
         {system?.discord_configured ? (
           <a
             href="/api/v1/auth/discord"
-            className="block w-full rounded-full border border-line py-2 text-center text-sm"
+            className="tap flex w-full items-center justify-center rounded-full border border-line text-sm"
           >
             Continue with Discord
           </a>

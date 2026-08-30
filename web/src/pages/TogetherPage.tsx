@@ -63,7 +63,7 @@ export function TogetherPage({ guest }: Props) {
 
   if (guest && meta?.needs_password && !unlocked) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-bg p-6">
+      <div className="flex min-h-dvh items-center justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
         <form onSubmit={onUnlock} className="w-full max-w-xs space-y-3 rounded-lg border border-line bg-raised p-5">
           <h1 className="text-base font-medium">Unlock share to join</h1>
           <input

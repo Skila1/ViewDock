@@ -27,7 +27,7 @@ export function WatchTogetherOverlay({
   };
 
   return (
-    <aside className="pointer-events-auto absolute top-14 right-3 z-20 w-64 rounded-lg border border-line bg-overlay/95 p-3 text-sm shadow-lg backdrop-blur">
+    <aside className="pointer-events-auto absolute top-16 right-3 z-20 max-w-[calc(100vw-1.5rem)] w-64 rounded-lg border border-line bg-overlay/95 p-3 text-sm shadow-lg backdrop-blur">
       <div className="mb-2 flex items-center gap-2 text-ink">
         <Radio size={14} className="text-accent" />
         <span className="font-medium">Watch Together</span>

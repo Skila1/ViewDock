@@ -24,7 +24,7 @@ export function MovieDetailPage() {
 
   return (
     <div className="flex flex-col gap-5 sm:flex-row">
-      <div className="poster-tile w-[160px] shrink-0 overflow-hidden rounded-md bg-raised">
+      <div className="poster-tile mx-auto w-[42%] max-w-[180px] shrink-0 overflow-hidden rounded-md bg-raised sm:mx-0 sm:w-[160px]">
         {movie.poster_url ? (
           <img src={movie.poster_url} alt="" className="h-full w-full object-cover" />
         ) : null}
@@ -44,7 +44,7 @@ export function MovieDetailPage() {
           <WatchActions kind="movie" id={movie.id} resumeMs={resumeMs} />
           <button
             type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
+            className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
             onClick={async () => {
               const room = await api.createWTRoom({ item_kind: "movie", item_id: movie.id });
               const code = room.code || room.invite_code || room.id;
@@ -56,7 +56,7 @@ export function MovieDetailPage() {
           {hasPerm(me, "shares.create") ? (
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
+              className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
               onClick={() => setShare(true)}
             >
               <Share2 size={14} /> Share

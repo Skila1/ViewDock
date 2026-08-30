@@ -1,3 +1,4 @@
+import { isAppleWebKitPlayer } from "@/lib/device";
 import type { ClientProfile, DecodingInfo } from "@/types/api.gen";
 
 const HEVC_MAIN = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
@@ -10,30 +11,34 @@ function canProbably(el: HTMLVideoElement, type: string): boolean {
   return /^probably$/i.test(el.canPlayType(type));
 }
 
+function canPlayLoose(el: HTMLVideoElement, type: string): boolean {
+  return /probably|maybe/i.test(el.canPlayType(type));
+}
+
 /** Safari / iOS only. Chromium often claims HLS it cannot play natively. */
 export function nativeHlsSupported(): boolean {
-  const ua = navigator.userAgent;
-  const iOS = /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const safari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
-  if (!iOS && !safari) return false;
+  if (!isAppleWebKitPlayer()) return false;
   const el = document.createElement("video");
   return Boolean(el.canPlayType("application/vnd.apple.mpegURL"));
 }
 
 type Decoded = { supported: boolean; smooth?: boolean };
 
-async function decodingInfo(kind: "video" | "audio", contentType: string): Promise<Decoded | undefined> {
+async function decodingInfo(
+  kind: "video" | "audio",
+  contentType: string,
+  type: "file" | "media-source",
+): Promise<Decoded | undefined> {
   const mc = navigator.mediaCapabilities;
   if (!mc?.decodingInfo) return undefined;
   try {
     const cfg = kind === "video"
       ? {
-          type: "media-source" as const,
+          type,
           video: { contentType, width: 1920, height: 1080, bitrate: 8_000_000, framerate: 24 },
         }
       : {
-          type: "media-source" as const,
+          type,
           audio: { contentType, channels: "6", bitrate: 640_000 },
         };
     const info = await mc.decodingInfo(cfg);
@@ -51,15 +56,17 @@ function record(info: DecodingInfo, key: string, value: Decoded | undefined) {
 /** Conservative codec flags. MediaCapabilities wins when present; otherwise "probably". */
 export async function detectClientProfile(): Promise<ClientProfile> {
   const el = document.createElement("video");
+  const apple = isAppleWebKitPlayer();
   const mse = typeof MediaSource !== "undefined" || "ManagedMediaSource" in window;
   const decoding_info: DecodingInfo = {};
+  const probeType = apple ? "file" : "media-source";
 
   const [hevc, hevc10, av1, ac3, eac3] = await Promise.all([
-    decodingInfo("video", HEVC_MAIN),
-    decodingInfo("video", HEVC_MAIN10),
-    decodingInfo("video", AV1),
-    decodingInfo("audio", AC3),
-    decodingInfo("audio", EAC3),
+    decodingInfo("video", HEVC_MAIN, probeType),
+    decodingInfo("video", HEVC_MAIN10, probeType),
+    decodingInfo("video", AV1, probeType),
+    decodingInfo("audio", AC3, probeType),
+    decodingInfo("audio", EAC3, probeType),
   ]);
   record(decoding_info, "hevc", hevc);
   record(decoding_info, "hevc_main10", hevc10);
@@ -67,8 +74,12 @@ export async function detectClientProfile(): Promise<ClientProfile> {
   record(decoding_info, "ac3", ac3);
   record(decoding_info, "eac3", eac3);
 
-  const hevcMain10 = hevc10?.supported ?? false;
-  const hevcMain = hevc?.supported ?? canProbably(el, HEVC_MAIN);
+  const hevcMain10 = apple
+    ? (hevc10?.supported ?? (canPlayLoose(el, HEVC_MAIN10) || true))
+    : (hevc10?.supported ?? false);
+  const hevcMain = apple
+    ? (hevc?.supported ?? (canPlayLoose(el, HEVC_MAIN) || true))
+    : (hevc?.supported ?? canProbably(el, HEVC_MAIN));
 
   return {
     user_agent: navigator.userAgent,
@@ -80,9 +91,9 @@ export async function detectClientProfile(): Promise<ClientProfile> {
     viewport_h: Math.round(window.innerHeight),
     hevc: hevcMain,
     hevc_main10: hevcMain10,
-    av1: av1?.supported ?? canProbably(el, AV1),
-    ac3: ac3?.supported ?? canProbably(el, AC3),
-    eac3: eac3?.supported ?? canProbably(el, EAC3),
+    av1: apple ? false : (av1?.supported ?? canProbably(el, AV1)),
+    ac3: apple ? (ac3?.supported ?? (canPlayLoose(el, AC3) || true)) : (ac3?.supported ?? canProbably(el, AC3)),
+    eac3: apple ? (eac3?.supported ?? (canPlayLoose(el, EAC3) || true)) : (eac3?.supported ?? canProbably(el, EAC3)),
     truehd: false,
     decoding_info,
   };

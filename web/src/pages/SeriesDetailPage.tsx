@@ -48,7 +48,7 @@ export function SeriesDetailPage() {
   return (
     <div>
       <div className="mb-5 flex flex-col gap-5 sm:flex-row">
-        <div className="poster-tile w-[160px] shrink-0 overflow-hidden rounded-md bg-raised">
+        <div className="poster-tile mx-auto w-[42%] max-w-[180px] shrink-0 overflow-hidden rounded-md bg-raised sm:mx-0 sm:w-[160px]">
           {series.poster_url ? (
             <img src={series.poster_url} alt="" className="h-full w-full object-cover" />
           ) : null}
@@ -68,7 +68,7 @@ export function SeriesDetailPage() {
             {playEp ? (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
+                className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
                 onClick={async () => {
                   const room = await api.createWTRoom({ item_kind: "episode", item_id: playEp.id });
                   const code = room.code || room.invite_code || room.id;
@@ -81,7 +81,7 @@ export function SeriesDetailPage() {
             {hasPerm(me, "shares.create") ? (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
+                className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
                 onClick={() => setShare(true)}
               >
                 <Share2 size={14} /> Share
@@ -112,7 +112,7 @@ export function SeriesDetailPage() {
           const to = epResume > 5000 ? `/watch/episode/${ep.id}?t=${Math.floor(epResume)}` : `/watch/episode/${ep.id}?t=0`;
           return (
             <li key={ep.id}>
-              <Link to={to} className="flex items-center gap-3 px-3 py-2 hover:bg-raised">
+              <Link to={to} className="flex min-h-12 items-center gap-3 px-3 py-3 hover:bg-raised">
                 <span className="w-12 shrink-0 text-xs text-dim">
                   S{ep.season}E{ep.number}
                 </span>

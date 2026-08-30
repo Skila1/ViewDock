@@ -40,6 +40,11 @@ export async function attachSession(
   await waitForPlaylist(playlist);
 
   if (nativeHlsSupported()) {
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.setAttribute("x-webkit-airplay", "allow");
+    video.playsInline = true;
+    video.controls = true;
     video.src = playlist;
     const onError = () => {
       void fetch(playlist, { credentials: "include" }).then((res) => {

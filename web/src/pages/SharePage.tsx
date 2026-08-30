@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { api } from "@/api/api";
+import { Logo } from "@/components/brand/Logo";
 import { Player } from "@/components/player/Player";
 import { useAuth } from "@/store/auth";
 import type { ItemKind, ShareMeta, ShareUnlockResponse } from "@/types/api.gen";
@@ -61,9 +62,10 @@ export function SharePage() {
 
   if (meta?.needs_password && !unlocked) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-bg p-6">
+      <div className="flex min-h-dvh items-center justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
         <form onSubmit={onUnlock} className="w-full max-w-xs space-y-3 rounded-lg border border-line bg-raised p-5">
-          <h1 className="text-base font-medium">{meta.title || "Shared video"}</h1>
+          <Logo className="mx-auto h-16 w-16" />
+          <h1 className="text-center text-base font-medium">{meta.title || "Shared video"}</h1>
           <input
             type="password"
             className="w-full"
@@ -72,7 +74,7 @@ export function SharePage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {err ? <p className="text-xs text-danger">{err}</p> : null}
-          <button type="submit" className="w-full rounded-md bg-accent py-2 text-sm text-black">
+          <button type="submit" className="tap w-full rounded-md bg-accent text-sm text-black">
             Unlock
           </button>
         </form>

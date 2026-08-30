@@ -17,13 +17,13 @@ export function WatchActions({ kind, id, resumeMs }: Props) {
         <>
           <Link
             to={`${watch}?t=${Math.floor(resumeMs ?? 0)}`}
-            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm text-black"
+            className="tap inline-flex items-center gap-1 rounded-md bg-accent px-3 text-sm text-black"
           >
             <Play size={14} /> Resume {formatClock(resumeMs ?? 0)}
           </Link>
           <Link
             to={`${watch}?t=0`}
-            className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm"
+            className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
           >
             <RotateCcw size={14} /> Play from start
           </Link>
@@ -31,7 +31,7 @@ export function WatchActions({ kind, id, resumeMs }: Props) {
       ) : (
         <Link
           to={`${watch}?t=0`}
-          className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm text-black"
+          className="tap inline-flex items-center gap-1 rounded-md bg-accent px-3 text-sm text-black"
         >
           <Play size={14} /> Play
         </Link>

@@ -11,7 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
+import { nativeHlsSupported } from "@/api/profile";
 import { cn } from "@/lib/cn";
+import { enterNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
@@ -290,6 +292,22 @@ export function Player({
     return () => window.clearTimeout(hideTimer.current);
   }, []);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !nativeHlsSupported()) return;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.setAttribute("x-webkit-airplay", "allow");
+    const onFs = () => setFs(true);
+    const onFsEnd = () => setFs(false);
+    video.addEventListener("webkitbeginfullscreen", onFs);
+    video.addEventListener("webkitendfullscreen", onFsEnd);
+    return () => {
+      video.removeEventListener("webkitbeginfullscreen", onFs);
+      video.removeEventListener("webkitendfullscreen", onFsEnd);
+    };
+  }, []);
+
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -381,10 +399,11 @@ export function Player({
     phase === "switchingQuality" ||
     phase === "recreating";
   const showSpinner = !err && (buffering || attaching);
+  const applePlayer = nativeHlsSupported();
 
   return (
     <div
-      className="relative h-dvh w-dvw overflow-hidden bg-black"
+      className="relative h-dvh w-dvw overflow-hidden bg-black overscroll-none"
       onMouseMove={reveal}
       onClick={reveal}
     >
@@ -392,7 +411,9 @@ export function Player({
         ref={videoRef}
         className="h-full w-full object-contain"
         playsInline
-        onClick={(e) => {
+        controls={applePlayer}
+        preload="auto"
+        onClick={applePlayer ? undefined : (e) => {
           e.stopPropagation();
           togglePlay();
         }}
@@ -416,14 +437,17 @@ export function Player({
           showUi ? "opacity-100" : "opacity-0",
         )}
       >
-        <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3">
+        <div
+          className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3"
+          style={{ paddingTop: "max(0.75rem, var(--sat))" }}
+        >
           <div className="pointer-events-auto min-w-0">
             <p className="truncate text-sm font-medium text-white">{title}</p>
           </div>
           {onClose ? (
             <button
               type="button"
-              className="pointer-events-auto rounded-full bg-black/50 p-2 text-white"
+              className="pointer-events-auto tap rounded-full bg-black/50 p-2 text-white"
               aria-label="Exit player"
               onClick={(e) => {
                 e.stopPropagation();
@@ -435,40 +459,50 @@ export function Player({
           ) : null}
         </div>
 
-        <div className="pointer-events-auto absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
+        <div
+          className="pointer-events-auto absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
+          style={{
+            bottom: applePlayer ? "max(3.25rem, calc(var(--sab) + 2.75rem))" : 0,
+            paddingBottom: applePlayer ? "0.5rem" : "max(1rem, var(--sab))",
+          }}
+        >
           <input
             type="range"
             min={0}
             max={Math.max(1, duration)}
             value={Math.min(pos, duration)}
             onChange={(e) => seek(Number(e.target.value))}
-            className="mb-3 w-full accent-[var(--accent)]"
+            className="mb-3 h-8 w-full accent-[var(--accent)]"
           />
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={togglePlay} className="text-white" aria-label="Play pause">
-              {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {applePlayer ? null : (
+              <button type="button" onClick={togglePlay} className="tap text-white" aria-label="Play pause">
+                {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+              </button>
+            )}
             <span className="text-xs tabular-nums text-white/80">
               {formatClock(pos)} / {formatClock(duration)}
             </span>
-            <button
-              type="button"
-              className="text-white"
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.muted = !v.muted;
-                setMuted(v.muted);
-              }}
-              aria-label="Mute"
-            >
-              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
+            {applePlayer ? null : (
+              <button
+                type="button"
+                className="tap text-white"
+                onClick={() => {
+                  const v = videoRef.current;
+                  if (!v) return;
+                  v.muted = !v.muted;
+                  setMuted(v.muted);
+                }}
+                aria-label="Mute"
+              >
+                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              </button>
+            )}
             <div className="ml-auto flex items-center gap-2">
               {session?.next_episode ? (
                 <button
                   type="button"
-                  className="flex items-center gap-1 rounded border border-white/20 px-2 py-1 text-xs text-white"
+                  className="tap flex items-center gap-1 rounded border border-white/20 px-2 text-xs text-white"
                   onClick={() => onEnded?.()}
                 >
                   <SkipForward size={14} /> Next
@@ -476,7 +510,7 @@ export function Player({
               ) : null}
               {qualities.length > 0 ? (
                 <select
-                  className="rounded border border-white/20 bg-black/40 px-2 py-1 text-xs"
+                  className="tap rounded border border-white/20 bg-black/40 px-2 text-xs"
                   value={qualityRef.current ?? qualities[0]}
                   onChange={(e) => changeQuality(e.target.value)}
                 >
@@ -489,10 +523,15 @@ export function Player({
               ) : null}
               <button
                 type="button"
-                className="text-white"
+                className="tap text-white"
                 aria-label="Fullscreen"
                 onClick={() => {
-                  const root = videoRef.current?.parentElement;
+                  const video = videoRef.current;
+                  if (applePlayer && video && enterNativeFullscreen(video)) {
+                    setFs(true);
+                    return;
+                  }
+                  const root = video?.parentElement;
                   if (!document.fullscreenElement) {
                     void root?.requestFullscreen();
                     setFs(true);

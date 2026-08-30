@@ -26,7 +26,7 @@ export function AppShell() {
 
   if (pinLocked) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-bg p-6">
+      <div className="flex min-h-dvh items-center justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
         <form
           className="w-full max-w-xs space-y-3 rounded-2xl border border-line bg-raised p-6"
           onSubmit={async (e) => {
@@ -38,8 +38,8 @@ export function AppShell() {
             }
           }}
         >
-          <Logo className="h-10 w-10" />
-          <h1 className="text-base font-semibold">Unlock</h1>
+          <Logo className="mx-auto h-20 w-20" />
+          <h1 className="text-center text-base font-semibold">Unlock</h1>
           <input
             type="password"
             inputMode="numeric"
@@ -47,9 +47,10 @@ export function AppShell() {
             placeholder="PIN"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
+            className="w-full"
           />
           {pinErr ? <p className="text-xs text-danger">{pinErr}</p> : null}
-          <button type="submit" className="btn-green w-full rounded-full px-3 py-2 text-sm">
+          <button type="submit" className="btn-green tap w-full rounded-full px-3 text-sm">
             Continue
           </button>
         </form>
@@ -60,8 +61,8 @@ export function AppShell() {
   return (
     <div className="flex min-h-dvh bg-bg">
       <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-raised/80 md:flex">
-        <Link to="/" className="flex items-center gap-2 bg-black px-3 py-4">
-          <Logo className="h-10 w-10" />
+        <Link to="/" className="flex items-center gap-2 px-3 py-4">
+          <Logo className="h-12 w-12" />
           <span className="text-sm font-bold tracking-wide">ViewDock</span>
         </Link>
         <nav className="flex-1 space-y-0.5 px-2 pt-3">
@@ -124,9 +125,15 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-[var(--nav-h)] items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur">
-          <Link to="/" className="flex items-center gap-2 md:hidden">
-            <Logo className="h-8 w-8" />
+        <header
+          className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur"
+          style={{
+            paddingTop: "max(0.5rem, var(--sat))",
+            minHeight: "calc(var(--nav-h) + var(--sat))",
+          }}
+        >
+          <Link to="/" className="shrink-0 md:hidden" aria-label="ViewDock home">
+            <Logo className="h-9 w-9" />
           </Link>
           <form onSubmit={onSearch} className="flex min-w-0 flex-1 items-center gap-2">
             <Search size={16} className="shrink-0 text-dim" />
@@ -134,14 +141,51 @@ export function AppShell() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search movies and TV"
-              className="h-9 w-full max-w-md border-0 bg-transparent px-0"
+              enterKeyHint="search"
+              className="h-11 w-full max-w-md border-0 bg-transparent px-0"
             />
           </form>
         </header>
-        <main className="px-4 py-5 md:px-8">
+        <main className="px-4 py-5 md:px-8 pb-[calc(var(--tab-h)+var(--sab)+1rem)] md:pb-5">
           <Outlet />
         </main>
       </div>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-raised/95 backdrop-blur md:hidden"
+        style={{ paddingBottom: "var(--sab)" }}
+      >
+        <div className="grid h-[var(--tab-h)] grid-cols-5">
+          {nav.map((it) => (
+            <NavLink
+              key={it.to}
+              to={it.to}
+              end={it.end}
+              className={({ isActive }) =>
+                cn(
+                  "flex flex-col items-center justify-center gap-0.5 text-[10px] text-dim",
+                  isActive && "text-accent",
+                )
+              }
+            >
+              <it.icon className="h-5 w-5" />
+              {it.label}
+            </NavLink>
+          ))}
+          <NavLink
+            to="/profile"
+            className={({ isActive }) =>
+              cn(
+                "flex flex-col items-center justify-center gap-0.5 text-[10px] text-dim",
+                isActive && "text-accent",
+              )
+            }
+          >
+            <Settings className="h-5 w-5" />
+            Me
+          </NavLink>
+        </div>
+      </nav>
     </div>
   );
 }
