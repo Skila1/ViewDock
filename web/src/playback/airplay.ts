@@ -1,26 +1,23 @@
 /**
- * WebKit MMS opens if remote playback is disabled OR an AirPlay-compatible
- * alternate <source> exists (https://webkit.org/blog/15036/).
- * hls.js attaches a blob/mp4 source first; the m3u8 sibling is AirPlay only.
+ * WebKit opens Managed Media Source only if remote playback is disabled
+ * OR an AirPlay-compatible alternate <source> exists
+ * (https://webkit.org/blog/15036/).
+ *
+ * We must NOT add an application/x-mpegURL sibling. Safari treats that
+ * source as inline native HLS, not AirPlay-only. On ViewDock EVENT
+ * playlists that produces a seg0.ts fetch storm, dual ownership with
+ * hls.js, and a dead video element — so fullscreen never becomes available.
+ *
+ * MMS precondition is satisfied by disableRemotePlayback = true for the
+ * whole hls.js attach. AirPlay stays off on that path.
  */
 
 export function disableRemotePlaybackForMms(video: HTMLVideoElement) {
   video.disableRemotePlayback = true;
+  video.setAttribute("disableremoteplayback", "");
+  video.removeAttribute("x-webkit-airplay");
 }
 
-export function addAirPlayAlternate(video: HTMLVideoElement, playlist: string) {
-  if (video.querySelector("source[data-vd-airplay]")) return;
-  const src = document.createElement("source");
-  src.setAttribute("data-vd-airplay", "1");
-  src.type = "application/x-mpegURL";
-  src.src = playlist;
-  video.appendChild(src);
-  video.setAttribute("x-webkit-airplay", "allow");
-  // Sibling is now present, so MMS can stay open with remote playback enabled.
-  video.disableRemotePlayback = false;
-  video.removeAttribute("disableremoteplayback");
-}
-
-export function sourceOrder(video: HTMLVideoElement): string[] {
-  return [...video.querySelectorAll("source")].map((el) => el.type || el.getAttribute("type") || "");
+export function stripAlternateSources(video: HTMLVideoElement) {
+  video.querySelectorAll("source[data-vd-hls], source[data-vd-airplay]").forEach((el) => el.remove());
 }

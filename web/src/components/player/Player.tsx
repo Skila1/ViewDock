@@ -338,7 +338,6 @@ export function Player({
     if (!video) return;
     video.setAttribute("playsinline", "");
     video.setAttribute("webkit-playsinline", "");
-    video.setAttribute("x-webkit-airplay", "allow");
     const sync = () => {
       setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
     };

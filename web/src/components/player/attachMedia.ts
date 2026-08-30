@@ -1,6 +1,5 @@
 import { nativeHlsSupported, sessionUrl } from "@/api/profile";
-import { isAppleWebKitPlayer } from "@/lib/device";
-import { addAirPlayAlternate, disableRemotePlaybackForMms } from "@/playback/airplay";
+import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/airplay";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
 
@@ -63,7 +62,7 @@ function prepareVideo(video: HTMLVideoElement) {
   video.playsInline = true;
   video.setAttribute("playsinline", "");
   video.setAttribute("webkit-playsinline", "");
-  video.querySelectorAll("source[data-vd-hls]").forEach((el) => el.remove());
+  stripAlternateSources(video);
 }
 
 async function attachWithHls(
@@ -97,14 +96,10 @@ async function attachWithHls(
     }
   };
   hls.on(Hls.Events.ERROR, onHlsError);
-  // MMS sourceopen requires disableRemotePlayback or an AirPlay sibling.
-  // Set the flag first so attach can open; add the sibling after hls.js
-  // inserts its blob <source>, then re-enable remote playback.
+  // MMS sourceopen requires disableRemotePlayback. Do not add an HLS
+  // <source> sibling — Safari plays that inline and fights hls.js.
   disableRemotePlaybackForMms(video);
   hls.attachMedia(video);
-  if (isAppleWebKitPlayer()) {
-    addAirPlayAlternate(video, playlist);
-  }
   hls.loadSource(playlist);
   try {
     await waitHlsBuffered(

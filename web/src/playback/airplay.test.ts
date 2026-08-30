@@ -1,25 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { addAirPlayAlternate, disableRemotePlaybackForMms, sourceOrder } from "./airplay";
+import { disableRemotePlaybackForMms, stripAlternateSources } from "./airplay";
 
-describe("AirPlay alternate source", () => {
+describe("MMS remote-playback precondition", () => {
   it("disables remote playback before MMS attach", () => {
     const video = document.createElement("video");
+    video.setAttribute("x-webkit-airplay", "allow");
     disableRemotePlaybackForMms(video);
     expect(video.disableRemotePlayback).toBe(true);
+    expect(video.getAttribute("disableremoteplayback")).toBe("");
+    expect(video.hasAttribute("x-webkit-airplay")).toBe(false);
   });
 
-  it("appends HLS after an existing blob source and re-enables remote playback", () => {
+  it("does not add a native HLS sibling that Safari would play inline", () => {
     const video = document.createElement("video");
-    disableRemotePlaybackForMms(video);
     const blob = document.createElement("source");
     blob.type = "video/mp4";
     blob.src = "blob:https://example/1";
     video.appendChild(blob);
-    addAirPlayAlternate(video, "/hls/s1/index.m3u8?stoken=tok");
-    expect(sourceOrder(video)).toEqual(["video/mp4", "application/x-mpegURL"]);
-    expect(video.disableRemotePlayback).toBe(false);
-    expect(video.getAttribute("x-webkit-airplay")).toBe("allow");
-    addAirPlayAlternate(video, "/hls/s1/index.m3u8?stoken=tok");
-    expect(video.querySelectorAll("source[data-vd-airplay]").length).toBe(1);
+    disableRemotePlaybackForMms(video);
+    expect(video.querySelectorAll("source[data-vd-airplay]").length).toBe(0);
+    expect(video.querySelectorAll('source[type="application/x-mpegURL"]').length).toBe(0);
+    expect(video.disableRemotePlayback).toBe(true);
+  });
+
+  it("strips leftover hls/airplay source children", () => {
+    const video = document.createElement("video");
+    const air = document.createElement("source");
+    air.setAttribute("data-vd-airplay", "1");
+    air.type = "application/x-mpegURL";
+    video.appendChild(air);
+    const hls = document.createElement("source");
+    hls.setAttribute("data-vd-hls", "1");
+    video.appendChild(hls);
+    stripAlternateSources(video);
+    expect(video.querySelectorAll("source").length).toBe(0);
   });
 });
