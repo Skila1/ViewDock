@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
-import { nativeHlsSupported } from "@/api/profile";
+import { usingNativeHls } from "@/api/profile";
 import { cn } from "@/lib/cn";
 import { enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
@@ -143,7 +143,7 @@ export function Player({
         bump("ATTACHED");
         attachedAtRef.current = Date.now();
         lastStablePosRef.current = originRef.current;
-        if (nativeHlsSupported()) {
+        if (usingNativeHls()) {
           video.controls = false;
           if (video.currentTime > 0.25) video.currentTime = 0;
         }
@@ -157,7 +157,7 @@ export function Player({
         pendingSeekRef.current = null;
         try {
           await video.play();
-          if (nativeHlsSupported() && video.currentTime > 0.25) {
+          if (usingNativeHls() && video.currentTime > 0.25) {
             video.currentTime = 0;
           }
           setBuffering(false);
@@ -236,7 +236,7 @@ export function Player({
       const origin = originRef.current;
       const rel = video.currentTime || 0;
       const ms = origin + rel * 1000;
-      if (nativeHlsSupported() && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
+      if (usingNativeHls() && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
         return;
       }
       lastStablePosRef.current = ms;
@@ -349,8 +349,14 @@ export function Player({
       setFs(false);
       return;
     }
+    // Native AVPlayer fullscreen shows LIVE on EVENT playlists. Keep our chrome.
+    if (isIOSDevice() && !usingNativeHls()) {
+      setPageFs(true);
+      setFs(true);
+      return;
+    }
     // iOS consumes the tap if we await requestFullscreen first; call WebKit sync.
-    if (isIOSDevice() || nativeHlsSupported()) {
+    if (isIOSDevice() || usingNativeHls()) {
       if (enterNativeFullscreen(video)) {
         setFs(true);
         return;
@@ -399,7 +405,7 @@ export function Player({
       originMs: origin,
       seekableStartSec: bounds.startSec,
       seekableEndSec: bounds.endSec,
-      ignoreSeekableStart: nativeHlsSupported(),
+      ignoreSeekableStart: usingNativeHls(),
     });
     if (!inWindow || attachBusyRef.current) {
       pendingSeekRef.current = target;

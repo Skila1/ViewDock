@@ -1,2 +1,2 @@
 export { api, ApiError } from "./api";
-export { detectClientProfile, nativeHlsSupported, sessionUrl } from "./profile";
+export { detectClientProfile, mseHlsAvailable, nativeHlsSupported, sessionUrl, usingNativeHls } from "./profile";

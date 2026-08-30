@@ -22,6 +22,16 @@ export function nativeHlsSupported(): boolean {
   return Boolean(el.canPlayType("application/vnd.apple.mpegURL"));
 }
 
+/** iOS 17.1+ ManagedMediaSource or classic MSE — use hls.js instead of AVPlayer. */
+export function mseHlsAvailable(): boolean {
+  return typeof MediaSource !== "undefined" || typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined";
+}
+
+/** True only when we must use video.src = m3u8 (pre-17.1 iOS, no MSE). */
+export function usingNativeHls(): boolean {
+  return nativeHlsSupported() && !mseHlsAvailable();
+}
+
 type Decoded = { supported: boolean; smooth?: boolean };
 
 async function decodingInfo(
@@ -53,13 +63,24 @@ function record(info: DecodingInfo, key: string, value: Decoded | undefined) {
   info[key] = value;
 }
 
+function mseTypeSupported(type: string): boolean {
+  const g = globalThis as {
+    ManagedMediaSource?: { isTypeSupported?: (t: string) => boolean };
+    MediaSource?: { isTypeSupported?: (t: string) => boolean };
+  };
+  const ms = g.ManagedMediaSource ?? g.MediaSource;
+  return Boolean(ms?.isTypeSupported?.(type));
+}
+
 /** Conservative codec flags. MediaCapabilities wins when present; otherwise "probably". */
 export async function detectClientProfile(): Promise<ClientProfile> {
   const el = document.createElement("video");
   const apple = isAppleWebKitPlayer();
-  const mse = typeof MediaSource !== "undefined" || "ManagedMediaSource" in window;
+  const mse = mseHlsAvailable();
+  const nativeHls = usingNativeHls();
   const decoding_info: DecodingInfo = {};
-  const probeType = apple ? "file" : "media-source";
+  // Native AVPlayer can decode HEVC/EAC3 that ManagedMediaSource cannot append.
+  const probeType = nativeHls ? "file" : "media-source";
 
   const [hevc, hevc10, av1, ac3, eac3] = await Promise.all([
     decodingInfo("video", HEVC_MAIN, probeType),
@@ -74,17 +95,17 @@ export async function detectClientProfile(): Promise<ClientProfile> {
   record(decoding_info, "ac3", ac3);
   record(decoding_info, "eac3", eac3);
 
-  const hevcMain10 = apple
+  const hevcMain10 = nativeHls
     ? (hevc10?.supported ?? (canPlayLoose(el, HEVC_MAIN10) || true))
-    : (hevc10?.supported ?? false);
-  const hevcMain = apple
+    : (hevc10?.supported ?? mseTypeSupported(HEVC_MAIN10));
+  const hevcMain = nativeHls
     ? (hevc?.supported ?? (canPlayLoose(el, HEVC_MAIN) || true))
-    : (hevc?.supported ?? canProbably(el, HEVC_MAIN));
+    : (hevc?.supported ?? mseTypeSupported(HEVC_MAIN));
 
   return {
     user_agent: navigator.userAgent,
     mse,
-    hls_native: nativeHlsSupported(),
+    hls_native: nativeHls,
     ass_js: false,
     hdr: false,
     viewport_w: Math.round(window.innerWidth),
@@ -92,8 +113,12 @@ export async function detectClientProfile(): Promise<ClientProfile> {
     hevc: hevcMain,
     hevc_main10: hevcMain10,
     av1: apple ? false : (av1?.supported ?? canProbably(el, AV1)),
-    ac3: apple ? (ac3?.supported ?? (canPlayLoose(el, AC3) || true)) : (ac3?.supported ?? canProbably(el, AC3)),
-    eac3: apple ? (eac3?.supported ?? (canPlayLoose(el, EAC3) || true)) : (eac3?.supported ?? canProbably(el, EAC3)),
+    ac3: nativeHls
+      ? (ac3?.supported ?? (canPlayLoose(el, AC3) || true))
+      : (ac3?.supported ?? mseTypeSupported(AC3)),
+    eac3: nativeHls
+      ? (eac3?.supported ?? (canPlayLoose(el, EAC3) || true))
+      : (eac3?.supported ?? mseTypeSupported(EAC3)),
     truehd: false,
     decoding_info,
   };

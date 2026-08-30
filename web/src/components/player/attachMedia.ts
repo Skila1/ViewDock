@@ -1,4 +1,4 @@
-import { nativeHlsSupported, sessionUrl } from "@/api/profile";
+import { mseHlsAvailable, nativeHlsSupported, sessionUrl } from "@/api/profile";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
@@ -39,91 +39,116 @@ export async function attachSession(
   if (!playlist) throw new Error("session missing HLS url");
   await waitForPlaylist(playlist);
 
-  if (nativeHlsSupported()) {
-    video.setAttribute("playsinline", "");
-    video.setAttribute("webkit-playsinline", "");
-    video.setAttribute("x-webkit-airplay", "allow");
-    video.playsInline = true;
-    // Native Safari controls use the HLS window as duration and treat EVENT
-    // playlists as live. Keep Apple's decoder; use our clock and seek bar.
-    video.controls = false;
-    video.src = playlist;
-    const onError = () => {
-      void fetch(playlist, { credentials: "include" }).then((res) => {
-        if (res.status === 410) gone();
-      }).catch(() => undefined);
-    };
-    video.addEventListener("error", onError);
-    try {
-      await waitCanPlay(video, () => aborted);
-      if (video.currentTime > 0.25) {
-        video.currentTime = 0;
-      }
-    } catch (err) {
-      video.removeEventListener("error", onError);
-      throw err;
-    }
-    return {
-      destroy() {
-        aborted = true;
-        video.removeEventListener("error", onError);
-        video.removeAttribute("src");
-        video.load();
-      },
-    };
-  }
+  prepareVideo(video);
 
+  // iOS native HLS (AVPlayer) treats EVENT playlists as LIVE until EXT-X-ENDLIST.
+  // iOS 17.1+ exposes ManagedMediaSource; hls.js uses that and we keep a VOD clock.
   const { default: Hls } = await import("hls.js");
-  if (Hls.isSupported()) {
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: false,
-      // EVENT playlists look live while ffmpeg is still writing. Play from
-      // the start instead of chasing the transcode frontier.
-      startPosition: 0,
-      liveDurationInfinity: false,
-      liveSyncDurationCount: 30,
-      liveMaxLatencyDurationCount: Infinity,
-      maxLiveSyncPlaybackRate: 1,
-      maxBufferLength: 30,
-      maxMaxBufferLength: 90,
-      // Keep enough of the window that a short skip-back stays in MSE.
-      backBufferLength: 900,
-      xhrSetup(xhr) {
-        xhr.withCredentials = true;
-      },
-    });
-    let fatalErr: Error | null = null;
-    const onHlsError = (_e: unknown, data: { fatal?: boolean; type?: string; details?: string; response?: { code?: number } }) => {
-      if (data.fatal && data.response?.code === 410) gone();
-      if (data.fatal) {
-        fatalErr = new Error(data.details || data.type || "hls error");
-      }
-    };
-    hls.on(Hls.Events.ERROR, onHlsError);
-    hls.attachMedia(video);
-    hls.loadSource(playlist);
+  if (Hls.isSupported() || mseHlsAvailable()) {
     try {
-      await waitHlsBuffered(
-        hls as unknown as { on: (ev: string, cb: () => void) => void; off: (ev: string, cb: () => void) => void },
-        video,
-        () => aborted,
-        Hls,
-      );
+      return await attachWithHls(video, playlist, Hls, () => aborted, gone);
     } catch (err) {
-      hls.destroy();
-      if (fatalErr) throw fatalErr;
-      throw err;
+      if (aborted || !nativeHlsSupported()) throw err;
+      // HEVC fMP4 can fail on ManagedMediaSource; last resort is AVPlayer.
+      return attachNativeHls(video, playlist, () => aborted, gone);
     }
-    return {
-      destroy() {
-        aborted = true;
-        hls.destroy();
-      },
-    };
+  }
+  if (nativeHlsSupported()) {
+    return attachNativeHls(video, playlist, () => aborted, gone);
   }
 
   throw new Error("HLS is not supported in this browser");
+}
+
+function prepareVideo(video: HTMLVideoElement) {
+  video.controls = false;
+  video.playsInline = true;
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  // Required for ManagedMediaSource to open on Safari/iOS.
+  video.disableRemotePlayback = true;
+}
+
+async function attachWithHls(
+  video: HTMLVideoElement,
+  playlist: string,
+  Hls: typeof import("hls.js").default,
+  isAborted: () => boolean,
+  gone: () => void,
+): Promise<AttachHandle> {
+  const hls = new Hls({
+    enableWorker: true,
+    preferManagedMediaSource: true,
+    lowLatencyMode: false,
+    startPosition: 0,
+    liveDurationInfinity: false,
+    liveSyncDurationCount: 30,
+    liveMaxLatencyDurationCount: Infinity,
+    maxLiveSyncPlaybackRate: 1,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 90,
+    backBufferLength: 900,
+    xhrSetup(xhr) {
+      xhr.withCredentials = true;
+    },
+  });
+  let fatalErr: Error | null = null;
+  const onHlsError = (_e: unknown, data: { fatal?: boolean; type?: string; details?: string; response?: { code?: number } }) => {
+    if (data.fatal && data.response?.code === 410) gone();
+    if (data.fatal) {
+      fatalErr = new Error(data.details || data.type || "hls error");
+    }
+  };
+  hls.on(Hls.Events.ERROR, onHlsError);
+  hls.attachMedia(video);
+  hls.loadSource(playlist);
+  try {
+    await waitHlsBuffered(
+      hls as unknown as { on: (ev: string, cb: () => void) => void; off: (ev: string, cb: () => void) => void },
+      video,
+      isAborted,
+      Hls,
+    );
+  } catch (err) {
+    hls.destroy();
+    if (fatalErr) throw fatalErr;
+    throw err;
+  }
+  return {
+    destroy() {
+      hls.destroy();
+    },
+  };
+}
+
+async function attachNativeHls(
+  video: HTMLVideoElement,
+  playlist: string,
+  isAborted: () => boolean,
+  gone: () => void,
+): Promise<AttachHandle> {
+  video.setAttribute("x-webkit-airplay", "allow");
+  video.src = playlist;
+  const onError = () => {
+    void fetch(playlist, { credentials: "include" }).then((res) => {
+      if (res.status === 410) gone();
+    }).catch(() => undefined);
+  };
+  video.addEventListener("error", onError);
+  try {
+    await waitCanPlay(video, isAborted);
+    if (video.currentTime > 0.25) video.currentTime = 0;
+  } catch (err) {
+    video.removeEventListener("error", onError);
+    throw err;
+  }
+  return {
+    destroy() {
+      video.removeEventListener("error", onError);
+      video.removeAttribute("src");
+      video.load();
+    },
+  };
 }
 
 async function waitForPlaylist(url: string): Promise<void> {
