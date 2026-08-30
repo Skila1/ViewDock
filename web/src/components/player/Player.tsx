@@ -349,13 +349,7 @@ export function Player({
       setFs(false);
       return;
     }
-    // Native AVPlayer fullscreen shows LIVE on EVENT playlists. Keep our chrome.
-    if (isIOSDevice() && !usingNativeHls()) {
-      setPageFs(true);
-      setFs(true);
-      return;
-    }
-    // iOS consumes the tap if we await requestFullscreen first; call WebKit sync.
+    // iPhone has no element Fullscreen API. AVKit only opens from this tap.
     if (isIOSDevice() || usingNativeHls()) {
       if (enterNativeFullscreen(video)) {
         setFs(true);
@@ -491,6 +485,7 @@ export function Player({
         className="h-full w-full object-contain"
         playsInline
         preload="auto"
+        x-webkit-airplay="allow"
         onClick={(e) => {
           e.stopPropagation();
           togglePlay();

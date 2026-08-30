@@ -20,7 +20,9 @@ export function isAppleWebKitPlayer(
 
 type AppleVideo = HTMLVideoElement & {
   webkitEnterFullscreen?: () => void;
+  webkitEnterFullScreen?: () => void;
   webkitExitFullscreen?: () => void;
+  webkitExitFullScreen?: () => void;
   webkitDisplayingFullscreen?: boolean;
   webkitSupportsFullscreen?: boolean;
   webkitSetPresentationMode?: (mode: "fullscreen" | "inline" | "picture-in-picture") => void;
@@ -39,12 +41,22 @@ export function isNativeFullscreen(video: HTMLVideoElement): boolean {
 export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
   const apple = asApple(video);
   try {
+    // iPhone only presents AVKit from HTMLVideoElement.webkitEnterFullscreen.
+    // Element.requestFullscreen / CSS page-fs stay inside Safari.
+    if (isIOSDevice()) {
+      const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
+      if (typeof enter === "function" && apple.webkitSupportsFullscreen !== false) {
+        enter.call(video);
+        return true;
+      }
+    }
     if (typeof apple.webkitSetPresentationMode === "function") {
       apple.webkitSetPresentationMode("fullscreen");
       return true;
     }
-    if (typeof apple.webkitEnterFullscreen === "function") {
-      apple.webkitEnterFullscreen();
+    const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
+    if (typeof enter === "function") {
+      enter.call(video);
       return true;
     }
   } catch {
@@ -60,8 +72,9 @@ export function exitNativeFullscreen(video: HTMLVideoElement): boolean {
       apple.webkitSetPresentationMode("inline");
       return true;
     }
-    if (typeof apple.webkitExitFullscreen === "function" && apple.webkitDisplayingFullscreen) {
-      apple.webkitExitFullscreen();
+    const exit = apple.webkitExitFullscreen ?? apple.webkitExitFullScreen;
+    if (typeof exit === "function" && apple.webkitDisplayingFullscreen) {
+      exit.call(video);
       return true;
     }
   } catch {

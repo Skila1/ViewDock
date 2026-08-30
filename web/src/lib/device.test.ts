@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { isAppleWebKitPlayer, isIOSDevice } from "./device";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
 
 describe("device", () => {
   it("detects iPhone and iPad", () => {
@@ -31,4 +31,26 @@ describe("device", () => {
       ),
     ).toBe(false);
   });
+
+  it("opens iPhone AVKit via webkitEnterFullscreen, not presentation mode", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+      platform: "iPhone",
+      maxTouchPoints: 5,
+    });
+    const enter = vi.fn();
+    const present = vi.fn();
+    const video = {
+      webkitEnterFullscreen: enter,
+      webkitSetPresentationMode: present,
+      webkitSupportsFullscreen: true,
+    } as unknown as HTMLVideoElement;
+    expect(enterNativeFullscreen(video)).toBe(true);
+    expect(enter).toHaveBeenCalledOnce();
+    expect(present).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });

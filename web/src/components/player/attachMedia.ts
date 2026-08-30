@@ -65,8 +65,27 @@ function prepareVideo(video: HTMLVideoElement) {
   video.playsInline = true;
   video.setAttribute("playsinline", "");
   video.setAttribute("webkit-playsinline", "");
-  // Required for ManagedMediaSource to open on Safari/iOS.
-  video.disableRemotePlayback = true;
+  video.setAttribute("x-webkit-airplay", "allow");
+}
+
+/** Safari opens MMS if remote playback is disabled *or* an HLS source exists.
+ *  Keep the HLS sibling so AirPlay / webkitEnterFullscreen can hand off to AVKit.
+ *  https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/ */
+function addNativeHlsSource(video: HTMLVideoElement, playlist: string) {
+  let src = video.querySelector<HTMLSourceElement>("source[data-vd-hls]");
+  if (!src) {
+    src = document.createElement("source");
+    src.setAttribute("data-vd-hls", "1");
+    video.appendChild(src);
+  }
+  src.type = "application/x-mpegURL";
+  src.src = playlist;
+  video.disableRemotePlayback = false;
+  video.removeAttribute("disableremoteplayback");
+}
+
+function removeNativeHlsSource(video: HTMLVideoElement) {
+  video.querySelectorAll("source[data-vd-hls]").forEach((el) => el.remove());
 }
 
 async function attachWithHls(
@@ -101,6 +120,7 @@ async function attachWithHls(
   };
   hls.on(Hls.Events.ERROR, onHlsError);
   hls.attachMedia(video);
+  addNativeHlsSource(video, playlist);
   hls.loadSource(playlist);
   try {
     await waitHlsBuffered(
@@ -110,12 +130,14 @@ async function attachWithHls(
       Hls,
     );
   } catch (err) {
+    removeNativeHlsSource(video);
     hls.destroy();
     if (fatalErr) throw fatalErr;
     throw err;
   }
   return {
     destroy() {
+      removeNativeHlsSource(video);
       hls.destroy();
     },
   };
