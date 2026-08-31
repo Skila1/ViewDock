@@ -30,7 +30,7 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 	if ff == nil {
 		ff = ffmpeg.New()
 	}
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	args := remuxInputFlags()
 	if opt.StartMS > 0 {
 		args = append(args, "-ss", ffmpeg.FormatTS(opt.StartMS))
 	}
@@ -47,6 +47,9 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 		"-map_chapters", "-1", "-dn",
 		"-map", vmap, "-map", amap,
 		"-c", "copy",
+		"-muxpreload", "0",
+		"-muxdelay", "0",
+		"-flush_packets", "1",
 	)
 	if opt.HEVC {
 		args = append(args, "-tag:v", "hvc1")
@@ -62,6 +65,15 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 		return nil, err
 	}
 	return cmd, nil
+}
+
+func remuxInputFlags() []string {
+	return []string{
+		"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-fflags", "+fastseek+discardcorrupt",
+		"-analyzeduration", "1000000",
+		"-probesize", "5000000",
+	}
 }
 
 func hlsArgs(destDir string, seg int) []string {

@@ -3,6 +3,7 @@ import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/a
 import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMeta } from "@/playback/attachTrace";
 import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
+import { inspectPlaylistBody } from "@/playback/playlistInspect";
 import { captureSeekHold, seekHoldAction } from "@/playback/seekHold";
 import type { PlaybackSession } from "@/types/api.gen";
 
@@ -155,6 +156,13 @@ async function attachWithHls(
   let seekHold: number | null = null;
   let seekHoldAt = 0;
   let lastKeepAt = 0;
+  let lastPollEdge = -1;
+  let holdPoll = 0;
+  const stopHoldPoll = () => {
+    if (!holdPoll) return;
+    window.clearInterval(holdPoll);
+    holdPoll = 0;
+  };
   const runSeekHold = (why: string) => {
     const now = video.currentTime;
     const action = seekHoldAction({
@@ -173,13 +181,48 @@ async function attachWithHls(
     } else if (action === "apply" && seekHold != null) {
       const target = seekHold;
       seekHold = null;
+      stopHoldPoll();
       noteCurrentTimeWrite(video, target, `seek_hold_apply:${why}`, session.id);
       video.currentTime = target;
+      hls.startLoad(target);
       noteAttach(video, "seek_hold_apply", `t=${target} edge=${playlistEdge}`);
     } else if (action === "timeout" || action === "clear") {
       noteAttach(video, `seek_hold_${action}`, `hold=${seekHold} edge=${playlistEdge}`);
       seekHold = null;
+      stopHoldPoll();
     }
+  };
+  let pollBusy = false;
+  const pollHoldPlaylist = async () => {
+    if (seekHold == null) {
+      stopHoldPoll();
+      return;
+    }
+    if (pollBusy) return;
+    pollBusy = true;
+    try {
+      const res = await fetch(playlist, { credentials: "include", cache: "no-store" });
+      if (!res.ok) return;
+      const snap = inspectPlaylistBody(await res.text(), "seek_hold_poll");
+      playlistEdge = snap.sumExtinfSec;
+      playlistEndlist = snap.endlist;
+      if (snap.sumExtinfSec !== lastPollEdge) {
+        lastPollEdge = snap.sumExtinfSec;
+        noteAttach(video, "seek_hold_poll", `edge=${snap.sumExtinfSec} segs=${snap.segmentCount} hold=${seekHold}`);
+      }
+      runSeekHold("playlist_poll");
+    } catch {
+      /* keep waiting */
+    } finally {
+      pollBusy = false;
+    }
+  };
+  const startHoldPoll = () => {
+    if (holdPoll) return;
+    void pollHoldPlaylist();
+    holdPoll = window.setInterval(() => {
+      void pollHoldPlaylist();
+    }, 400);
   };
   const onAvkitSeeking = () => {
     const captured = captureSeekHold(video.currentTime, playlistEdge, movieSec);
@@ -187,6 +230,7 @@ async function attachWithHls(
       seekHold = captured;
       seekHoldAt = Date.now();
       noteAttach(video, "seek_hold_begin", `t=${captured} edge=${playlistEdge}`);
+      startHoldPoll();
       return;
     }
     runSeekHold("seeking");
@@ -280,6 +324,7 @@ async function attachWithHls(
   return {
     engine: "hlsjs",
     destroy() {
+      stopHoldPoll();
       video.removeEventListener("seeking", onAvkitSeeking);
       video.removeEventListener("durationchange", onDurPin);
       hls.destroy();
