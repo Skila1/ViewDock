@@ -680,8 +680,8 @@ export function Player({
         "relative h-dvh w-dvw overflow-hidden bg-black overscroll-none",
         pageFs && "player-page-fs",
       )}
-      onMouseMove={reveal}
-      onClick={reveal}
+      onMouseMove={applePlayer ? undefined : reveal}
+      onClick={applePlayer ? undefined : reveal}
     >
       <video
         ref={videoRef}
@@ -712,41 +712,23 @@ export function Player({
       ) : null}
 
       {applePlayer ? (
-        <>
-          <p
-            className={cn(
-              "pointer-events-none absolute truncate text-sm font-medium text-white transition-opacity",
-              showUi ? "opacity-100" : "opacity-0",
-            )}
+        onClose ? (
+          <button
+            type="button"
+            className="pointer-events-auto tap absolute z-10 rounded-full bg-black/50 p-2 text-white"
             style={{
-              top: "max(3.5rem, calc(var(--sat) + 2.75rem))",
-              left: "1rem",
-              right: "4.5rem",
+              top: "max(0.5rem, calc(var(--sat) + 0.15rem))",
+              right: "0.75rem",
+            }}
+            aria-label="Exit player"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
             }}
           >
-            {title}
-          </p>
-          {onClose ? (
-            <button
-              type="button"
-              className={cn(
-                "tap absolute rounded-full bg-black/50 p-2 text-white transition-opacity",
-                showUi ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
-              )}
-              style={{
-                top: "max(0.5rem, calc(var(--sat) + 0.15rem))",
-                right: "0.75rem",
-              }}
-              aria-label="Exit player"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-            >
-              <X size={20} />
-            </button>
-          ) : null}
-        </>
+            <X size={20} />
+          </button>
+        ) : null
       ) : (
         <div
           className={cn(
@@ -778,6 +760,7 @@ export function Player({
         </div>
       )}
 
+      {applePlayer ? null : (
       <div
         className={cn(
           "absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 transition-opacity",
@@ -797,29 +780,25 @@ export function Player({
           className="mb-3 h-8 w-full accent-[var(--accent)]"
         />
         <div className="flex flex-wrap items-center gap-3">
-          {applePlayer ? null : (
-            <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
-              {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
-            </button>
-          )}
+          <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
+            {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+          </button>
           <span className="text-xs tabular-nums text-white/80">
             {formatClock(pos)} / {formatClock(duration)}
           </span>
-          {applePlayer ? null : (
-            <button
-              type="button"
-              className="tap text-white"
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.muted = !v.muted;
-                setMuted(v.muted);
-              }}
-              aria-label="Mute"
-            >
-              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
-          )}
+          <button
+            type="button"
+            className="tap text-white"
+            onClick={() => {
+              const v = videoRef.current;
+              if (!v) return;
+              v.muted = !v.muted;
+              setMuted(v.muted);
+            }}
+            aria-label="Mute"
+          >
+            {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+          </button>
           <div className="ml-auto flex items-center gap-2">
             {session?.next_episode ? (
               <button
@@ -843,19 +822,18 @@ export function Player({
                 ))}
               </select>
             ) : null}
-            {applePlayer ? null : (
-              <button
-                type="button"
-                className="tap text-white"
-                aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
-                onClick={(e) => toggleFullscreen(e)}
-              >
-                {fs ? <Minimize size={18} /> : <Maximize size={18} />}
-              </button>
-            )}
+            <button
+              type="button"
+              className="tap text-white"
+              aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+              onClick={(e) => toggleFullscreen(e)}
+            >
+              {fs ? <Minimize size={18} /> : <Maximize size={18} />}
+            </button>
           </div>
         </div>
       </div>
+      )}
 
       {showSpinner ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
