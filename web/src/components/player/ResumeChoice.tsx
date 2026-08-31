@@ -1,7 +1,6 @@
 import { Link } from "react-router";
-import { Bug, Play, RotateCcw } from "lucide-react";
+import { Play, RotateCcw } from "lucide-react";
 import { formatClock } from "@/lib/format";
-import { withVdDebug } from "@/playback/policy";
 
 type Props = {
   title?: string;
@@ -29,13 +28,6 @@ export function ResumeChoice({ title, resumeMs, resumeTo, startTo }: Props) {
           className="tap inline-flex items-center gap-2 rounded-md border border-white/25 px-4 text-sm text-white"
         >
           <RotateCcw size={16} /> Play from start
-        </Link>
-        <Link
-          to={withVdDebug(startTo)}
-          replace
-          className="tap inline-flex items-center gap-2 rounded-md border border-dashed border-amber-400/70 px-4 text-sm text-amber-200"
-        >
-          <Bug size={16} /> Play Debug
         </Link>
       </div>
     </div>

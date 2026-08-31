@@ -66,7 +66,7 @@ export function debugPlaybackEnabled(): boolean {
   }
 }
 
-/** Temporary helper for the Play Debug button. */
+/** Append vd_debug=1 so the diagnostics overlay can be opened by URL. */
 export function withVdDebug(to: string): string {
   if (/[?&]vd_debug=/.test(to)) return to;
   return to.includes("?") ? `${to}&vd_debug=1` : `${to}?vd_debug=1`;
