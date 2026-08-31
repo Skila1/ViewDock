@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
+import { enterAvkitFromUserGesture, enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
 
 describe("device", () => {
   it("detects iPhone and iPad", () => {
@@ -48,6 +48,24 @@ describe("device", () => {
     expect(enterNativeFullscreen(video)).toBe(true);
     expect(enter).toHaveBeenCalledOnce();
     expect(present).not.toHaveBeenCalled();
+  });
+
+  it("starts playback before AVKit when the video is paused", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)",
+      platform: "iPhone",
+      maxTouchPoints: 5,
+    });
+    const enter = vi.fn();
+    const play = vi.fn().mockResolvedValue(undefined);
+    const video = {
+      paused: true,
+      play,
+      webkitEnterFullscreen: enter,
+    } as unknown as HTMLVideoElement;
+    expect(enterAvkitFromUserGesture(video)).toBe(true);
+    expect(play).toHaveBeenCalledOnce();
+    expect(enter).toHaveBeenCalledOnce();
   });
 });
 

@@ -45,7 +45,7 @@ export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
     // Element.requestFullscreen / CSS page-fs stay inside Safari.
     if (isIOSDevice()) {
       const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
-      if (typeof enter === "function" && apple.webkitSupportsFullscreen !== false) {
+      if (typeof enter === "function") {
         enter.call(video);
         return true;
       }
@@ -63,6 +63,14 @@ export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
     return false;
   }
   return false;
+}
+
+/** Play if needed, then AVKit. Safari rejects webkitEnterFullscreen while paused. */
+export function enterAvkitFromUserGesture(video: HTMLVideoElement): boolean {
+  if (video.paused) {
+    void video.play().catch(() => undefined);
+  }
+  return enterNativeFullscreen(video);
 }
 
 export function exitNativeFullscreen(video: HTMLVideoElement): boolean {

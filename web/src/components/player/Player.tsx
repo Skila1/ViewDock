@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
-import { enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
+import { enterAvkitFromUserGesture, enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
@@ -489,14 +489,14 @@ export function Player({
     }
     if (fullscreenStrategy() === "avkit") {
       noteMedia(video, "fullscreen_tap", sessionRef.current?.id);
-      if (enterNativeFullscreen(video)) {
+      report("play.fullscreen", { action: "tap", currentTime: video.currentTime, session_id: sessionRef.current?.id });
+      if (enterAvkitFromUserGesture(video)) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
         setFs(true);
         return;
       }
-      noteMedia(video, "webkitEnterFullscreen_failed_page_fs", sessionRef.current?.id);
-      setPageFs(true);
-      setFs(true);
+      noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
+      report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       return;
     }
     const req = root?.requestFullscreen?.() ?? video.requestFullscreen?.();
@@ -520,17 +520,29 @@ export function Player({
   const togglePlay = (via: "chrome" | "keyboard" | "video_click" = "chrome") => {
     const video = videoRef.current;
     if (!video) return;
+    const avkit = fullscreenStrategy() === "avkit";
     if (video.paused) {
       userPausedRef.current = false;
       report("play.resume", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteUserControl(video, "play", via);
       void video.play();
-    } else {
-      userPausedRef.current = true;
-      report("play.pause", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
-      noteUserControl(video, "pause", via);
-      viewDockPause(video, `togglePlay:${via}`);
+      if (avkit) {
+        report("play.fullscreen", { action: "play_enter", via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
+        if (enterAvkitFromUserGesture(video)) setFs(true);
+      }
+      return;
     }
+    if (avkit && via === "video_click") {
+      report("play.fullscreen", { action: "video_tap", currentTime: video.currentTime, session_id: sessionRef.current?.id });
+      if (enterNativeFullscreen(video)) {
+        setFs(true);
+        return;
+      }
+    }
+    userPausedRef.current = true;
+    report("play.pause", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
+    noteUserControl(video, "pause", via);
+    viewDockPause(video, `togglePlay:${via}`);
   };
 
   const seek = (ms: number, source = "unknown") => {
