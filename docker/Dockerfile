@@ -5,22 +5,24 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
     if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else echo "no web lockfile"; fi
-COPY web/ ./
+COPY --link web/ ./
 # Image build skips tsc; local `npm run build` still typechecks.
+# Independent of the Go warmup below — BuildKit runs them together.
 RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/src/web/node_modules/.vite \
     if [ -f package.json ] && grep -q '"build"' package.json; then npm exec -- vite build; else mkdir -p dist && printf '%s\n' '<!doctype html><title>ViewDock</title><p>ViewDock</p>' > dist/index.html; fi
 
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
 ENV GOCACHE=/src/.gocache GOFLAGS=-buildvcs=false
-COPY go.mod go.sum ./
+COPY --link go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
-COPY cmd/ ./cmd/
-COPY internal/ ./internal/
-COPY migrations/ ./migrations/
-COPY web/embed.go ./web/embed.go
-COPY VERSION ./
+COPY --link cmd/ ./cmd/
+COPY --link internal/ ./internal/
+COPY --link migrations/ ./migrations/
+COPY --link web/embed.go ./web/embed.go
+COPY --link VERSION ./
 # Compile packages into the layer so a web-only change does not rebuild Go.
 RUN --mount=type=cache,target=/go/pkg/mod \
     mkdir -p web/dist /out \

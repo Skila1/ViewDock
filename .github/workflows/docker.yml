@@ -26,24 +26,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image name
-        id: img
-        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-      - name: App version
-        id: ver
+      - name: Image tags
         run: |
-          v="$(tr -d '[:space:]' < VERSION)"
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ steps.img.outputs.name }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.ver.outputs.version }}
-            type=semver,pattern={{version}}
-            type=sha,prefix=
+          echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+          echo "SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+      # One BuildKit graph: npm, Vite, Go warmup, and apt overlap when they
+      # do not depend on each other. Every RUN uses a cache mount or layer.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -51,9 +40,15 @@ jobs:
           push: true
           provenance: false
           sbom: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.ver.outputs.version }}
-          cache-from: type=gha,scope=viewdock-image
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:${{ env.SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+          cache-from: |
+            type=gha,scope=viewdock-image
+            type=registry,ref=${{ env.IMAGE }}:latest
           cache-to: type=gha,mode=max,scope=viewdock-image
