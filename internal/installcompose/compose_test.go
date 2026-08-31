@@ -133,4 +133,13 @@ func TestInstallShDetectRules(t *testing.T) {
 	if !strings.Contains(text, "compose_is_current()") {
 		t.Fatal("install.sh must skip rewriting a current compose file")
 	}
+	if !strings.Contains(text, "clear_viewdock_runtime()") {
+		t.Fatal("install.sh must stop leftover viewdock containers before recreate")
+	}
+	if !strings.Contains(text, "Compose up failed; clearing leftovers and retrying") {
+		t.Fatal("install.sh must retry compose up after freeing the container name")
+	}
+	if !strings.Contains(text, "Network ${net} still has active endpoints") {
+		t.Fatal("install.sh must detach leftover endpoints when the project network will not close")
+	}
 }

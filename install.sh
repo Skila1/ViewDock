@@ -760,6 +760,71 @@ EOF
   chmod 0644 "${PREFIX}/docker-compose.yml"
 }
 
+# The cpu and gpu services share container_name: viewdock. A profile switch or
+# an upgrade from the old single-service file leaves that name (and the project
+# network) held by the previous container. Compose down with only one profile
+# enabled will not stop the other service.
+clear_viewdock_runtime() {
+  cd "${PREFIX}" || return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  msg_info "Stopping existing ViewDock containers"
+
+  COMPOSE_PROFILES=cpu,gpu ${COMPOSE} down --remove-orphans --timeout 30 || true
+  ${COMPOSE} down --remove-orphans --timeout 30 || true
+
+  local ids name cid net
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=viewdock" 2>/dev/null || true)"
+  if [[ -n "${ids}" ]]; then
+    msg_info "Removing leftover compose project containers"
+    # shellcheck disable=SC2086
+    docker stop -t 20 ${ids} >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086
+    docker rm -f ${ids} >/dev/null 2>&1 || true
+  fi
+
+  for name in viewdock viewdock-gpu viewdock-local; do
+    cid="$(docker ps -aq --filter "name=^/${name}$" 2>/dev/null || true)"
+    if [[ -n "${cid}" ]]; then
+      msg_info "Removing leftover container ${name}"
+      docker stop -t 20 "${cid}" >/dev/null 2>&1 || true
+      docker rm -f "${cid}" >/dev/null 2>&1 || true
+    fi
+  done
+
+  for net in viewdock_default viewdock; do
+    docker network inspect "${net}" >/dev/null 2>&1 || continue
+    ids="$(docker network inspect "${net}" -f '{{range $id, $e := .Containers}}{{println $id}}{{end}}' 2>/dev/null || true)"
+    if [[ -n "${ids}" ]]; then
+      msg_info "Network ${net} still has active endpoints"
+      while IFS= read -r cid; do
+        [[ -z "${cid}" ]] && continue
+        name="$(docker inspect -f '{{.Name}}' "${cid}" 2>/dev/null || echo "${cid}")"
+        msg_info "Stopping ${name} so ${net} can close"
+        docker stop -t 10 "${cid}" >/dev/null 2>&1 || true
+        docker rm -f "${cid}" >/dev/null 2>&1 || true
+      done <<< "${ids}"
+    fi
+    if docker network rm "${net}" >/dev/null 2>&1; then
+      msg_ok "Removed leftover network ${net}"
+    fi
+  done
+
+  COMPOSE_PROFILES=cpu,gpu ${COMPOSE} down --remove-orphans --timeout 15 || true
+}
+
+compose_recreate() {
+  cd "${PREFIX}"
+  clear_viewdock_runtime
+  msg_info "Pulling ${IMAGE} in ${PREFIX}"
+  ${COMPOSE} pull
+  if ${COMPOSE} up -d --remove-orphans; then
+    return 0
+  fi
+  msg_info "Compose up failed; clearing leftovers and retrying"
+  clear_viewdock_runtime
+  ${COMPOSE} up -d --remove-orphans
+}
+
 # Write compose only when missing or still on the old single-service / overlay layout.
 # An already-migrated file is left alone (custom volumes, image, group_add stay).
 ensure_compose() {
@@ -863,10 +928,7 @@ cmd_install() {
   fi
   msg_ok "Compose project ready in ${PREFIX}"
 
-  cd "${PREFIX}"
-  msg_info "Pulling ${IMAGE} in ${PREFIX}"
-  ${COMPOSE} pull
-  ${COMPOSE} up -d --remove-orphans
+  compose_recreate
   digest="$(docker image inspect "${IMAGE}" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
   if [[ -n "${digest}" ]]; then
     printf '%s\n' "${digest}" > "${PREFIX}/update/applied"
@@ -916,16 +978,14 @@ cmd_update() {
   ensure_env_defaults
   detect_nvidia_docker
   ensure_compose "${dockergid}"
-  cd "${PREFIX}"
-  ${COMPOSE} pull
-  ${COMPOSE} up -d --remove-orphans
+  compose_recreate
 }
 cmd_uninstall() {
   need_root
   cd "${PREFIX}"
-  ${COMPOSE} down
+  clear_viewdock_runtime
   if [[ "${1:-}" == "--purge" ]]; then
-    ${COMPOSE} down -v
+    COMPOSE_PROFILES=cpu,gpu ${COMPOSE} down -v --remove-orphans || true
     rm -rf "${PREFIX}"
     rm -f /usr/local/bin/viewdock
     remove_update_helper

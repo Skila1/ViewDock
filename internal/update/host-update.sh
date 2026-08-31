@@ -112,6 +112,33 @@ progress_write() {
   fi
 
   progress_write 80 "restarting" "Starting updated containers"
+  COMPOSE_PROFILES=cpu,gpu docker compose down --remove-orphans --timeout 30 || true
+  leftovers="$(docker ps -aq --filter "label=com.docker.compose.project=viewdock" 2>/dev/null || true)"
+  if [[ -n "${leftovers}" ]]; then
+    # shellcheck disable=SC2086
+    docker stop -t 20 ${leftovers} >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086
+    docker rm -f ${leftovers} >/dev/null 2>&1 || true
+  fi
+  for _name in viewdock viewdock-gpu viewdock-local; do
+    _cid="$(docker ps -aq --filter "name=^/${_name}$" 2>/dev/null || true)"
+    if [[ -n "${_cid}" ]]; then
+      docker stop -t 20 "${_cid}" >/dev/null 2>&1 || true
+      docker rm -f "${_cid}" >/dev/null 2>&1 || true
+    fi
+  done
+  for _net in viewdock_default viewdock; do
+    docker network inspect "${_net}" >/dev/null 2>&1 || continue
+    _eps="$(docker network inspect "${_net}" -f '{{range $id, $e := .Containers}}{{println $id}}{{end}}' 2>/dev/null || true)"
+    if [[ -n "${_eps}" ]]; then
+      while IFS= read -r _cid; do
+        [[ -z "${_cid}" ]] && continue
+        docker stop -t 10 "${_cid}" >/dev/null 2>&1 || true
+        docker rm -f "${_cid}" >/dev/null 2>&1 || true
+      done <<< "${_eps}"
+    fi
+    docker network rm "${_net}" >/dev/null 2>&1 || true
+  done
   docker compose up -d --remove-orphans
   digest="$(docker image inspect "${img}" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
   if [[ -n "${digest}" ]]; then
