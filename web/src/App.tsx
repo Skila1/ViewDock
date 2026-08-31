@@ -26,6 +26,7 @@ import { SetupPage } from "@/pages/SetupPage";
 import { SharePage } from "@/pages/SharePage";
 import { TogetherPage } from "@/pages/TogetherPage";
 import { WatchPage } from "@/pages/WatchPage";
+import { bindJourneyLifecycle, report, startJourney } from "@/lib/journey";
 import { useAuth } from "@/store/auth";
 
 function BootGate({ children }: { children: ReactNode }) {
@@ -69,9 +70,30 @@ function RequireAdmin() {
   return <Outlet />;
 }
 
+function JourneyReporter() {
+  const location = useLocation();
+  useEffect(() => {
+    startJourney();
+    return bindJourneyLifecycle();
+  }, []);
+  useEffect(() => {
+    const path = location.pathname;
+    report("route", { path, search: location.search });
+    const movie = path.match(/^\/movies\/([^/]+)/);
+    if (movie) report("movie_open", { id: movie[1] });
+    const series = path.match(/^\/tv\/([^/]+)/);
+    if (series) report("series_open", { id: series[1] });
+    const watch = path.match(/^\/watch\/(movie|episode)\/([^/]+)/);
+    if (watch) report("watch_open", { kind: watch[1], id: watch[2], t: new URLSearchParams(location.search).get("t") });
+  }, [location.pathname, location.search]);
+  return null;
+}
+
 export function App() {
   return (
-    <BootGate>
+    <>
+      <JourneyReporter />
+      <BootGate>
       <Routes>
         <Route element={<SetupRedirect />}>
           <Route path="/setup" element={<SetupPage />} />
@@ -114,5 +136,6 @@ export function App() {
         </Route>
       </Routes>
     </BootGate>
+    </>
   );
 }

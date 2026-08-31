@@ -14,6 +14,7 @@ import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
 import { enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
 import { formatClock } from "@/lib/format";
+import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
 import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
@@ -80,6 +81,16 @@ export function Player({
   const engineRef = useRef<PlaybackEngine | null>(null);
   const [engine, setEngine] = useState<PlaybackEngine | null>(null);
   const debug = debugPlaybackEnabled();
+
+  useEffect(() => {
+    setJourneyContext({ item_kind: itemKind, item_id: itemId });
+    report("play.start", { kind: itemKind, id: itemId, start_ms: startMs, title });
+    return () => {
+      report("play.end", { kind: itemKind, id: itemId });
+      setJourneyContext({ session_id: undefined });
+      void flush(true);
+    };
+  }, [itemKind, itemId, startMs, title]);
 
   const bump = useCallback((ev: PlayerEvent) => {
     const next = reducePlayer(phaseRef.current, ev);
@@ -153,6 +164,16 @@ export function Player({
           return;
         }
         sessionRef.current = sess;
+        setJourneyContext({ session_id: sess.id, item_kind: itemKind, item_id: itemId });
+        report("play.session", {
+          id: sess.id,
+          reason,
+          mode: sess.decision?.mode,
+          playback: sess.decision?.playback,
+          delivery: sess.delivery,
+          start_ms: startAt,
+          replace: replaceId ?? "",
+        });
         noteAttach(video, "session_created", `reason=${reason} id=${sess.id} replace=${replaceId ?? ""}`);
         originRef.current = sess.seekable_from_ms ?? startAt;
         setAttachMeta(video, { originMs: originRef.current, sessionId: sess.id });
@@ -369,6 +390,41 @@ export function Player({
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    let lastT = -1;
+    const id = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      const sess = sessionRef.current;
+      const t = video.currentTime;
+      const apple = video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean };
+      if (video.paused && lastT >= 0 && Math.abs(t - lastT) > 0.25) {
+        report("play.drift_while_paused", {
+          from: lastT,
+          to: t,
+          delta: t - lastT,
+          session_id: sess?.id,
+          readyState: video.readyState,
+          seeking: video.seeking,
+        });
+      }
+      report("play.heartbeat", {
+        session_id: sess?.id,
+        currentTime: t,
+        paused: video.paused,
+        readyState: video.readyState,
+        seeking: video.seeking,
+        duration: video.duration,
+        muted: video.muted,
+        playbackRate: video.playbackRate,
+        fullscreen: Boolean(document.fullscreenElement) || Boolean(apple.webkitDisplayingFullscreen),
+        phase: phaseRef.current,
+      });
+      lastT = t;
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const reveal = () => {
     setShowUi(true);
     window.clearTimeout(hideTimer.current);
@@ -389,6 +445,7 @@ export function Player({
       setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
     };
     const onFs = () => {
+      report("play.fullscreen", { action: "enter", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteLogical(video, "webkitbeginfullscreen", originRef.current, sessionRef.current?.id);
       setFs(true);
     };
@@ -397,6 +454,7 @@ export function Player({
       fsExitAtRef.current = Date.now();
       suppressReplaceUntilRef.current = Date.now() + 2500;
       window.clearTimeout(seekTimer.current);
+      report("play.fullscreen", { action: "exit", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
       noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
       setFs(false);
@@ -464,10 +522,12 @@ export function Player({
     if (!video) return;
     if (video.paused) {
       userPausedRef.current = false;
+      report("play.resume", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteUserControl(video, "play", via);
       void video.play();
     } else {
       userPausedRef.current = true;
+      report("play.pause", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteUserControl(video, "pause", via);
       viewDockPause(video, `togglePlay:${via}`);
     }
@@ -494,6 +554,7 @@ export function Player({
       seekableEndSec: bounds.endSec,
       ignoreSeekableStart: engineRef.current === "native-hls",
     });
+    report("play.seek", { source, target, inWindow, origin, currentTime: video.currentTime, session_id: sessionRef.current?.id });
     if (!inWindow || attachBusyRef.current) {
       noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: false, origin }));
       pendingSeekRef.current = target;

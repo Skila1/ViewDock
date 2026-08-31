@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { Logo } from "@/components/brand/Logo";
 import { api } from "@/api/api";
+import { report } from "@/lib/journey";
 import { useAuth } from "@/store/auth";
 
 export function LoginPage() {
@@ -18,11 +19,14 @@ export function LoginPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErr("");
+    report("login_attempt", { username });
     try {
       await login(username, password);
+      report("login_ok", { username });
       await api.ensureCsrf();
       navigate("/");
     } catch {
+      report("login_fail", { username });
       setErr("Invalid credentials");
     }
   };

@@ -227,6 +227,8 @@ export const api = {
   createAPIKey: (body: { name: string; scopes: string[] }) =>
     request<APIKeyRow>("/api/v1/admin/api-keys", { method: "POST", body }),
   revokeAPIKey: (id: string) => request(`/api/v1/admin/api-keys/${id}`, { method: "DELETE" }),
+  reportClientLogs: (body: { events: { name: string; t?: number; details?: Record<string, unknown> }[] }) =>
+    request<{ ok: boolean; accepted?: number }>("/api/v1/client-logs", { method: "POST", body }),
   listLogs: (q: { level?: string; category?: string; q?: string; limit?: number; after?: string } = {}) => {
     const p = new URLSearchParams();
     if (q.level) p.set("level", q.level);

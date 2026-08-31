@@ -79,6 +79,9 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 			return
 		}
 		path := r.URL.Path
+		if path == "/api/v1/client-logs" {
+			return
+		}
 		query := r.URL.RawQuery
 		if strings.HasPrefix(path, "/api/v1/playback") || strings.HasPrefix(path, "/hls") || strings.HasPrefix(path, "/api/v1/watch-together") {
 			query = ""

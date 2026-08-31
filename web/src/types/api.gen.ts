@@ -600,3 +600,28 @@ export interface CreateInviteResponse {
 export interface OkResponse {
   ok?: boolean;
 }
+
+export interface ClientLogEvent {
+  name: string;
+  t?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface ClientLogsRequest {
+  events: ClientLogEvent[];
+}
+
+export interface LogEntry {
+  id: string;
+  created_at: string;
+  level: string;
+  category: string;
+  message: string;
+  details?: Record<string, unknown>;
+  actor_id?: string;
+}
+
+export interface LogsResponse {
+  items: LogEntry[];
+  next?: string;
+}

@@ -10,6 +10,7 @@ import (
 )
 
 func (s *Store) Routes(r chi.Router) {
+	r.Post("/client-logs", s.handleIngest)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequirePerm(auth.PermLogsRead))
 		r.Get("/admin/logs", s.handleList)

@@ -1,3 +1,4 @@
+import { reportThrottled, shouldShipAttach } from "@/lib/journey";
 import { classifyNetworkAbort } from "./abortClassify";
 import { classifyPauseSource, type PauseVerdict } from "./pauseClassify";
 import { inspectPlaylistBody, type PlaylistSnap } from "./playlistInspect";
@@ -271,6 +272,18 @@ export function noteAttach(video: HTMLVideoElement, ev: string, detail?: string)
   cur.events.push(rec);
   if (cur.events.length > 80) cur.events.splice(0, cur.events.length - 80);
   pushWindow(cur, rec);
+  if (shouldShipAttach(ev, video.paused)) {
+    const name = ev === "hls:FRAG_CHANGED" ? "play.frag_while_paused" : "play.attach";
+    reportThrottled(name, {
+      ev,
+      detail,
+      paused: video.paused,
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      seeking: video.seeking,
+      session_id: cur.sessionId ?? undefined,
+    }, ev === "hls:FRAG_CHANGED" ? 400 : 200, ev);
+  }
 }
 
 export function noteUserControl(video: HTMLVideoElement, action: "play" | "pause", via: string) {
@@ -336,6 +349,14 @@ function notePauseEvent(video: HTMLVideoElement) {
 export function noteMediaDom(video: HTMLVideoElement, ev: string) {
   const cur = state(video);
   if (ev === "pause") notePauseEvent(video);
+  if (ev === "timeupdate" && video.paused) {
+    reportThrottled("play.time_while_paused", {
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      seeking: video.seeking,
+      session_id: cur.sessionId ?? undefined,
+    }, 500);
+  }
   if (ev === "timeupdate") {
     if (!inWindow(cur) && !cur.fsOpenedAt) {
       const rec = { t: Date.now(), ev, detail: `t=${video.currentTime.toFixed(3)}` };

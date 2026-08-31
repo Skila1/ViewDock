@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, ApiError } from "@/api/api";
+import { report, setJourneyContext } from "@/lib/journey";
 import type { Me, SystemInfo } from "@/types/api.gen";
 
 export type GuestCaps = {
@@ -51,8 +52,11 @@ export const useAuth = create<AuthState>((set) => ({
           }
         }
       }
+      setJourneyContext({ user_id: me?.id, username: me?.username });
+      report("boot", { setup_needed: system.setup_needed, signed_in: Boolean(me), pin_locked: pinLocked });
       set({ system, me, pinLocked, ready: true, error: null });
     } catch (err) {
+      report("boot_fail", { message: err instanceof Error ? err.message : "boot failed" });
       set({
         ready: true,
         error: err instanceof Error ? err.message : "boot failed",
@@ -62,11 +66,14 @@ export const useAuth = create<AuthState>((set) => ({
 
   login: async (username, password) => {
     const me = await api.login({ username, password });
+    setJourneyContext({ user_id: me.id, username: me.username });
     set({ me, pinLocked: Boolean(me.pin_locked), error: null });
   },
 
   logout: async () => {
+    report("logout");
     await api.logout();
+    setJourneyContext({ user_id: undefined, username: undefined });
     set({ me: null, pinLocked: false, guest: null });
   },
 

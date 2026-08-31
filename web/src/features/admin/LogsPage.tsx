@@ -16,7 +16,10 @@ export function LogsPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-base font-medium">Logs</h1>
-        <p className="text-sm text-dim">Application and playback events. Secrets are redacted. Pull the same data with an API key at GET /api/v1/admin/logs.</p>
+        <p className="text-sm text-dim">
+          Application, playback, and browser journey events. Filter category <code>journey</code> for land → login → play → pause/seek/fullscreen.
+          Secrets are redacted. Same data: GET /api/v1/admin/logs?category=journey with a <code>logs.read</code> API key.
+        </p>
       </div>
       <div className="flex flex-wrap gap-2">
         <select className="text-sm" value={level} onChange={(e) => setLevel(e.target.value)}>
@@ -26,7 +29,7 @@ export function LogsPage() {
           <option value="warn">warn</option>
           <option value="error">error</option>
         </select>
-        <input className="text-sm" placeholder="category (playback, app)" value={category} onChange={(e) => setCategory(e.target.value)} />
+        <input className="text-sm" placeholder="category (journey, playback, app)" value={category} onChange={(e) => setCategory(e.target.value)} />
         <input className="text-sm" placeholder="search" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <ul className="divide-y divide-line rounded-md border border-line font-mono text-[12px]">

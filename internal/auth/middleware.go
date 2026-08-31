@@ -162,6 +162,7 @@ func (s *Service) SetupGate(next http.Handler) http.Handler {
 		if strings.HasPrefix(path, "/api/v1/setup") || path == "/api/v1/system" ||
 			path == "/healthz" || path == "/readyz" ||
 			path == "/api/v1/auth/csrf" || path == "/api/v1/auth/login" ||
+			path == "/api/v1/client-logs" ||
 			strings.HasPrefix(path, "/api/v1/auth/discord") ||
 			path == "/api/v1/invites/accept" {
 			next.ServeHTTP(w, r)
