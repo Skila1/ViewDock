@@ -64,6 +64,7 @@ export function Player({
   const [pageFs, setPageFs] = useState(false);
   const [pos, setPos] = useState(0);
   const [dur, setDur] = useState(0);
+  const movieDurRef = useRef(0);
   const [err, setErr] = useState<string | null>(null);
   const hideTimer = useRef<number>(0);
   const goneAt = useRef(0);
@@ -182,7 +183,10 @@ export function Player({
         const predicted: PlaybackEngine = sess.delivery === "direct" ? "direct" : sess.hls_attach === "native" ? "native-hls" : "hlsjs";
         engineRef.current = predicted;
         setEngine(predicted);
-        if (sess.duration_ms && sess.duration_ms > 0) setDur(sess.duration_ms);
+        if (sess.duration_ms && sess.duration_ms > 0) {
+          movieDurRef.current = sess.duration_ms;
+          setDur(sess.duration_ms);
+        }
         setPos(originRef.current);
         bump("SESSION_CREATED");
         attachRef.current = await attachSession(
@@ -326,11 +330,12 @@ export function Player({
     const onDur = () => {
       const probed = sessionRef.current?.duration_ms ?? 0;
       if (probed > 0) {
+        movieDurRef.current = probed;
         setDur(probed);
         return;
       }
-      const next = video.duration * 1000;
-      if (Number.isFinite(next) && next > 0) setDur(next);
+      // Never adopt EVENT/live video.duration — that is why the slider
+      // flashed ~30m then 2:50 then snapped back.
     };
     const onPlay = () => {
       if (!attachBusyRef.current) setBuffering(false);
@@ -593,7 +598,16 @@ export function Player({
       generatedEndSec: generatedEnd,
       ignoreSeekableStart: engineRef.current === "native-hls",
     });
-    report("play.seek", { source, target, inWindow, origin, currentTime: video.currentTime, session_id: sessionRef.current?.id });
+    report("play.seek", {
+      source,
+      target,
+      inWindow,
+      origin,
+      generatedEnd,
+      seekableEnd: bounds.endSec,
+      currentTime: video.currentTime,
+      session_id: sessionRef.current?.id,
+    });
     if (!inWindow || attachBusyRef.current) {
       noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: false, origin }));
       pendingSeekRef.current = target;
@@ -665,7 +679,7 @@ export function Player({
   }, [onClose, pos]);
 
   const applePlayer = isIOSDevice();
-  const duration = movieDurationMs(session, dur);
+  const duration = movieDurationMs(session, movieDurRef.current || dur);
   const qualities = session?.qualities ?? [];
   const attaching =
     phase === "creatingSession" ||
@@ -712,23 +726,41 @@ export function Player({
       ) : null}
 
       {applePlayer ? (
-        onClose ? (
-          <button
-            type="button"
-            className="pointer-events-auto tap absolute z-10 rounded-full bg-black/50 p-2 text-white"
-            style={{
-              top: "max(0.5rem, calc(var(--sat) + 0.15rem))",
-              right: "0.75rem",
-            }}
-            aria-label="Exit player"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
+        <>
+          {onClose ? (
+            <button
+              type="button"
+              className="pointer-events-auto tap absolute z-10 rounded-full bg-black/50 p-2 text-white"
+              style={{
+                top: "max(0.5rem, calc(var(--sat) + 0.15rem))",
+                right: "0.75rem",
+              }}
+              aria-label="Exit player"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+            >
+              <X size={20} />
+            </button>
+          ) : null}
+          <div
+            className="pointer-events-auto absolute inset-x-0 z-10 bg-gradient-to-t from-black/80 to-transparent px-4 pt-8"
+            style={{ bottom: 0, paddingBottom: "max(0.75rem, var(--sab))" }}
           >
-            <X size={20} />
-          </button>
-        ) : null
+            <input
+              type="range"
+              min={0}
+              max={Math.max(1, duration)}
+              value={Math.min(pos, duration)}
+              onChange={(e) => seek(Number(e.target.value), "slider")}
+              className="mb-2 h-8 w-full accent-[var(--accent)]"
+            />
+            <span className="text-xs tabular-nums text-white/80">
+              {formatClock(pos)} / {formatClock(duration)}
+            </span>
+          </div>
+        </>
       ) : (
         <div
           className={cn(

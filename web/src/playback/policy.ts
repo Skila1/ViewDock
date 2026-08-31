@@ -64,7 +64,8 @@ export const IOS_AVKIT_MMS_VALIDATED = {
 export function movieDurationMs(session: PlaybackSession | null | undefined, fallbackMs = 0): number {
   const probed = session?.duration_ms ?? 0;
   if (probed > 0) return probed;
-  return Number.isFinite(fallbackMs) && fallbackMs > 0 ? fallbackMs : 0;
+  if (!Number.isFinite(fallbackMs) || fallbackMs <= 0) return 0;
+  return fallbackMs;
 }
 
 export function debugPlaybackEnabled(): boolean {

@@ -10,6 +10,7 @@ describe("playback policy", () => {
   });
 
   it("uses session duration_ms, not a 30s HLS window", () => {
+    expect(movieDurationMs({ id: "s", delivery: "hls", urls: {}, duration_ms: 10_193_000 }, 1_800_000)).toBe(10_193_000);
     expect(movieDurationMs({ id: "s", delivery: "hls", urls: {}, duration_ms: 7_200_000 }, 32_000)).toBe(7_200_000);
     expect(movieDurationMs({ id: "s", delivery: "hls", urls: {} }, 32_000)).toBe(32_000);
     expect(movieDurationMs({ id: "s", delivery: "hls", urls: {} }, Number.POSITIVE_INFINITY)).toBe(0);

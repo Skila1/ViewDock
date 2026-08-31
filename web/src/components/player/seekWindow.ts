@@ -7,6 +7,27 @@ export function generatedMediaEndSec(video: HTMLVideoElement): number | undefine
   return Number.isFinite(end) ? end : undefined;
 }
 
+/**
+ * Native EVENT HLS: Safari's video.duration / seekable end is often the movie
+ * (or Infinity). That made 21-minute slider seeks look in-window. Use the
+ * playlist EXTINF sum and the buffer, and only trust seekable when it matches.
+ */
+export function nativeGeneratedEndSec(video: HTMLVideoElement, listedSec?: number): number | undefined {
+  const listed = listedSec != null && Number.isFinite(listedSec) && listedSec > 0 && listedSec < 86_400 ? listedSec : undefined;
+  const buf =
+    video.buffered.length > 0 && Number.isFinite(video.buffered.end(video.buffered.length - 1)) && video.buffered.end(video.buffered.length - 1) > 0
+      ? video.buffered.end(video.buffered.length - 1)
+      : undefined;
+  const seek =
+    video.seekable.length > 0 && Number.isFinite(video.seekable.end(video.seekable.length - 1))
+      ? video.seekable.end(video.seekable.length - 1)
+      : undefined;
+  const seekOk = seek != null && seek > 0 && seek < 86_400 && (buf != null ? seek <= buf + 15 : seek <= 600);
+  const candidates = [listed, buf, seekOk ? seek : undefined].filter((n): n is number => n != null);
+  if (candidates.length === 0) return undefined;
+  return Math.min(...candidates);
+}
+
 /** True if the movie timestamp can be seeked inside the current HLS/MSE window. */
 export function canSeekInWindow(opts: {
   targetMs: number;
@@ -23,11 +44,16 @@ export function canSeekInWindow(opts: {
   if (generatedEndSec != null && Number.isFinite(generatedEndSec) && targetMs > originMs + generatedEndSec * 1000 + 8000) {
     return false;
   }
-  if (seekableStartSec == null || seekableEndSec == null || !Number.isFinite(seekableStartSec) || !Number.isFinite(seekableEndSec)) {
+  let endSec = seekableEndSec;
+  // iOS EVENT often reports a movie-length seekable; without a generated edge that is a lie.
+  if (ignoreSeekableStart && generatedEndSec == null && endSec != null && endSec > 600) {
+    endSec = undefined;
+  }
+  if (seekableStartSec == null || endSec == null || !Number.isFinite(seekableStartSec) || !Number.isFinite(endSec)) {
     return Math.abs(targetMs - originMs) <= 2000;
   }
   const start = ignoreSeekableStart ? originMs : originMs + seekableStartSec * 1000;
-  const end = originMs + seekableEndSec * 1000;
+  const end = originMs + endSec * 1000;
   return targetMs >= start - 500 && targetMs <= end + 2000;
 }
 

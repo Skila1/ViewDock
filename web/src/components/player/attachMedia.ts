@@ -7,6 +7,7 @@ import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import { inspectPlaylistBody } from "@/playback/playlistInspect";
 import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
 import { captureSeekHold, seekHoldAction, shouldReplaceForGenerated } from "@/playback/seekHold";
+import { nativeGeneratedEndSec } from "./seekWindow";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
@@ -80,7 +81,7 @@ export async function attachSession(
   if (engine === "hlsjs") {
     return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated);
   }
-  return attachNativeHls(video, playlist, session, () => aborted, gone, onBeyondGenerated);
+  return attachNativeHls(video, playlist, session, () => aborted, gone, onBeyondGenerated, playlistMeta.durationMs);
 }
 
 function prepareVideo(video: HTMLVideoElement) {
@@ -352,6 +353,7 @@ async function attachNativeHls(
   isAborted: () => boolean,
   gone: () => void,
   onBeyondGenerated?: (movieMs: number) => void,
+  listedDurationMs?: number,
 ): Promise<AttachHandle> {
   video.disableRemotePlayback = false;
   video.removeAttribute("disableremoteplayback");
@@ -359,15 +361,21 @@ async function attachNativeHls(
   video.controls = true;
   video.src = playlist;
   noteAttach(video, "native_src");
-  const generatedEndSec = (): number | undefined => {
-    const d = video.duration;
-    if (Number.isFinite(d) && d > 0.5 && d < 86_400) return d;
-    if (video.buffered.length > 0) {
-      const end = video.buffered.end(video.buffered.length - 1);
-      if (Number.isFinite(end) && end > 0) return end;
+  let listedSec = listedDurationMs != null && listedDurationMs > 0 ? listedDurationMs / 1000 : undefined;
+  const generatedEndSec = () => nativeGeneratedEndSec(video, listedSec);
+  const pollListed = async () => {
+    try {
+      const res = await fetch(playlist, { credentials: "include", cache: "no-store" });
+      if (!res.ok) return;
+      const snap = inspectPlaylistBody(await res.text(), "native_edge", res.headers);
+      if (snap.sumExtinfSec > 0) listedSec = snap.sumExtinfSec;
+    } catch {
+      /* keep last edge */
     }
-    return undefined;
   };
+  const listedPoll = window.setInterval(() => {
+    void pollListed();
+  }, 1000);
   let farSeekAt = 0;
   const onSeeking = () => {
     const edge = generatedEndSec();
@@ -393,6 +401,7 @@ async function attachNativeHls(
       video.currentTime = 0;
     }
   } catch (err) {
+    window.clearInterval(listedPoll);
     video.removeEventListener("error", onError);
     video.removeEventListener("seeking", onSeeking);
     throw err;
@@ -401,6 +410,7 @@ async function attachNativeHls(
     engine: "native-hls",
     generatedEndSec,
     destroy() {
+      window.clearInterval(listedPoll);
       video.removeEventListener("error", onError);
       video.removeEventListener("seeking", onSeeking);
       video.removeAttribute("src");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSeekInWindow, pinNativeLiveEdge } from "./seekWindow";
+import { canSeekInWindow, nativeGeneratedEndSec, pinNativeLiveEdge } from "./seekWindow";
 
 describe("canSeekInWindow", () => {
   it("rejects targets before the session origin", () => {
@@ -68,6 +68,18 @@ describe("canSeekInWindow", () => {
     ).toBe(true);
   });
 
+  it("does not treat a movie-length iOS seekable range as the EVENT window", () => {
+    expect(
+      canSeekInWindow({
+        targetMs: 1_292_777,
+        originMs: 0,
+        seekableStartSec: 0,
+        seekableEndSec: 10_193,
+        ignoreSeekableStart: true,
+      }),
+    ).toBe(false);
+  });
+
   it("ignores a live-edge seekable start on Apple EVENT playlists", () => {
     expect(
       canSeekInWindow({
@@ -87,6 +99,26 @@ describe("canSeekInWindow", () => {
         ignoreSeekableStart: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("nativeGeneratedEndSec", () => {
+  it("ignores video.duration and a movie-length seekable when the buffer is short", () => {
+    const video = {
+      duration: 10193,
+      buffered: { length: 1, end: () => 12 },
+      seekable: { length: 1, end: () => 10193 },
+    } as unknown as HTMLVideoElement;
+    expect(nativeGeneratedEndSec(video, 14)).toBe(12);
+  });
+
+  it("returns undefined when only a movie-length seekable exists", () => {
+    const video = {
+      duration: 10193,
+      buffered: { length: 0, end: () => 0 },
+      seekable: { length: 1, end: () => 10193 },
+    } as unknown as HTMLVideoElement;
+    expect(nativeGeneratedEndSec(video)).toBeUndefined();
   });
 });
 
