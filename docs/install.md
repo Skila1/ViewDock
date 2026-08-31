@@ -26,6 +26,8 @@ sudo env VD_UNATTENDED=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com
 
 Optional helper: `sudo viewdock status|update|logs|doctor|uninstall` (same directory).
 
+Re-running the installer or `sudo viewdock update` on an existing folder does not overwrite `.env` values or a compose file that already has the GPU profiles. It adds missing keys (`VD_GPU`, `COMPOSE_PROFILES`, …), folds old `docker-compose.gpu.yml` / `COMPOSE_FILE` overlays into `VD_GPU=true`, and only rewrites compose when it is still the old single-service layout.
+
 The public site is [viewdock.dev](https://viewdock.dev). A typical app hostname is `app.viewdock.dev` behind your own reverse proxy or Cloudflare Tunnel (not included in Compose).
 
 ## Backup

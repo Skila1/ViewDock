@@ -309,6 +309,9 @@ case "\$cmd" in
   status) cd_prefix; \${COMPOSE} ps ;;
   logs) cd_prefix; \${COMPOSE} logs -f --tail=200 ;;
 	update)
+    if [[ -f "\${PREFIX}/install.sh" ]] && grep -q 'ensure_compose()' "\${PREFIX}/install.sh"; then
+      exec bash "\${PREFIX}/install.sh" update
+    fi
     cd_prefix
     \${COMPOSE} pull
     \${COMPOSE} up -d --remove-orphans
@@ -541,19 +544,208 @@ remove_update_helper() {
   fi
 }
 
+docker_sock_gid() {
+  if [[ -S /var/run/docker.sock ]]; then
+    stat -c %g /var/run/docker.sock 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+
+env_get() {
+  local key="$1"
+  [[ -f "${PREFIX}/.env" ]] || return 1
+  local line
+  line="$(grep -E "^${key}=" "${PREFIX}/.env" 2>/dev/null | tail -1 || true)"
+  [[ -n "${line}" ]] || return 1
+  printf '%s\n' "${line#*=}" | tr -d '"' | tr -d '\r'
+}
+
+env_has() {
+  [[ -f "${PREFIX}/.env" ]] && grep -q "^${1}=" "${PREFIX}/.env"
+}
+
+env_gpu_truthy() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "${v}" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Append KEY=VAL only when the key is missing. Never changes an existing value.
+env_ensure_key() {
+  local key="$1" val="$2" envf="${PREFIX}/.env"
+  [[ -f "${envf}" ]] || return 0
+  if grep -q "^${key}=" "${envf}"; then
+    return 0
+  fi
+  if [[ -s "${envf}" ]] && [[ "$(tail -c1 "${envf}" | wc -c)" -gt 0 ]]; then
+    printf '\n' >> "${envf}"
+  fi
+  printf '%s=%s\n' "${key}" "${val}" >> "${envf}"
+  chmod 0600 "${envf}" || true
+  msg_ok "Added ${key} to .env"
+}
+
+# Derived keys only (COMPOSE_PROFILES). User-facing values go through env_ensure_key.
+env_set_key() {
+  local key="$1" val="$2" envf="${PREFIX}/.env"
+  [[ -f "${envf}" ]] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  if grep -q "^${key}=" "${envf}"; then
+    awk -v k="${key}" -v v="${val}" 'index($0, k "=") == 1 { print k "=" v; next } { print }' "${envf}" > "${tmp}"
+  else
+    cat "${envf}" > "${tmp}"
+    if [[ -s "${tmp}" ]] && [[ "$(tail -c1 "${tmp}" | wc -c)" -gt 0 ]]; then
+      printf '\n' >> "${tmp}"
+    fi
+    printf '%s=%s\n' "${key}" "${val}" >> "${tmp}"
+  fi
+  mv "${tmp}" "${envf}"
+  chmod 0600 "${envf}" || true
+}
+
+env_sync_profiles() {
+  local profile="cpu"
+  if env_has VD_GPU && env_gpu_truthy "$(env_get VD_GPU || true)"; then
+    profile="gpu"
+  fi
+  if env_has COMPOSE_PROFILES; then
+    local cur
+    cur="$(env_get COMPOSE_PROFILES || true)"
+    if [[ "${cur}" != "${profile}" ]]; then
+      env_set_key COMPOSE_PROFILES "${profile}"
+      msg_ok "Set COMPOSE_PROFILES=${profile} to match VD_GPU"
+    fi
+  else
+    env_ensure_key COMPOSE_PROFILES "${profile}"
+  fi
+}
+
+ensure_env_defaults() {
+  if [[ ! -f "${PREFIX}/.env" ]]; then
+    cat > "${PREFIX}/.env" <<EOF
+# Host port. The container always listens on 8080.
+VD_PORT=8080
+
+# Public origin for Discord OAuth and share links. Example: https://app.viewdock.dev
+# You can also set this later under Admin → Settings.
+VD_PUBLIC_URL=
+
+EOF
+    chmod 0600 "${PREFIX}/.env"
+    return 0
+  fi
+  msg_info "Keeping existing ${PREFIX}/.env (adding missing keys only)"
+  env_ensure_key VD_PORT 8080
+  env_ensure_key VD_PUBLIC_URL ""
+}
+
+# Older installs used docker-compose.gpu.yml / docker-compose.local.yml / COMPOSE_FILE.
+# Fold that intent into .env, then drop the extra files. Existing VD_* values stay.
+migrate_legacy_install() {
+  local envf="${PREFIX}/.env"
+  local had_gpu=0
+
+  if [[ -f "${PREFIX}/docker-compose.gpu.yml" ]]; then
+    had_gpu=1
+    msg_info "Detected older docker-compose.gpu.yml"
+  fi
+  if [[ -f "${envf}" ]] && grep -qE '^COMPOSE_FILE=.*gpu' "${envf}"; then
+    had_gpu=1
+    msg_info "Detected older COMPOSE_FILE GPU overlay"
+  fi
+  if [[ "${had_gpu}" -eq 1 ]] && ! env_has VD_GPU; then
+    env_ensure_key VD_GPU true
+  fi
+
+  if [[ -f "${PREFIX}/docker-compose.local.yml" ]]; then
+    msg_info "Detected older docker-compose.local.yml"
+    if ! env_has VD_IMAGE && grep -qE 'image:[[:space:]]*viewdock:local' "${PREFIX}/docker-compose.local.yml"; then
+      env_ensure_key VD_IMAGE viewdock:local
+    fi
+    if ! env_has VD_RESTART && grep -qE 'restart:[[:space:]]*"?no"?' "${PREFIX}/docker-compose.local.yml"; then
+      env_ensure_key VD_RESTART no
+    fi
+  fi
+
+  if [[ -f "${envf}" ]] && grep -q '^COMPOSE_FILE=' "${envf}"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -v '^COMPOSE_FILE=' "${envf}" > "${tmp}" || true
+    mv "${tmp}" "${envf}"
+    chmod 0600 "${envf}" || true
+    msg_ok "Removed obsolete COMPOSE_FILE from .env"
+  fi
+
+  if [[ -f "${PREFIX}/docker-compose.gpu.yml" || -f "${PREFIX}/docker-compose.local.yml" ]]; then
+    rm -f "${PREFIX}/docker-compose.gpu.yml" "${PREFIX}/docker-compose.local.yml"
+    msg_ok "Removed leftover compose overlay files"
+  fi
+}
+
+compose_is_current() {
+  local f="${PREFIX}/docker-compose.yml"
+  [[ -f "${f}" ]] || return 1
+  grep -q 'viewdock-gpu:' "${f}" || return 1
+  grep -q 'profiles: \["cpu"\]' "${f}" || return 1
+  grep -q 'profiles: \["gpu"\]' "${f}" || return 1
+  grep -q 'gpus: all' "${f}" || return 1
+}
+
 write_compose() {
   local dockergid="${1:-0}"
   mkdir -p "${PREFIX}"
   cat > "${PREFIX}/docker-compose.yml" <<EOF
+# GPU is selected from .env (VD_GPU=true|false). Compose profiles follow that flag:
+#   VD_GPU=false  →  COMPOSE_PROFILES=cpu
+#   VD_GPU=true   →  COMPOSE_PROFILES=gpu
 name: viewdock
+
+x-viewdock: &viewdock
+  image: \${VD_IMAGE:-ghcr.io/skila1/viewdock:latest}
+  container_name: viewdock
+  restart: \${VD_RESTART:-unless-stopped}
+  stop_grace_period: 60s
+  env_file: [.env]
+  environment:
+    VD_HTTP_ADDR: ":8080"
+    VD_CONFIG_DIR: /config
+    VD_CACHE_DIR: /cache
+    VD_TRANSCODE_DIR: /transcode
+    VD_MEDIA_DIR: /media
+    VD_COMPOSE_PROJECT: viewdock
+    VD_UPDATE_DIR: /update
+  group_add:
+    - "${dockergid}"
+  volumes:
+    - ./config:/config
+    - ./cache:/cache
+    - ./transcode:/transcode
+    - ./media:/media
+    - ./update:/update
+    - /var/run/docker.sock:/var/run/docker.sock
+  ports:
+    - "\${VD_PORT:-8080}:8080"
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+    interval: 10s
+    timeout: 5s
+    retries: 8
+    start_period: 25s
 
 services:
   viewdock:
-    image: ghcr.io/skila1/viewdock:latest
-    container_name: viewdock
-    restart: unless-stopped
-    stop_grace_period: 60s
-    env_file: [.env]
+    <<: *viewdock
+    profiles: ["cpu"]
+
+  viewdock-gpu:
+    <<: *viewdock
+    profiles: ["gpu"]
+    gpus: all
     environment:
       VD_HTTP_ADDR: ":8080"
       VD_CONFIG_DIR: /config
@@ -562,74 +754,35 @@ services:
       VD_MEDIA_DIR: /media
       VD_COMPOSE_PROJECT: viewdock
       VD_UPDATE_DIR: /update
-    group_add:
-      - "${dockergid}"
-    volumes:
-      - ./config:/config
-      - ./cache:/cache
-      - ./transcode:/transcode
-      - ./media:/media
-      - ./update:/update
-      - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - "\${VD_PORT:-8080}:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 8
-      start_period: 25s
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
 EOF
   chmod 0644 "${PREFIX}/docker-compose.yml"
 }
 
-# Same overlay as repo docker-compose.gpu.yml. Written only when Docker's NVIDIA runtime is present.
-write_gpu_compose() {
-  cat > "${PREFIX}/docker-compose.gpu.yml" <<'EOF'
-services:
-  viewdock:
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
-    gpus: all
-EOF
-  chmod 0644 "${PREFIX}/docker-compose.gpu.yml"
-}
-
-env_set_compose_file_gpu() {
-  local envf="${PREFIX}/.env"
-  [[ -f "${envf}" ]] || return 0
-  local tmp
-  tmp="$(mktemp)"
-  if grep -q '^COMPOSE_FILE=' "${envf}"; then
-    awk '
-      /^COMPOSE_FILE=/ {
-        print "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml"
-        next
-      }
-      { print }
-    ' "${envf}" > "${tmp}"
-  else
-    cat "${envf}" > "${tmp}"
-    printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml\n' >> "${tmp}"
+# Write compose only when missing or still on the old single-service / overlay layout.
+# An already-migrated file is left alone (custom volumes, image, group_add stay).
+ensure_compose() {
+  local dockergid="${1:-0}"
+  mkdir -p "${PREFIX}"
+  if compose_is_current; then
+    msg_info "Keeping existing ${PREFIX}/docker-compose.yml"
+    return 0
   fi
-  mv "${tmp}" "${envf}"
-  chmod 0600 "${envf}" || true
-}
-
-# Drop GPU overlay from COMPOSE_FILE on CPU-only / missing-runtime reinstall. Other .env keys stay.
-env_clear_gpu_compose_file() {
-  local envf="${PREFIX}/.env"
-  [[ -f "${envf}" ]] || return 0
-  grep -q '^COMPOSE_FILE=.*gpu' "${envf}" || return 0
-  local tmp
-  tmp="$(mktemp)"
-  grep -v '^COMPOSE_FILE=.*gpu' "${envf}" > "${tmp}" || true
-  mv "${tmp}" "${envf}"
-  chmod 0600 "${envf}" || true
+  if [[ -f "${PREFIX}/docker-compose.yml" ]]; then
+    local oldgid
+    oldgid="$(grep -A2 'group_add:' "${PREFIX}/docker-compose.yml" | grep -oE '[0-9]+' | head -1 || true)"
+    if [[ -n "${oldgid}" ]]; then
+      dockergid="${oldgid}"
+    fi
+    cp -a "${PREFIX}/docker-compose.yml" "${PREFIX}/docker-compose.yml.bak"
+    msg_info "Older docker-compose.yml detected; upgrading to the GPU-profile layout (backup: docker-compose.yml.bak)"
+  fi
+  write_compose "${dockergid}"
 }
 
 # Detect NVIDIA GPU + Docker runtime. Never installs drivers. Never fails install.
+# Never overwrites an existing VD_GPU.
 detect_nvidia_docker() {
   local gpu_hint=0
   local runtime_ok=0
@@ -646,17 +799,22 @@ detect_nvidia_docker() {
     fi
   fi
 
-  if [[ "${gpu_hint}" -eq 1 && "${runtime_ok}" -eq 0 ]]; then
-    echo "NVIDIA GPU detected but Docker GPU runtime is unavailable. ViewDock will use CPU transcoding."
-  fi
-
-  if [[ "${runtime_ok}" -eq 1 ]]; then
-    write_gpu_compose
-    env_set_compose_file_gpu
-    msg_ok "NVIDIA Docker runtime detected; GPU overlay enabled"
+  if env_has VD_GPU; then
+    if [[ "${gpu_hint}" -eq 1 && "${runtime_ok}" -eq 0 ]] && ! env_gpu_truthy "$(env_get VD_GPU || true)"; then
+      echo "NVIDIA GPU detected but Docker GPU runtime is unavailable. ViewDock will use CPU transcoding."
+    fi
   else
-    env_clear_gpu_compose_file
+    if [[ "${gpu_hint}" -eq 1 && "${runtime_ok}" -eq 0 ]]; then
+      echo "NVIDIA GPU detected but Docker GPU runtime is unavailable. ViewDock will use CPU transcoding."
+      env_ensure_key VD_GPU false
+    elif [[ "${runtime_ok}" -eq 1 ]]; then
+      env_ensure_key VD_GPU true
+      msg_ok "NVIDIA Docker runtime detected; VD_GPU=true"
+    else
+      env_ensure_key VD_GPU false
+    fi
   fi
+  env_sync_profiles
   return 0
 }
 
@@ -689,43 +847,26 @@ cmd_install() {
   chmod 0777 "${PREFIX}/update" "${PREFIX}/media" "${PREFIX}/config/uploads" || true
   chown 1000:1000 "${PREFIX}/media" "${PREFIX}/config/uploads" 2>/dev/null || true
   mkdir -p "${CFG_MEDIAHOST}"
-  local dockergid="0"
-  if [[ -S /var/run/docker.sock ]]; then
-    dockergid="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)"
-  fi
-  write_compose "${dockergid}"
+  local dockergid
+  dockergid="$(docker_sock_gid)"
+  migrate_legacy_install
+  ensure_env_defaults
+  detect_nvidia_docker
+  ensure_compose "${dockergid}"
   write_cli
   save_installer
   install_update_helper
-
-  if [[ -f "${PREFIX}/.env" ]]; then
-    msg_info "Keeping existing ${PREFIX}/.env"
-    grep -q '^VD_PORT=' "${PREFIX}/.env" || echo "VD_PORT=8080" >> "${PREFIX}/.env"
-    grep -q '^VD_PUBLIC_URL=' "${PREFIX}/.env" || echo "VD_PUBLIC_URL=" >> "${PREFIX}/.env"
-  else
-    cat > "${PREFIX}/.env" <<EOF
-# Host port. The container always listens on 8080.
-VD_PORT=8080
-
-# Public origin for Discord OAuth and share links. Example: https://app.viewdock.dev
-# You can also set this later under Admin → Settings.
-VD_PUBLIC_URL=
-EOF
-    chmod 0600 "${PREFIX}/.env"
-  fi
-
-  detect_nvidia_docker
 
   if [[ ! -f "${PREFIX}/docker-compose.yml" || ! -f "${PREFIX}/.env" ]]; then
     msg_err "Failed to write ${PREFIX}/docker-compose.yml and ${PREFIX}/.env"
     exit 1
   fi
-  msg_ok "Wrote ${PREFIX}/docker-compose.yml and ${PREFIX}/.env"
+  msg_ok "Compose project ready in ${PREFIX}"
 
   cd "${PREFIX}"
   msg_info "Pulling ${IMAGE} in ${PREFIX}"
   ${COMPOSE} pull
-  ${COMPOSE} up -d
+  ${COMPOSE} up -d --remove-orphans
   digest="$(docker image inspect "${IMAGE}" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
   if [[ -n "${digest}" ]]; then
     printf '%s\n' "${digest}" > "${PREFIX}/update/applied"
@@ -745,10 +886,10 @@ EOF
   echo
   echo -e " ${BOLD}${BL}ViewDock files are in ${PREFIX}${CL}"
   echo "  ${PREFIX}/docker-compose.yml"
-  if [[ -f "${PREFIX}/docker-compose.gpu.yml" ]] && grep -q '^COMPOSE_FILE=.*gpu' "${PREFIX}/.env" 2>/dev/null; then
-    echo "  ${PREFIX}/docker-compose.gpu.yml (NVIDIA overlay)"
-  fi
   echo "  ${PREFIX}/.env"
+  if env_has VD_GPU; then
+    echo "  GPU: VD_GPU=$(env_get VD_GPU || echo false)"
+  fi
   echo "  Open http://<this-host>:8080 and create the first administrator."
   echo "  First-run token: printed in docker compose logs after ViewDock starts (8 characters)."
   echo "  Public URL: ${PREFIX}/.env (VD_PUBLIC_URL) or Admin → Settings after login."
@@ -769,9 +910,15 @@ EOF
 cmd_status() { [[ -f "${PREFIX}/docker-compose.yml" ]] || { echo "Not installed." >&2; exit 1; }; cd "${PREFIX}" && ${COMPOSE} ps; }
 cmd_logs() { cd "${PREFIX}" && ${COMPOSE} logs -f --tail=200; }
 cmd_update() {
+  local dockergid
+  dockergid="$(docker_sock_gid)"
+  migrate_legacy_install
+  ensure_env_defaults
+  detect_nvidia_docker
+  ensure_compose "${dockergid}"
   cd "${PREFIX}"
   ${COMPOSE} pull
-  ${COMPOSE} up -d
+  ${COMPOSE} up -d --remove-orphans
 }
 cmd_uninstall() {
   need_root

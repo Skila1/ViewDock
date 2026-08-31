@@ -5,8 +5,8 @@ The image is Debian + ffmpeg + libzimg (`zscale`). VAAPI packages install on `li
 - Image: `ghcr.io/skila1/viewdock:latest` (same tag on CPU and GPU hosts)
 - Platforms: `linux/amd64`, `linux/arm64`
 - Tags: `latest` on the default branch, the `VERSION` file, git SHA, and semver from `v*` tags
-- CPU-only: `docker-compose.yml` only (no `gpus:`, no NVIDIA env)
-- GPU hosts: add `docker-compose.gpu.yml` via `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` or `docker compose -f docker-compose.yml -f docker-compose.gpu.yml`. ViewDock does not install the NVIDIA Container Toolkit or drivers.
+- One Compose file. Set `VD_GPU=true` or `VD_GPU=false` in `.env`. The installer sets `COMPOSE_PROFILES` to match (`gpu` or `cpu`) so CPU hosts never request an NVIDIA device.
+- `VD_GPU=true` needs the NVIDIA Container Toolkit on the host. ViewDock does not install drivers or the toolkit.
 
 Production hosts should use the [one-line installer](install.md), then:
 
@@ -15,7 +15,7 @@ cd ~/viewdock
 docker compose pull && docker compose up -d
 ```
 
-The repo `docker-compose.yml` is the CPU-safe production pull file. The installer writes the same shape (plus `./update` and the Docker socket) so **Admin → Updates** can recreate the container. On a host with a working NVIDIA Docker runtime, the installer also writes `docker-compose.gpu.yml` and sets `COMPOSE_FILE`. Re-running the installer on a CPU-only host drops that overlay from `.env`.
+The repo `docker-compose.yml` is the production pull file. The installer writes the same shape (plus `./update` and the Docker socket) so **Admin → Updates** can recreate the container. Re-running the installer or `viewdock update` keeps an existing `.env` and an already-migrated compose file; it only adds missing keys and upgrades the old overlay layout. `VD_GPU` is never overwritten. On a first install, a working NVIDIA Docker runtime sets `VD_GPU=true`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | sudo bash

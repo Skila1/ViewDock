@@ -1,12 +1,51 @@
+# GPU is selected from .env (VD_GPU=true|false). Compose profiles follow that flag:
+#   VD_GPU=false  →  COMPOSE_PROFILES=cpu
+#   VD_GPU=true   →  COMPOSE_PROFILES=gpu
+# The installer keeps those in sync. CPU hosts never request an NVIDIA device.
+# Same image for both. NVIDIA Container Toolkit is required when VD_GPU=true.
 name: viewdock
+
+x-viewdock: &viewdock
+  image: ${VD_IMAGE:-ghcr.io/skila1/viewdock:latest}
+  container_name: viewdock
+  restart: ${VD_RESTART:-unless-stopped}
+  stop_grace_period: 60s
+  env_file: [.env]
+  environment:
+    VD_HTTP_ADDR: ":8080"
+    VD_CONFIG_DIR: /config
+    VD_CACHE_DIR: /cache
+    VD_TRANSCODE_DIR: /transcode
+    VD_MEDIA_DIR: /media
+    VD_COMPOSE_PROJECT: viewdock
+    VD_UPDATE_DIR: /update
+  group_add:
+    - "991"
+  volumes:
+    - ./config:/config
+    - ./cache:/cache
+    - ./transcode:/transcode
+    - ./media:/media
+    - ./update:/update
+    - /var/run/docker.sock:/var/run/docker.sock
+  ports:
+    - "${VD_PORT:-8080}:8080"
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+    interval: 10s
+    timeout: 5s
+    retries: 8
+    start_period: 25s
 
 services:
   viewdock:
-    image: ghcr.io/skila1/viewdock:latest
-    container_name: viewdock
-    restart: unless-stopped
-    stop_grace_period: 60s
-    env_file: [.env]
+    <<: *viewdock
+    profiles: ["cpu"]
+
+  viewdock-gpu:
+    <<: *viewdock
+    profiles: ["gpu"]
+    gpus: all
     environment:
       VD_HTTP_ADDR: ":8080"
       VD_CONFIG_DIR: /config
@@ -15,20 +54,5 @@ services:
       VD_MEDIA_DIR: /media
       VD_COMPOSE_PROJECT: viewdock
       VD_UPDATE_DIR: /update
-    group_add:
-      - "991"
-    volumes:
-      - ./config:/config
-      - ./cache:/cache
-      - ./transcode:/transcode
-      - ./media:/media
-      - ./update:/update
-      - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - "${VD_PORT:-8080}:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 8
-      start_period: 25s
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility

@@ -54,6 +54,27 @@ progress_write() {
   progress_write 5 "queued" "Host received update request"
   sleep 1
   cd "${PREFIX}"
+  rm -f docker-compose.gpu.yml docker-compose.local.yml
+  if [[ -f .env ]]; then
+    if grep -q '^COMPOSE_FILE=' .env; then
+      _tmp="$(mktemp)"
+      grep -v '^COMPOSE_FILE=' .env > "${_tmp}" || true
+      mv "${_tmp}" .env
+    fi
+    _gpu="$(grep -E '^VD_GPU=' .env | tail -1 | cut -d= -f2- | tr -d '"' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' || true)"
+    _profile=cpu
+    case "${_gpu}" in true|1|yes|on) _profile=gpu ;; esac
+    if grep -q '^COMPOSE_PROFILES=' .env; then
+      _cur="$(grep -E '^COMPOSE_PROFILES=' .env | tail -1 | cut -d= -f2- | tr -d '"' | tr -d '[:space:]' || true)"
+      if [[ "${_cur}" != "${_profile}" ]]; then
+        _tmp="$(mktemp)"
+        awk -v v="${_profile}" 'index($0, "COMPOSE_PROFILES=") == 1 { print "COMPOSE_PROFILES=" v; next } { print }' .env > "${_tmp}"
+        mv "${_tmp}" .env
+      fi
+    else
+      printf '\nCOMPOSE_PROFILES=%s\n' "${_profile}" >> .env
+    fi
+  fi
   img="ghcr.io/skila1/viewdock:latest"
   if [[ -f docker-compose.yml ]]; then
     from_compose="$(grep -E 'image:[[:space:]]' docker-compose.yml | head -1 | awk '{print $2}' | tr -d '"' || true)"
