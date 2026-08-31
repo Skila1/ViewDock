@@ -4,6 +4,7 @@ import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMe
 import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import { inspectPlaylistBody } from "@/playback/playlistInspect";
+import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
 import { captureSeekHold, seekHoldAction } from "@/playback/seekHold";
 import type { PlaybackSession } from "@/types/api.gen";
 
@@ -99,12 +100,8 @@ async function attachWithHls(
   const hls = new Hls({
     enableWorker: true,
     preferManagedMediaSource: true,
-    lowLatencyMode: false,
     startPosition: 0,
-    liveDurationInfinity: false,
-    liveSyncDurationCount: 1,
-    liveMaxLatencyDurationCount: 3,
-    maxLiveSyncPlaybackRate: 1,
+    ...eventPlaylistHlsSync(),
     maxBufferLength: 30,
     maxMaxBufferLength: 90,
     backBufferLength: 900,
