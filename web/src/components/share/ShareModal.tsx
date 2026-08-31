@@ -70,7 +70,7 @@ export function ShareModal({ open, onOpenChange, itemKind, itemId }: Props) {
             ) : null}
             <div className="flex justify-end gap-2">
               <Dialog.Close className="rounded border border-line px-3 py-1.5 text-xs">Cancel</Dialog.Close>
-              <button type="submit" className="rounded bg-accent px-3 py-1.5 text-xs text-black">
+              <button type="submit" className="rounded bg-accent px-3 py-1.5 text-xs text-white">
                 Create link
               </button>
             </div>

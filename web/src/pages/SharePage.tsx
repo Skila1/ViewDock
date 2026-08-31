@@ -74,7 +74,7 @@ export function SharePage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {err ? <p className="text-xs text-danger">{err}</p> : null}
-          <button type="submit" className="tap w-full rounded-md bg-accent text-sm text-black">
+          <button type="submit" className="tap w-full rounded-md bg-accent text-sm text-white">
             Unlock
           </button>
         </form>

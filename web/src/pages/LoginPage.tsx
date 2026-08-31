@@ -35,7 +35,7 @@ export function LoginPage() {
     <div className="flex min-h-dvh items-center justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
       <form onSubmit={onSubmit} className="w-full max-w-xs space-y-3 rounded-2xl border border-line bg-raised p-6">
         <Logo className="mx-auto h-24 w-24" />
-        <h1 className="text-center text-lg font-semibold tracking-tight">ViewDock</h1>
+        <h1 className="text-center text-lg font-semibold tracking-tight">View<span className="text-accent">Dock</span></h1>
         <input
           autoComplete="username"
           placeholder="Username"

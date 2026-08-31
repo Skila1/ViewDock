@@ -943,7 +943,7 @@ export function Player({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
           <p className="max-w-md text-center text-sm text-danger">{err}</p>
           <div className="flex gap-3">
-            <button type="button" className="rounded-md bg-accent px-3 py-1.5 text-sm text-black" onClick={() => void createAndAttach("START")}>
+            <button type="button" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white" onClick={() => void createAndAttach("START")}>
               Retry
             </button>
             {onClose ? (

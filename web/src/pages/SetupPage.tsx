@@ -87,7 +87,7 @@ export function SetupPage() {
     <div className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center bg-bg p-6 pt-[max(1.5rem,var(--sat))] pb-[max(1.5rem,var(--sab))]">
       <Logo className="mb-4 h-20 w-20" />
       <p className="mb-1 text-xs font-semibold uppercase tracking-[0.08em] text-accent">First-run setup</p>
-      <h1 className="mb-4 text-xl font-semibold tracking-tight">ViewDock</h1>
+      <h1 className="mb-4 text-xl font-semibold tracking-tight">View<span className="text-accent">Dock</span></h1>
       <ol className="mb-5 flex flex-wrap gap-2 text-[11px] text-dim">
         {STEPS.map((s) => (
           <li key={s} className={s === step ? "text-accent" : undefined}>

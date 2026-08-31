@@ -66,7 +66,7 @@ export function RolesPage() {
         <input className="w-full" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
         <input className="w-full" placeholder="Description" value={desc} onChange={(e) => setDesc(e.target.value)} />
         {err ? <p className="text-xs text-danger">{err}</p> : null}
-        <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-black">
+        <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
           Create
         </button>
       </form>
@@ -133,7 +133,7 @@ export function RolesPage() {
             </select>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-black">
+            <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
               Save
             </button>
             {!selected.is_system ? (

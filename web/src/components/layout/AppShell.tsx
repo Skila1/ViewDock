@@ -63,7 +63,7 @@ export function AppShell() {
       <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-raised/80 md:flex">
         <Link to="/" className="flex items-center gap-2 px-3 py-4">
           <Logo className="h-12 w-12" />
-          <span className="text-sm font-bold tracking-wide">ViewDock</span>
+          <span className="text-sm font-bold tracking-wide">View<span className="text-accent">Dock</span></span>
         </Link>
         <nav className="flex-1 space-y-0.5 px-2 pt-3">
           {nav.map((it) => (

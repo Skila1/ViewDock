@@ -18,7 +18,7 @@ export function ResumeChoice({ title, resumeMs, resumeTo, startTo }: Props) {
         <Link
           to={resumeTo}
           replace
-          className="tap inline-flex items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-black"
+          className="tap inline-flex items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white"
         >
           <Play size={16} /> Resume
         </Link>

@@ -86,7 +86,7 @@ export function UsersPage() {
             ))}
           </div>
           {err ? <p className="text-xs text-danger">{err}</p> : null}
-          <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-black">
+          <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
             Create
           </button>
         </form>

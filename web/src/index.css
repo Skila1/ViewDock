@@ -17,22 +17,22 @@
 
 :root {
   color-scheme: dark;
-  --vd-bg: #0c1117;
-  --vd-surface-1: #131a22;
-  --vd-surface-2: #1a232d;
-  --vd-surface-3: #24303c;
+  --vd-bg: #05070c;
+  --vd-surface-1: #0c121c;
+  --vd-surface-2: #121a28;
+  --vd-surface-3: #1a2434;
   --vd-border: rgba(232, 238, 245, 0.08);
   --vd-text: #eef3f8;
   --vd-text-2: #9aa8b6;
   --vd-text-3: #6b7a88;
-  --vd-accent: #1db954;
-  --vd-accent-hover: #22c55e;
+  --vd-accent: #0084fc;
+  --vd-accent-hover: #00a8ff;
   --vd-destructive: #f07187;
   --vd-warning: #e3b341;
-  --vd-success: #34d399;
-  --vd-ring: #3ddc84;
-  --chip: #1a2a1c;
-  --chip-text: #1ed760;
+  --vd-success: #38bdf8;
+  --vd-ring: #0084fc;
+  --chip: #0d1a2e;
+  --chip-text: #7ec8ff;
   --poster-ratio: 2 / 3;
   --radius: 12px;
   --nav-h: 56px;
@@ -67,7 +67,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   background:
-    radial-gradient(900px 420px at 0% -10%, rgba(29, 185, 84, 0.08), transparent 55%),
+    radial-gradient(900px 420px at 0% -10%, rgba(0, 132, 252, 0.12), transparent 55%),
     var(--vd-bg);
 }
 
@@ -214,7 +214,7 @@ textarea:focus {
 
 .btn-green {
   background: var(--vd-accent);
-  color: #04140a;
+  color: #fff;
   font-weight: 650;
 }
 

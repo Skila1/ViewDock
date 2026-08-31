@@ -74,7 +74,7 @@ export function TogetherPage({ guest }: Props) {
             placeholder="Password"
           />
           {err ? <p className="text-xs text-danger">{err}</p> : null}
-          <button type="submit" className="w-full rounded-md bg-accent py-2 text-sm text-black">
+          <button type="submit" className="w-full rounded-md bg-accent py-2 text-sm text-white">
             Unlock
           </button>
         </form>
