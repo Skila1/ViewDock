@@ -34,7 +34,7 @@ describe("device", () => {
     ).toBe(false);
   });
 
-  it("opens iPhone AVKit via webkitEnterFullscreen, not presentation mode", () => {
+  it("opens iPhone AVKit via webkitEnterFullscreen only — no pause/play", () => {
     vi.stubGlobal("navigator", {
       userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
       platform: "iPhone",
@@ -55,14 +55,13 @@ describe("device", () => {
       removeAttribute: vi.fn(),
     } as unknown as HTMLVideoElement;
     expect(enterNativeFullscreen(video)).toBe(true);
-    expect(video.disableRemotePlayback).toBe(true);
     expect(enter).toHaveBeenCalledOnce();
-    expect(pause).toHaveBeenCalledOnce();
-    expect(play).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+    expect(play).not.toHaveBeenCalled();
     expect(present).not.toHaveBeenCalled();
   });
 
-  it("starts playback before AVKit when the video is paused", () => {
+  it("does not start playback as part of entering AVKit", () => {
     vi.stubGlobal("navigator", {
       userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)",
       platform: "iPhone",
@@ -78,11 +77,11 @@ describe("device", () => {
       removeAttribute: vi.fn(),
     } as unknown as HTMLVideoElement;
     expect(enterAvkitFromUserGesture(video)).toBe(true);
-    expect(play).toHaveBeenCalledOnce();
+    expect(play).not.toHaveBeenCalled();
     expect(enter).toHaveBeenCalledOnce();
   });
 
-  it("strips playsinline before AVKit (Apple opt-out of native fullscreen)", () => {
+  it("can strip or restore playsinline", () => {
     const video = document.createElement("video");
     video.setAttribute("playsinline", "");
     video.setAttribute("webkit-playsinline", "");
@@ -91,6 +90,9 @@ describe("device", () => {
     expect(video.hasAttribute("playsinline")).toBe(false);
     expect(video.hasAttribute("webkit-playsinline")).toBe(false);
     expect(video.playsInline).toBe(false);
+    allowInlinePlayback(video, true);
+    expect(video.hasAttribute("playsinline")).toBe(true);
+    expect(video.playsInline).toBe(true);
   });
 
   it("returns InvalidStateError text when webkitEnterFullscreen throws", () => {
@@ -111,10 +113,10 @@ describe("device", () => {
       },
     } as unknown as HTMLVideoElement;
     expect(enterAvkitDetailed(video)).toEqual({
-      ok: true,
+      ok: false,
       threw: "InvalidStateError: The object is in an invalid state.",
     });
-    expect(play).toHaveBeenCalledOnce();
+    expect(play).not.toHaveBeenCalled();
   });
 });
 

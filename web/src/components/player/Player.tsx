@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
-import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIPhone, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
+import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
@@ -219,7 +219,6 @@ export function Player({
         attachedAtRef.current = Date.now();
         lastStablePosRef.current = originRef.current;
         if (attachRef.current.engine === "native-hls") {
-          video.controls = false;
           if (video.currentTime > 0.25) {
             noteCurrentTimeWrite(video, 0, "createAndAttach.nativeHlsReset", sess.id);
             video.currentTime = 0;
@@ -448,10 +447,9 @@ export function Player({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (!isIPhone()) {
-      video.setAttribute("playsinline", "");
-      video.setAttribute("webkit-playsinline", "");
-    }
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    if (isIOSDevice()) video.setAttribute("x-webkit-airplay", "allow");
     const sync = () => {
       setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
     };
@@ -468,7 +466,7 @@ export function Player({
       report("play.fullscreen", { action: "exit", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
       noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
-      restoreMmsRemotePlaybackLock(video);
+      if (engineRef.current === "hlsjs") restoreMmsRemotePlaybackLock(video);
       setFs(false);
       setPageFs(false);
     };
@@ -527,6 +525,7 @@ export function Player({
       });
       if (result.ok) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
+        setFs(true);
       } else {
         noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
         report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, threw: result.threw, session_id: sessionRef.current?.id });
@@ -665,6 +664,7 @@ export function Player({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, pos]);
 
+  const applePlayer = isIOSDevice();
   const duration = movieDurationMs(session, dur);
   const qualities = session?.qualities ?? [];
   const attaching =
@@ -686,9 +686,10 @@ export function Player({
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
-        playsInline={!isIPhone()}
+        playsInline
+        controls={applePlayer}
         preload="auto"
-        onClick={(e) => {
+        onClick={applePlayer ? undefined : (e) => {
           e.stopPropagation();
           togglePlay("video_click");
         }}
@@ -739,8 +740,11 @@ export function Player({
         </div>
 
         <div
-          className="pointer-events-auto absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
-          style={{ paddingBottom: "max(1rem, var(--sab))" }}
+          className="pointer-events-auto absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
+          style={{
+            bottom: applePlayer ? "max(3.25rem, calc(var(--sab) + 2.75rem))" : 0,
+            paddingBottom: applePlayer ? "0.5rem" : "max(1rem, var(--sab))",
+          }}
         >
           <input
             type="range"
@@ -751,25 +755,29 @@ export function Player({
             className="mb-3 h-8 w-full accent-[var(--accent)]"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
-              {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
-            </button>
+            {applePlayer ? null : (
+              <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
+                {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+              </button>
+            )}
             <span className="text-xs tabular-nums text-white/80">
               {formatClock(pos)} / {formatClock(duration)}
             </span>
-            <button
-              type="button"
-              className="tap text-white"
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.muted = !v.muted;
-                setMuted(v.muted);
-              }}
-              aria-label="Mute"
-            >
-              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
+            {applePlayer ? null : (
+              <button
+                type="button"
+                className="tap text-white"
+                onClick={() => {
+                  const v = videoRef.current;
+                  if (!v) return;
+                  v.muted = !v.muted;
+                  setMuted(v.muted);
+                }}
+                aria-label="Mute"
+              >
+                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              </button>
+            )}
             <div className="ml-auto flex items-center gap-2">
               {session?.next_episode ? (
                 <button
@@ -793,26 +801,16 @@ export function Player({
                   ))}
                 </select>
               ) : null}
-              <button
-                type="button"
-                className="tap text-white"
-                aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
-                onPointerUp={(e) => {
-                  // WebKit only treats touchend/click as a media gesture. React
-                  // onClick is too late on iPhone and webkitEnterFullscreen no-ops.
-                  if (isIOSDevice()) toggleFullscreen(e);
-                }}
-                onClick={(e) => {
-                  if (isIOSDevice()) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                  }
-                  toggleFullscreen(e);
-                }}
-              >
-                {fs ? <Minimize size={18} /> : <Maximize size={18} />}
-              </button>
+              {applePlayer ? null : (
+                <button
+                  type="button"
+                  className="tap text-white"
+                  aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+                  onClick={(e) => toggleFullscreen(e)}
+                >
+                  {fs ? <Minimize size={18} /> : <Maximize size={18} />}
+                </button>
+              )}
             </div>
           </div>
         </div>

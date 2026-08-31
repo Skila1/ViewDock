@@ -50,7 +50,7 @@ export function restoreMmsRemotePlaybackLock(video: HTMLVideoElement) {
   video.setAttribute("disableremoteplayback", "");
 }
 
-/** playsinline is Apple's opt-out of AVKit. Strip it before webkitEnterFullscreen. */
+/** Match 67e1f88: keep playsinline on. Safari's native controls present AVKit. */
 export function allowInlinePlayback(video: HTMLVideoElement, on: boolean) {
   video.playsInline = on;
   if (on) {
@@ -64,38 +64,16 @@ export function allowInlinePlayback(video: HTMLVideoElement, on: boolean) {
 
 export type AvkitEnterResult = { ok: boolean; threw?: string };
 
-/**
- * On iPhone, playsinline is Apple's opt-out of AVKit. Live logs showed
- * webkitEnterFullscreen accepted (supports=true, no throw) and never
- * presented. Apple's documented path is play() without playsinline.
- * https://webkit.org/blog/6784/new-video-policies-for-ios/
- */
+/** Same as 67e1f88 / 5c18566: only webkitEnterFullscreen. Do not pause/play. */
 export function enterAvkitDetailed(video: HTMLVideoElement): AvkitEnterResult {
   const apple = asApple(video);
   try {
-    if (isIPhone()) {
-      allowInlinePlayback(video, false);
+    if (isIOSDevice()) {
       const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
       if (typeof enter === "function") {
-        try {
-          enter.call(video);
-        } catch (err) {
-          const threw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-          if (video.paused) void video.play().catch(() => undefined);
-          else {
-            video.pause();
-            void video.play().catch(() => undefined);
-          }
-          return { ok: true, threw };
-        }
+        enter.call(video);
+        return { ok: true };
       }
-      if (video.paused) {
-        void video.play().catch(() => undefined);
-      } else {
-        video.pause();
-        void video.play().catch(() => undefined);
-      }
-      return { ok: true };
     }
     if (typeof apple.webkitSetPresentationMode === "function") {
       apple.webkitSetPresentationMode("fullscreen");

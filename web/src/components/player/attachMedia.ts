@@ -1,5 +1,5 @@
 import { nativeHlsSupported, sessionUrl } from "@/api/profile";
-import { allowInlinePlayback, isIPhone } from "@/lib/device";
+import { allowInlinePlayback, isIOSDevice } from "@/lib/device";
 import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/airplay";
 import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMeta } from "@/playback/attachTrace";
 import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
@@ -84,9 +84,9 @@ export async function attachSession(
 }
 
 function prepareVideo(video: HTMLVideoElement) {
-  video.controls = false;
-  // iPhone: never set playsinline — play() is what opens AVKit.
-  allowInlinePlayback(video, !isIPhone());
+  // 67e1f88: iOS uses Safari's native controls (that fullscreen button works).
+  video.controls = isIOSDevice();
+  allowInlinePlayback(video, true);
   stripAlternateSources(video);
 }
 
@@ -356,6 +356,7 @@ async function attachNativeHls(
   video.disableRemotePlayback = false;
   video.removeAttribute("disableremoteplayback");
   video.setAttribute("x-webkit-airplay", "allow");
+  video.controls = true;
   video.src = playlist;
   noteAttach(video, "native_src");
   const generatedEndSec = (): number | undefined => {
