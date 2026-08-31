@@ -79,7 +79,7 @@ export async function attachSession(
   if (engine === "hlsjs") {
     return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated);
   }
-  return attachNativeHls(video, playlist, () => aborted, gone);
+  return attachNativeHls(video, playlist, session, () => aborted, gone, onBeyondGenerated);
 }
 
 function prepareVideo(video: HTMLVideoElement) {
@@ -348,17 +348,43 @@ async function attachWithHls(
 async function attachNativeHls(
   video: HTMLVideoElement,
   playlist: string,
+  session: PlaybackSession,
   isAborted: () => boolean,
   gone: () => void,
+  onBeyondGenerated?: (movieMs: number) => void,
 ): Promise<AttachHandle> {
+  video.disableRemotePlayback = false;
+  video.removeAttribute("disableremoteplayback");
   video.setAttribute("x-webkit-airplay", "allow");
   video.src = playlist;
+  noteAttach(video, "native_src");
+  const generatedEndSec = (): number | undefined => {
+    const d = video.duration;
+    if (Number.isFinite(d) && d > 0.5 && d < 86_400) return d;
+    if (video.buffered.length > 0) {
+      const end = video.buffered.end(video.buffered.length - 1);
+      if (Number.isFinite(end) && end > 0) return end;
+    }
+    return undefined;
+  };
+  let farSeekAt = 0;
+  const onSeeking = () => {
+    const edge = generatedEndSec();
+    if (edge == null || !onBeyondGenerated) return;
+    if (shouldReplaceForGenerated(video.currentTime, edge) && Date.now() - farSeekAt > 400) {
+      farSeekAt = Date.now();
+      const origin = session.seekable_from_ms ?? 0;
+      noteAttach(video, "beyond_generated_replace", `t=${video.currentTime} edge=${edge}`);
+      onBeyondGenerated(origin + video.currentTime * 1000);
+    }
+  };
   const onError = () => {
     void fetch(playlist, { credentials: "include" }).then((res) => {
       if (res.status === 410) gone();
     }).catch(() => undefined);
   };
   video.addEventListener("error", onError);
+  video.addEventListener("seeking", onSeeking);
   try {
     await waitCanPlay(video, isAborted);
     if (video.currentTime > 0.25) {
@@ -367,12 +393,15 @@ async function attachNativeHls(
     }
   } catch (err) {
     video.removeEventListener("error", onError);
+    video.removeEventListener("seeking", onSeeking);
     throw err;
   }
   return {
     engine: "native-hls",
+    generatedEndSec,
     destroy() {
       video.removeEventListener("error", onError);
+      video.removeEventListener("seeking", onSeeking);
       video.removeAttribute("src");
       video.load();
     },

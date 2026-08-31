@@ -518,10 +518,7 @@ export function Player({
         displaying: apple.webkitDisplayingFullscreen,
         session_id: sessionRef.current?.id,
       });
-      // AVKit often never presents for MMS. Flip chrome immediately so the
-      // minimize button works; still try native in the same gesture.
-      setPageFs(true);
-      setFs(true);
+      // Native HLS on iOS: AVKit is the fullscreen. Do not use CSS page-fs.
       if (enterAvkitFromUserGesture(video)) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
       } else {

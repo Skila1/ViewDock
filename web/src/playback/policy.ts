@@ -10,9 +10,14 @@ export type EngineCaps = {
   nativeHls: boolean;
 };
 
-/** One owner. hls.js first wherever MSE/MMS exists — including iOS 17.1+. */
-export function selectEngine(delivery: PlaybackSession["delivery"] | undefined, caps: EngineCaps): PlaybackEngine {
+/** One owner. iOS uses native HLS so AVKit can present. Everyone else prefers hls.js. */
+export function selectEngine(
+  delivery: PlaybackSession["delivery"] | undefined,
+  caps: EngineCaps,
+  ios = isIOSDevice(),
+): PlaybackEngine {
   if (delivery === "direct") return "direct";
+  if (ios && caps.nativeHls) return "native-hls";
   if (caps.hlsJsSupported) return "hlsjs";
   if (caps.nativeHls) return "native-hls";
   throw new Error("HLS is not supported in this browser");
@@ -23,14 +28,20 @@ export function fullscreenStrategy(): FullscreenStrategy {
 }
 
 /**
- * REAL DEVICE VALIDATED:
- * iPhone + hls.js + ManagedMediaSource
- * → webkitEnterFullscreen → AVKit → native seek → webkitendfullscreen
- * → same blob currentSrc → same backend session → native seek position preserved.
- *
- * A prior currentTime=0 observation was not reproduced and is not an
- * architectural limitation. Do not restore currentTime on fullscreen exit.
+ * iPhone + native HLS (video.src = m3u8) → webkitEnterFullscreen → AVKit.
+ * MMS/hls.js never presented webkitbeginfullscreen; do not use page-fs as a stand-in.
+ * Do not restore currentTime on fullscreen exit.
  */
+export const IOS_AVKIT_NATIVE_HLS = {
+  engine: "native-hls",
+  enter: "webkitEnterFullscreen",
+  seek: "avkit_native",
+  exit: "webkitendfullscreen",
+  same_session: true,
+  restore_currentTime_on_exit: false,
+} as const;
+
+/** @deprecated MMS never handed off to AVKit on the live phone. Kept for log comparison. */
 export const IOS_AVKIT_MMS_VALIDATED = {
   engine: "hls-mms",
   enter: "webkitEnterFullscreen",

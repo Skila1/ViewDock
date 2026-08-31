@@ -1,4 +1,4 @@
-import { isAppleWebKitPlayer } from "@/lib/device";
+import { isAppleWebKitPlayer, isIOSDevice } from "@/lib/device";
 import type { ClientProfile, DecodingInfo } from "@/types/api.gen";
 
 const HEVC_MAIN = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
@@ -27,8 +27,9 @@ export function mseHlsAvailable(): boolean {
   return typeof MediaSource !== "undefined" || typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined";
 }
 
-/** True only when we must use video.src = m3u8 (pre-17.1 iOS, no MSE). */
+/** iPhone/iPad use AVPlayer (m3u8 src) so fullscreen can present AVKit. */
 export function usingNativeHls(): boolean {
+  if (isIOSDevice() && nativeHlsSupported()) return true;
   return nativeHlsSupported() && !mseHlsAvailable();
 }
 

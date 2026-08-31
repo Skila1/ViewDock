@@ -46,9 +46,8 @@ export function restoreMmsRemotePlaybackLock(video: HTMLVideoElement) {
 export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
   const apple = asApple(video);
   try {
-    // iPhone only presents AVKit from HTMLVideoElement.webkitEnterFullscreen.
-    // Do not lift disableRemotePlayback here: MMS attach requires it, and
-    // toggling it never produced webkitbeginfullscreen (it did reattach).
+    // iPhone presents AVKit from webkitEnterFullscreen on a native HLS
+    // video.src. MMS/blob never handed off; do not CSS page-fs instead.
     if (isIOSDevice()) {
       const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
       if (typeof enter === "function") {

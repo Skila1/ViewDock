@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { inferDiagnosticOwner, IOS_AVKIT_MMS_VALIDATED, movieDurationMs, selectEngine, withVdDebug } from "./policy";
+import { inferDiagnosticOwner, IOS_AVKIT_MMS_VALIDATED, IOS_AVKIT_NATIVE_HLS, movieDurationMs, selectEngine, withVdDebug } from "./policy";
 
 describe("playback policy", () => {
-  it("prefers hls.js over native HLS whenever MSE/MMS is available", () => {
-    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true })).toBe("hlsjs");
-    expect(selectEngine("hls", { hlsJsSupported: false, nativeHls: true })).toBe("native-hls");
-    expect(selectEngine("direct", { hlsJsSupported: true, nativeHls: true })).toBe("direct");
+  it("uses native HLS on iOS so AVKit can present; hls.js elsewhere when MSE exists", () => {
+    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true }, true)).toBe("native-hls");
+    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true }, false)).toBe("hlsjs");
+    expect(selectEngine("hls", { hlsJsSupported: false, nativeHls: true }, false)).toBe("native-hls");
+    expect(selectEngine("direct", { hlsJsSupported: true, nativeHls: true }, true)).toBe("direct");
   });
 
   it("uses session duration_ms, not a 30s HLS window", () => {
@@ -14,13 +15,10 @@ describe("playback policy", () => {
     expect(movieDurationMs({ id: "s", delivery: "hls", urls: {} }, Number.POSITIVE_INFINITY)).toBe(0);
   });
 
-  it("records the validated iPhone AVKit + MMS path and forbids currentTime restore", () => {
-    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true })).toBe("hlsjs");
-    expect(IOS_AVKIT_MMS_VALIDATED.engine).toBe("hls-mms");
-    expect(IOS_AVKIT_MMS_VALIDATED.enter).toBe("webkitEnterFullscreen");
-    expect(IOS_AVKIT_MMS_VALIDATED.same_blob).toBe(true);
-    expect(IOS_AVKIT_MMS_VALIDATED.same_session).toBe(true);
-    expect(IOS_AVKIT_MMS_VALIDATED.seek_position_preserved).toBe(true);
+  it("records the iPhone native-HLS AVKit path and forbids currentTime restore", () => {
+    expect(IOS_AVKIT_NATIVE_HLS.engine).toBe("native-hls");
+    expect(IOS_AVKIT_NATIVE_HLS.enter).toBe("webkitEnterFullscreen");
+    expect(IOS_AVKIT_NATIVE_HLS.restore_currentTime_on_exit).toBe(false);
     expect(IOS_AVKIT_MMS_VALIDATED.restore_currentTime_on_exit).toBe(false);
   });
 
