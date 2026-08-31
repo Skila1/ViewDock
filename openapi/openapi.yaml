@@ -510,6 +510,23 @@ paths:
       operationId: createUser
       responses:
         "201": { description: Created }
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      operationId: getUser
+      responses:
+        "200": { description: OK }
+    patch:
+      operationId: patchUser
+      responses:
+        "200": { description: OK }
+    delete:
+      operationId: deleteUser
+      summary: Hard-delete a user. The original Superadmin cannot be deleted.
+      responses:
+        "200": { description: Deleted }
+        "403": { description: Protected Superadmin }
   /invites:
     get:
       operationId: listInvites
@@ -595,6 +612,7 @@ components:
         setup_needed: { type: boolean }
         discord_login: { type: boolean }
         discord_configured: { type: boolean }
+        local_login_disabled: { type: boolean }
         public_url: { type: string }
     Me:
       type: object
@@ -603,6 +621,7 @@ components:
         username: { type: string }
         display_name: { type: string }
         is_admin: { type: boolean }
+        is_superadmin: { type: boolean }
         kind: { type: string, enum: [user, guest_share] }
         pin_locked: { type: boolean }
         can_download: { type: boolean }

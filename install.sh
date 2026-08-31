@@ -971,14 +971,53 @@ cmd_install() {
 
 cmd_status() { [[ -f "${PREFIX}/docker-compose.yml" ]] || { echo "Not installed." >&2; exit 1; }; cd "${PREFIX}" && ${COMPOSE} ps; }
 cmd_logs() { cd "${PREFIX}" && ${COMPOSE} logs -f --tail=200; }
+# Re-fetch this script from GitHub so `sudo viewdock update` picks up installer
+# changes (compose layout, helper, env keys) before it pulls the new image.
+refresh_installer() {
+  if [[ "${VD_INSTALL_REFRESHED:-}" == "1" ]]; then
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  if ! curl -fsSL "${SCRIPT_SRC}" -o "${tmp}"; then
+    rm -f "${tmp}"
+    msg_info "Could not refresh install.sh from GitHub; continuing with the local copy"
+    return 0
+  fi
+  if [[ -f "${PREFIX}/install.sh" ]] && cmp -s "${tmp}" "${PREFIX}/install.sh"; then
+    rm -f "${tmp}"
+    return 0
+  fi
+  mkdir -p "${PREFIX}"
+  mv "${tmp}" "${PREFIX}/install.sh"
+  chmod 0755 "${PREFIX}/install.sh"
+  msg_ok "Refreshed ${PREFIX}/install.sh"
+  export VD_INSTALL_REFRESHED=1
+  exec bash "${PREFIX}/install.sh" update
+}
+
 cmd_update() {
+  msg_info "Updating the container image only. ${PREFIX}/config (SQLite) and ${PREFIX}/media stay on disk."
+  refresh_installer
+  mkdir -p "${PREFIX}/config" "${PREFIX}/config/uploads" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
   local dockergid
   dockergid="$(docker_sock_gid)"
   migrate_legacy_install
   ensure_env_defaults
   detect_nvidia_docker
   ensure_compose "${dockergid}"
+  if [[ "${EUID}" -eq 0 ]]; then
+    write_cli
+    save_installer
+    install_update_helper
+  fi
   compose_recreate
+  local digest
+  digest="$(docker image inspect "${IMAGE}" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)"
+  if [[ -n "${digest}" ]]; then
+    printf '%s\n' "${digest}" > "${PREFIX}/update/applied"
+  fi
+  msg_ok "ViewDock image updated. Database and libraries were not modified."
 }
 cmd_uninstall() {
   need_root

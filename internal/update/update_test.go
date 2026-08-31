@@ -28,6 +28,24 @@ func TestDigestEqual(t *testing.T) {
 	}
 }
 
+func TestVersionUpdateAvailable(t *testing.T) {
+	if versionUpdateAvailable("0.1.0", "0.1.0") {
+		t.Fatal("same version is not an update")
+	}
+	if versionUpdateAvailable("0.1.0", "") {
+		t.Fatal("missing latest is not an update")
+	}
+	if versionUpdateAvailable("0.1.0", "0.1.0\n") {
+		t.Fatal("trimmed same version is not an update")
+	}
+	if !versionUpdateAvailable("0.1.0", "0.1.1") {
+		t.Fatal("patch bump is an update")
+	}
+	if versionUpdateAvailable("0.2.0", "0.1.9") {
+		t.Fatal("older latest is not an update")
+	}
+}
+
 func TestParseChangelog(t *testing.T) {
 	md := "# Changelog\n\n## 0.0.8\n\n- Host pull progress.\n- Changelog on the Updates page.\n\n## 0.0.7\n\n- Zip uploads.\n"
 	latest, notes := ParseChangelog(md, "0.0.7")

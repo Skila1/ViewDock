@@ -68,8 +68,9 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 		"tmdb_configured":    tmdb,
 		"setup_needed":       setupNeeded,
 		"media_dir":          s.Cfg.MediaDir,
-		"discord_login":      discordLogin,
-		"discord_configured": discordConfigured,
-		"public_url":         ResolvePublicURL(r.Context(), s.Cfg, s.Settings),
+		"discord_login":         discordLogin,
+		"discord_configured":    discordConfigured,
+		"local_login_disabled":  discordConfigured,
+		"public_url":            ResolvePublicURL(r.Context(), s.Cfg, s.Settings),
 	})
 }

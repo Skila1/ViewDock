@@ -56,10 +56,17 @@ func TestUsersManageCannotModifyAdministrator(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor, _ := managerActor(t, s, PermUsersManage)
-	if err := s.AssertCanModifyUser(context.Background(), actor, admin.ID); err != ErrAdministratorsManage {
+	if err := s.AssertCanModifyUser(context.Background(), actor, admin.ID); err != ErrProtectedUser {
+		t.Fatalf("superadmin: %v", err)
+	}
+	second, err := s.CreateUser(context.Background(), "mod", "secret12", "Mod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AssertCanModifyUser(context.Background(), actor, second.ID); err != ErrAdministratorsManage {
 		t.Fatalf("got %v", err)
 	}
-	if err := s.SetDisabled(context.Background(), actor, admin.ID, true); err != ErrAdministratorsManage {
+	if err := s.SetDisabled(context.Background(), actor, second.ID, true); err != ErrAdministratorsManage {
 		t.Fatalf("disable admin: %v", err)
 	}
 }

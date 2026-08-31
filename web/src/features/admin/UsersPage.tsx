@@ -1,9 +1,13 @@
 import { FormEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
+import { useAuth } from "@/store/auth";
 
 export function UsersPage() {
   const qc = useQueryClient();
+  const { system, me } = useAuth();
+  const discordOnly = Boolean(system?.discord_configured || system?.local_login_disabled);
+  const canAssignSuperadmin = Boolean(me?.is_superadmin);
   const users = useQuery({ queryKey: ["users"], queryFn: api.listUsers });
   const roles = useQuery({ queryKey: ["roles"], queryFn: api.listRoles });
   const libs = useQuery({ queryKey: ["libraries"], queryFn: api.listLibraries });
@@ -59,6 +63,7 @@ export function UsersPage() {
                   {u.display_name || u.username}
                   <span className="ml-2 text-xs text-dim">{u.username}</span>
                   {u.disabled ? <span className="ml-2 text-[10px] text-danger">disabled</span> : null}
+                  {u.protected ? <span className="ml-2 text-[10px] text-accent">superadmin</span> : null}
                 </span>
                 <span className="text-[10px] text-dim">{(u.roles ?? []).join(", ") || (u.is_admin ? "admin" : "")}</span>
               </button>
@@ -68,13 +73,19 @@ export function UsersPage() {
       </div>
 
       <div className="space-y-6">
+        {discordOnly ? (
+          <p className="text-xs text-dim">
+            Discord sign-in is on, so local accounts cannot be created. New people join through Discord
+            (and the guild/role whitelist). Link Discord on an existing account under Settings → Connected.
+          </p>
+        ) : (
         <form onSubmit={onCreate} className="space-y-2">
           <h2 className="text-sm font-medium">Create user</h2>
           <input className="w-full" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <input className="w-full" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           <input className="w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           <div className="flex flex-wrap gap-2 text-xs">
-            {(roles.data ?? []).map((r) => (
+            {(roles.data ?? []).filter((r) => r.id !== "sys-superadmin" || canAssignSuperadmin).map((r) => (
               <label key={r.id} className="flex items-center gap-1">
                 <input
                   type="checkbox"
@@ -85,21 +96,25 @@ export function UsersPage() {
               </label>
             ))}
           </div>
-          {err ? <p className="text-xs text-danger">{err}</p> : null}
           <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
             Create
           </button>
         </form>
+        )}
+        {err ? <p className="text-xs text-danger">{err}</p> : null}
 
         {detail.data ? (
           <div className="space-y-3 rounded-md border border-line p-3">
             <h2 className="text-sm font-medium">{detail.data.display_name || detail.data.username}</h2>
             <div className="flex flex-wrap gap-2 text-xs">
-              {(roles.data ?? []).map((r) => (
+              {(roles.data ?? []).filter((r) => r.id !== "sys-superadmin" || canAssignSuperadmin).map((r) => {
+                const locked = r.id === "sys-superadmin" && detail.data.protected;
+                return (
                 <label key={r.id} className="flex items-center gap-1">
                   <input
                     type="checkbox"
-                    checked={(detail.data.role_ids ?? []).includes(r.id)}
+                    checked={(detail.data.role_ids ?? []).includes(r.id) || locked}
+                    disabled={locked}
                     onChange={async () => {
                       const next = (detail.data.role_ids ?? []).includes(r.id)
                         ? (detail.data.role_ids ?? []).filter((id) => id !== r.id)
@@ -111,19 +126,44 @@ export function UsersPage() {
                   />
                   {r.name}
                 </label>
-              ))}
+                );
+              })}
             </div>
-            <button
-              type="button"
-              className="text-xs text-danger"
-              onClick={async () => {
-                await api.patchUser(detail.data.id, { disabled: !detail.data.disabled });
-                await qc.invalidateQueries({ queryKey: ["users"] });
-                await qc.invalidateQueries({ queryKey: ["user", detail.data.id] });
-              }}
-            >
-              {detail.data.disabled ? "Enable" : "Disable"}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              {detail.data.protected ? null : (
+              <button
+                type="button"
+                className="text-xs text-danger"
+                onClick={async () => {
+                  await api.patchUser(detail.data.id, { disabled: !detail.data.disabled });
+                  await qc.invalidateQueries({ queryKey: ["users"] });
+                  await qc.invalidateQueries({ queryKey: ["user", detail.data.id] });
+                }}
+              >
+                {detail.data.disabled ? "Enable" : "Disable"}
+              </button>
+              )}
+              {detail.data.protected ? (
+                <p className="text-xs text-dim">The original Superadmin cannot be deleted.</p>
+              ) : (
+                <button
+                  type="button"
+                  className="text-xs text-danger"
+                  onClick={async () => {
+                    if (!window.confirm(`Delete ${detail.data.display_name || detail.data.username}? This cannot be undone.`)) return;
+                    try {
+                      await api.deleteUser(detail.data.id);
+                      setSelected(null);
+                      await qc.invalidateQueries({ queryKey: ["users"] });
+                    } catch (e2) {
+                      setErr(e2 instanceof Error ? e2.message : "delete failed");
+                    }
+                  }}
+                >
+                  Delete user
+                </button>
+              )}
+            </div>
             <div>
               <h3 className="mb-1 text-xs font-medium">Library grants</h3>
               <ul className="space-y-1 text-xs">

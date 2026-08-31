@@ -50,11 +50,18 @@ func TestLastAdminGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := &Principal{Kind: KindUser, UserID: "other", IsAdmin: true}
-	if err := s.SetDisabled(context.Background(), other, admin.ID, true); err != ErrLastAdmin {
+	if err := s.SetDisabled(context.Background(), other, admin.ID, true); err != ErrProtectedUser {
 		t.Fatalf("got %v", err)
 	}
-	if err := s.SetUserRoles(context.Background(), admin.ID, []string{RoleUser}); err != ErrLastAdmin {
-		t.Fatalf("demote %v", err)
+	if err := s.DeleteUser(context.Background(), other, admin.ID); err != ErrProtectedUser {
+		t.Fatalf("delete %v", err)
+	}
+	second, err := s.CreateUser(context.Background(), "mod", "secret12", "Mod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDisabled(context.Background(), other, second.ID, true); err != nil {
+		t.Fatalf("other admin can be disabled while Superadmin remains: %v", err)
 	}
 }
 

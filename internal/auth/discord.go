@@ -24,14 +24,31 @@ type DiscordProfile struct {
 	Avatar string `json:"avatar"`
 }
 
+type DiscordRegistration struct {
+	GuildEnabled bool   `json:"registration_guild_enabled"`
+	GuildID      string `json:"registration_guild_id"`
+	RoleEnabled  bool   `json:"registration_role_enabled"`
+	RoleID       string `json:"registration_role_id"`
+}
+
+func (r DiscordRegistration) NeedGuildsScope() bool {
+	return r.GuildEnabled || r.RoleEnabled
+}
+
+func (r DiscordRegistration) NeedRoleScope() bool {
+	return r.RoleEnabled
+}
+
 type DiscordOAuthConfig struct {
-	LoginEnabled         bool   `json:"login_enabled"`
-	ClientID             string `json:"client_id"`
-	Secret               string `json:"-"`
-	ClientSecretSet      bool   `json:"client_secret_set"`
-	RegistrationEnabled  bool   `json:"registration_enabled"`
-	AdminDiscordIDs      string `json:"admin_discord_ids"`
-	RedirectURI          string `json:"redirect_uri"`
+	LoginEnabled        bool   `json:"login_enabled"`
+	ClientID            string `json:"client_id"`
+	Secret              string `json:"-"`
+	ClientSecretSet     bool   `json:"client_secret_set"`
+	RegistrationEnabled bool   `json:"registration_enabled"`
+	AdminDiscordIDs     string `json:"admin_discord_ids"`
+	SuperadminDiscordID string `json:"superadmin_discord_id"`
+	RedirectURI         string `json:"redirect_uri"`
+	DiscordRegistration
 }
 
 func (c DiscordOAuthConfig) Ready() bool {
@@ -39,50 +56,93 @@ func (c DiscordOAuthConfig) Ready() bool {
 }
 
 func (s *Service) LoadDiscord(ctx context.Context) DiscordOAuthConfig {
-	var login, reg int
-	var clientID, secret, admins string
+	var login, reg, gEn, rEn int
+	var clientID, secret, admins, gid, rid string
 	_ = s.DB.QueryRowContext(ctx, `
-		SELECT login_enabled, client_id, client_secret, registration_enabled, admin_discord_ids
+		SELECT login_enabled, client_id, client_secret, registration_enabled, admin_discord_ids,
+			registration_guild_enabled, registration_guild_id, registration_role_enabled, registration_role_id
 		FROM discord_settings WHERE id = 1
-	`).Scan(&login, &clientID, &secret, &reg, &admins)
-	return DiscordOAuthConfig{
+	`).Scan(&login, &clientID, &secret, &reg, &admins, &gEn, &gid, &rEn, &rid)
+	cfg := DiscordOAuthConfig{
 		LoginEnabled:        login == 1,
 		ClientID:            strings.TrimSpace(clientID),
 		Secret:              secret,
 		ClientSecretSet:     strings.TrimSpace(secret) != "",
 		RegistrationEnabled: reg == 1,
 		AdminDiscordIDs:     admins,
+		DiscordRegistration: DiscordRegistration{
+			GuildEnabled: gEn == 1,
+			GuildID:      strings.TrimSpace(gid),
+			RoleEnabled:  rEn == 1,
+			RoleID:       strings.TrimSpace(rid),
+		},
 	}
+	cfg.SuperadminDiscordID = s.superadminDiscordID(ctx)
+	return cfg
+}
+
+func (s *Service) superadminDiscordID(ctx context.Context) string {
+	if s.Settings != nil {
+		if id, _ := s.Settings.Get(ctx, "discord.superadmin_id"); strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	if oid := s.OriginalAdminID(ctx); oid != "" {
+		return s.DiscordUserID(ctx, oid)
+	}
+	return ""
+}
+
+func (s *Service) AssociateSuperadminDiscord(ctx context.Context, discordID string) error {
+	discordID = strings.TrimSpace(discordID)
+	if discordID == "" {
+		return errors.New("Superadmin Discord user ID is required before enabling Discord sign-in")
+	}
+	oid := s.OriginalAdminID(ctx)
+	if oid == "" {
+		return errors.New("original Superadmin is missing")
+	}
+	if existing, err := s.userByDiscord(ctx, discordID); err == nil && existing.ID != oid {
+		return errors.New("that Discord account is already linked to another user")
+	}
+	if err := s.linkDiscord(ctx, oid, DiscordProfile{ID: discordID}); err != nil {
+		return err
+	}
+	if s.Settings != nil {
+		return s.Settings.Set(ctx, "discord.superadmin_id", discordID)
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO server_settings(key, value) VALUES ('discord.superadmin_id', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, discordID)
+	return err
 }
 
 func (s *Service) SaveDiscord(ctx context.Context, cfg DiscordOAuthConfig, updateSecret bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if updateSecret {
-		_, err := s.DB.ExecContext(ctx, `
-			INSERT INTO discord_settings(id, login_enabled, client_id, client_secret, registration_enabled, admin_discord_ids, updated_at)
-			VALUES (1, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				login_enabled=excluded.login_enabled,
-				client_id=excluded.client_id,
-				client_secret=excluded.client_secret,
-				registration_enabled=excluded.registration_enabled,
-				admin_discord_ids=excluded.admin_discord_ids,
-				updated_at=excluded.updated_at
-		`, boolInt(cfg.LoginEnabled), strings.TrimSpace(cfg.ClientID), cfg.Secret,
-			boolInt(cfg.RegistrationEnabled), strings.TrimSpace(cfg.AdminDiscordIDs), now)
-		return err
+	secret := cfg.Secret
+	if !updateSecret {
+		secret = ""
 	}
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO discord_settings(id, login_enabled, client_id, client_secret, registration_enabled, admin_discord_ids, updated_at)
-		VALUES (1, ?, ?, '', ?, ?, ?)
+		INSERT INTO discord_settings(id, login_enabled, client_id, client_secret, registration_enabled, admin_discord_ids, updated_at,
+			registration_guild_enabled, registration_guild_id, registration_role_enabled, registration_role_id)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			login_enabled=excluded.login_enabled,
 			client_id=excluded.client_id,
+			client_secret=CASE WHEN excluded.client_secret = '' THEN discord_settings.client_secret ELSE excluded.client_secret END,
 			registration_enabled=excluded.registration_enabled,
 			admin_discord_ids=excluded.admin_discord_ids,
-			updated_at=excluded.updated_at
-	`, boolInt(cfg.LoginEnabled), strings.TrimSpace(cfg.ClientID),
-		boolInt(cfg.RegistrationEnabled), strings.TrimSpace(cfg.AdminDiscordIDs), now)
+			updated_at=excluded.updated_at,
+			registration_guild_enabled=excluded.registration_guild_enabled,
+			registration_guild_id=excluded.registration_guild_id,
+			registration_role_enabled=excluded.registration_role_enabled,
+			registration_role_id=excluded.registration_role_id
+	`, boolInt(cfg.LoginEnabled), strings.TrimSpace(cfg.ClientID), secret,
+		boolInt(cfg.RegistrationEnabled), strings.TrimSpace(cfg.AdminDiscordIDs), now,
+		boolInt(cfg.GuildEnabled), strings.TrimSpace(cfg.GuildID),
+		boolInt(cfg.RoleEnabled), strings.TrimSpace(cfg.RoleID))
 	return err
 }
 
@@ -144,12 +204,26 @@ func (s *Service) TakeLoginState(ctx context.Context, state string) (verifier, l
 	return verifier, linkUserID, nil
 }
 
-func discordAuthURL(clientID, redirect, state, challenge string) string {
+func DiscordLoginScope(reg DiscordRegistration) string {
+	parts := []string{"identify"}
+	if reg.NeedGuildsScope() {
+		parts = append(parts, "guilds")
+	}
+	if reg.NeedRoleScope() {
+		parts = append(parts, "guilds.members.read")
+	}
+	return strings.Join(parts, " ")
+}
+
+func discordAuthURL(clientID, redirect, state, challenge, scope string) string {
+	if strings.TrimSpace(scope) == "" {
+		scope = "identify"
+	}
 	q := url.Values{
 		"client_id":             {clientID},
 		"response_type":         {"code"},
 		"redirect_uri":          {redirect},
-		"scope":                 {"identify"},
+		"scope":                 {scope},
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
@@ -158,7 +232,7 @@ func discordAuthURL(clientID, redirect, state, challenge string) string {
 	return "https://discord.com/oauth2/authorize?" + q.Encode()
 }
 
-func exchangeDiscordCode(ctx context.Context, clientID, secret, redirect, code, verifier string) (DiscordProfile, error) {
+func exchangeDiscordCode(ctx context.Context, clientID, secret, redirect, code, verifier string) (DiscordProfile, string, error) {
 	var prof DiscordProfile
 	form := url.Values{
 		"client_id": {clientID}, "client_secret": {secret}, "grant_type": {"authorization_code"},
@@ -167,42 +241,142 @@ func exchangeDiscordCode(ctx context.Context, clientID, secret, redirect, code, 
 	cli := &http.Client{Timeout: 20 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
 	if err != nil {
-		return prof, err
+		return prof, "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := cli.Do(req)
 	if err != nil {
-		return prof, err
+		return prof, "", err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return prof, fmt.Errorf("discord token: %s", strings.TrimSpace(string(b)))
+		return prof, "", fmt.Errorf("discord token: %s", strings.TrimSpace(string(b)))
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(b, &tok); err != nil || tok.AccessToken == "" {
-		return prof, errors.New("discord token missing")
+		return prof, "", errors.New("discord token missing")
 	}
 	ureq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://discord.com/api/users/@me", nil)
 	if err != nil {
-		return prof, err
+		return prof, "", err
 	}
 	ureq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	uresp, err := cli.Do(ureq)
 	if err != nil {
-		return prof, err
+		return prof, "", err
 	}
 	defer uresp.Body.Close()
 	ub, _ := io.ReadAll(io.LimitReader(uresp.Body, 1<<20))
 	if uresp.StatusCode >= 400 {
-		return prof, fmt.Errorf("discord profile: %s", strings.TrimSpace(string(ub)))
+		return prof, "", fmt.Errorf("discord profile: %s", strings.TrimSpace(string(ub)))
 	}
 	if err := json.Unmarshal(ub, &prof); err != nil || prof.ID == "" {
-		return prof, errors.New("discord profile missing")
+		return prof, "", errors.New("discord profile missing")
 	}
-	return prof, nil
+	return prof, tok.AccessToken, nil
+}
+
+func CheckDiscordRegistration(ctx context.Context, accessToken string, reg DiscordRegistration) error {
+	if !reg.GuildEnabled && !reg.RoleEnabled {
+		return nil
+	}
+	cli := &http.Client{Timeout: 20 * time.Second}
+	if reg.GuildEnabled {
+		if strings.TrimSpace(reg.GuildID) == "" {
+			return errors.New("not_in_server")
+		}
+		ids, err := discordUserGuildIDs(ctx, cli, accessToken)
+		if err != nil {
+			return err
+		}
+		found := false
+		want := strings.TrimSpace(reg.GuildID)
+		for _, id := range ids {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New("not_in_server")
+		}
+	}
+	if reg.RoleEnabled {
+		if strings.TrimSpace(reg.GuildID) == "" || strings.TrimSpace(reg.RoleID) == "" {
+			return errors.New("missing_role")
+		}
+		roles, err := discordMemberRoles(ctx, cli, accessToken, strings.TrimSpace(reg.GuildID))
+		if err != nil {
+			return err
+		}
+		ok := false
+		for _, id := range roles {
+			if id == strings.TrimSpace(reg.RoleID) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return errors.New("missing_role")
+		}
+	}
+	return nil
+}
+
+func discordUserGuildIDs(ctx context.Context, cli *http.Client, token string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://discord.com/api/users/@me/guilds", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode >= 400 {
+		return nil, errors.New("not_in_server")
+	}
+	var guilds []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(b, &guilds); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(guilds))
+	for _, g := range guilds {
+		ids = append(ids, g.ID)
+	}
+	return ids, nil
+}
+
+func discordMemberRoles(ctx context.Context, cli *http.Client, token, guildID string) ([]string, error) {
+	u := "https://discord.com/api/users/@me/guilds/" + url.PathEscape(guildID) + "/member"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return nil, errors.New("missing_role")
+	}
+	var mem struct {
+		Roles []string `json:"roles"`
+	}
+	if err := json.Unmarshal(b, &mem); err != nil {
+		return nil, err
+	}
+	return mem.Roles, nil
 }
 
 func discordDisplay(p DiscordProfile) string {
@@ -213,6 +387,20 @@ func discordDisplay(p DiscordProfile) string {
 		return u
 	}
 	return p.ID
+}
+
+func mergeDiscordIDs(first string, rest string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range append([]string{first}, splitIDs(rest)...) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return strings.Join(out, ",")
 }
 
 func splitIDs(s string) []string {
@@ -267,6 +455,9 @@ func (s *Service) ListIdentities(ctx context.Context, userID string) ([]map[stri
 }
 
 func (s *Service) UnlinkDiscord(ctx context.Context, userID string) error {
+	if s.LoadDiscord(ctx).Ready() {
+		return errors.New("cannot unlink Discord while Discord sign-in is on")
+	}
 	var hp int
 	_ = s.DB.QueryRowContext(ctx, `SELECT has_password FROM users WHERE id = ?`, userID).Scan(&hp)
 	if hp != 1 {

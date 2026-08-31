@@ -26,7 +26,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Post("/users", a.create)
 		r.Get("/users/{id}", a.get)
 		r.Patch("/users/{id}", a.patch)
-		r.Delete("/users/{id}", a.disable)
+		r.Delete("/users/{id}", a.remove)
 		r.Get("/users/{id}/grants", a.listGrants)
 		r.Post("/users/{id}/grants", a.setGrant)
 		r.Delete("/users/{id}/grants", a.deleteGrant)
@@ -40,8 +40,10 @@ func (a *API) userJSON(r *http.Request, id, un, dn string, admin, dis int) map[s
 	return map[string]any{
 		"id": id, "username": un, "display_name": dn,
 		"is_admin": admin == 1, "disabled": dis == 1,
-		"roles":    a.Auth.RoleNamesFor(r.Context(), id),
-		"role_ids": a.Auth.RoleIDsFor(r.Context(), id),
+		"is_superadmin": a.Auth.IsSuperadmin(r.Context(), id),
+		"protected":     a.Auth.IsProtectedUser(r.Context(), id),
+		"roles":         a.Auth.RoleNamesFor(r.Context(), id),
+		"role_ids":      a.Auth.RoleIDsFor(r.Context(), id),
 	}
 }
 
@@ -109,7 +111,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := a.Auth.CreateUser(r.Context(), body.Username, body.Password, body.DisplayName, body.Admin)
 	if err != nil {
-		httpapi.WriteErr(w, 400, "users", err.Error())
+		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 		return
 	}
 	if len(body.RoleIDs) > 0 {
@@ -193,9 +195,9 @@ func (a *API) deleteGrant(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteOK(w)
 }
 
-func (a *API) disable(w http.ResponseWriter, r *http.Request) {
+func (a *API) remove(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromRequest(r)
-	if err := a.Auth.SetDisabled(r.Context(), p, chi.URLParam(r, "id"), true); err != nil {
+	if err := a.Auth.DeleteUser(r.Context(), p, chi.URLParam(r, "id")); err != nil {
 		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "users", err.Error())
 		return
 	}
@@ -224,6 +226,10 @@ func (a *API) listInvites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
+	if !a.Auth.LocalSignupAllowed(r.Context()) {
+		httpapi.WriteErr(w, 403, "invite", auth.ErrLocalSignupDisabled.Error())
+		return
+	}
 	p := auth.FromRequest(r)
 	raw, err := auth.RandomToken(24)
 	if err != nil {
@@ -292,7 +298,7 @@ func (a *API) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := a.Auth.CreateUser(r.Context(), body.Username, body.Password, body.DisplayName, admin == 1)
 	if err != nil {
-		httpapi.WriteErr(w, 400, "invite", err.Error())
+		httpapi.WriteErr(w, auth.CeilingHTTPStatus(err), "invite", err.Error())
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)

@@ -28,6 +28,8 @@ Optional helper: `sudo viewdock status|update|logs|doctor|uninstall` (same direc
 
 Re-running the installer or `sudo viewdock update` on an existing folder does not overwrite `.env` values or a compose file that already has the GPU profiles. It adds missing keys (`VD_GPU`, `COMPOSE_PROFILES`, …), folds old `docker-compose.gpu.yml` / `COMPOSE_FILE` overlays into `VD_GPU=true`, and only rewrites compose when it is still the old single-service layout.
 
+`sudo viewdock update` (or `sudo bash install.sh update`) pulls the latest image and recreates the container. SQLite in `./config` and files in `./media` are bind-mounted and are not deleted. App schema migrations run on startup. Uninstall without `--purge` also leaves `./config` in place.
+
 The public site is [viewdock.dev](https://viewdock.dev). A typical app hostname is `app.viewdock.dev` behind your own reverse proxy or Cloudflare Tunnel (not included in Compose).
 
 ## Backup

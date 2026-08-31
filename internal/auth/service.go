@@ -167,11 +167,16 @@ func (s *Service) CreateAdmin(ctx context.Context, username, password, display s
 		return User{}, err
 	}
 	_ = s.AssignRole(ctx, u.ID, RoleAdministrator)
+	_ = s.AssignRole(ctx, u.ID, RoleSuperadmin)
+	s.rememberOriginalAdmin(ctx, u.ID)
 	s.hydrateUser(ctx, &u)
 	return u, nil
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password, display string, admin bool) (User, error) {
+	if !s.LocalSignupAllowed(ctx) {
+		return User{}, ErrLocalSignupDisabled
+	}
 	username = strings.TrimSpace(username)
 	if username == "" || len(password) < 8 {
 		return User{}, errors.New("username required and password must be at least 8 characters")
@@ -215,9 +220,63 @@ func (s *Service) UpdateDisplayName(ctx context.Context, userID, display string)
 	return err
 }
 
+func (s *Service) OriginalAdminID(ctx context.Context) string {
+	if s.Settings != nil {
+		id, _ := s.Settings.Get(ctx, "setup.original_admin_id")
+		return strings.TrimSpace(id)
+	}
+	var id string
+	_ = s.DB.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = 'setup.original_admin_id'`).Scan(&id)
+	return strings.TrimSpace(id)
+}
+
+func (s *Service) rememberOriginalAdmin(ctx context.Context, userID string) {
+	if strings.TrimSpace(userID) == "" {
+		return
+	}
+	if s.Settings != nil {
+		_ = s.Settings.Set(ctx, "setup.original_admin_id", userID)
+		return
+	}
+	_, _ = s.DB.ExecContext(ctx, `
+		INSERT INTO server_settings(key, value) VALUES ('setup.original_admin_id', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, userID)
+}
+
+func (s *Service) IsSuperadmin(ctx context.Context, userID string) bool {
+	if strings.TrimSpace(userID) == "" {
+		return false
+	}
+	if s.OriginalAdminID(ctx) == userID {
+		return true
+	}
+	for _, id := range s.RoleIDsFor(ctx, userID) {
+		if id == RoleSuperadmin {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) IsProtectedUser(ctx context.Context, userID string) bool {
+	return s.IsSuperadmin(ctx, userID)
+}
+
+func (s *Service) LocalLoginAllowed(ctx context.Context, userID string) bool {
+	return !s.LoadDiscord(ctx).Ready()
+}
+
+func (s *Service) LocalSignupAllowed(ctx context.Context) bool {
+	return !s.LoadDiscord(ctx).Ready()
+}
+
 func (s *Service) SetDisabled(ctx context.Context, actor *Principal, userID string, disabled bool) error {
 	if actor != nil && actor.UserID == userID && disabled {
 		return errors.New("cannot disable your own account")
+	}
+	if disabled && s.IsProtectedUser(ctx, userID) {
+		return ErrProtectedUser
 	}
 	if actor != nil {
 		if err := s.AssertCanModifyUser(ctx, actor, userID); err != nil {
@@ -265,11 +324,32 @@ func (s *Service) Login(ctx context.Context, username, password, ip, ua string) 
 	if u.Disabled {
 		return "", time.Time{}, User{}, ErrDisabled
 	}
+	if !s.LocalLoginAllowed(ctx, u.ID) {
+		return "", time.Time{}, User{}, ErrLocalLoginDisabled
+	}
 	if !VerifyPassword(hash, password) {
 		return "", time.Time{}, User{}, ErrInvalidCredentials
 	}
 	raw, exp, err = s.Sessions.Create(ctx, u.ID, ip, ua)
 	return raw, exp, u, err
+}
+
+func (s *Service) DeleteUser(ctx context.Context, actor *Principal, userID string) error {
+	if actor != nil && actor.UserID == userID {
+		return errors.New("cannot delete your own account")
+	}
+	if s.IsProtectedUser(ctx, userID) {
+		return ErrProtectedUser
+	}
+	if err := s.AssertCanModifyUser(ctx, actor, userID); err != nil {
+		return err
+	}
+	if err := s.guardLastAdmin(ctx, userID, true, nil); err != nil {
+		return err
+	}
+	s.Sessions.DeleteAllForUser(ctx, userID)
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
+	return err
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, current, next string) error {

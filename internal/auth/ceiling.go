@@ -18,7 +18,7 @@ func (p *Principal) CanManageAdministrators() bool {
 }
 
 func (s *Service) RoleIsPrivileged(ctx context.Context, roleID string) bool {
-	if roleID == RoleAdministrator {
+	if roleID == RoleAdministrator || roleID == RoleSuperadmin {
 		return true
 	}
 	for _, name := range s.rolePerms(ctx, roleID) {
@@ -55,6 +55,9 @@ func (s *Service) AssertCanModifyUser(ctx context.Context, actor *Principal, tar
 	if targetUserID == "" || targetUserID == actor.UserID {
 		return nil
 	}
+	if s.IsSuperadmin(ctx, targetUserID) && !s.IsSuperadmin(ctx, actor.UserID) {
+		return ErrProtectedUser
+	}
 	if s.userIsAdmin(ctx, targetUserID) && !actor.CanManageAdministrators() {
 		return ErrAdministratorsManage
 	}
@@ -72,6 +75,9 @@ func (s *Service) AssertCanAssignRoles(ctx context.Context, actor *Principal, ta
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
+		}
+		if id == RoleSuperadmin && !s.IsSuperadmin(ctx, actor.UserID) {
+			return ErrProtectedUser
 		}
 		if s.RoleIsPrivileged(ctx, id) && !actor.CanManageAdministrators() {
 			return ErrAdministratorsManage
@@ -120,7 +126,7 @@ func (s *Service) RemoveRoleMemberAs(ctx context.Context, actor *Principal, role
 }
 
 func CeilingHTTPStatus(err error) int {
-	if errors.Is(err, ErrAdministratorsManage) || errors.Is(err, ErrPrivilegeCeiling) {
+	if errors.Is(err, ErrAdministratorsManage) || errors.Is(err, ErrPrivilegeCeiling) || errors.Is(err, ErrProtectedUser) || errors.Is(err, ErrLocalLoginDisabled) || errors.Is(err, ErrLocalSignupDisabled) {
 		return 403
 	}
 	if errors.Is(err, ErrLastAdmin) {

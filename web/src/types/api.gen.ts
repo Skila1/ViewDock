@@ -20,6 +20,7 @@ export interface SystemInfo {
   media_dir?: string;
   discord_login?: boolean;
   discord_configured?: boolean;
+  local_login_disabled?: boolean;
   public_url?: string;
 }
 
@@ -37,6 +38,7 @@ export interface Me {
   username: string;
   display_name: string;
   is_admin: boolean;
+  is_superadmin?: boolean;
   kind: PrincipalKind;
   pin_locked: boolean;
   can_download?: boolean;
@@ -91,7 +93,12 @@ export interface DiscordSettings {
   client_secret_set: boolean;
   registration_enabled: boolean;
   admin_discord_ids: string;
+  superadmin_discord_id?: string;
   redirect_uri: string;
+  registration_guild_enabled?: boolean;
+  registration_guild_id?: string;
+  registration_role_enabled?: boolean;
+  registration_role_id?: string;
 }
 
 export interface UpdateChangelogEntry {
@@ -574,6 +581,8 @@ export interface UserRow {
   username: string;
   display_name: string;
   is_admin: boolean;
+  is_superadmin?: boolean;
+  protected?: boolean;
   disabled?: boolean;
   roles?: string[];
   role_ids?: string[];

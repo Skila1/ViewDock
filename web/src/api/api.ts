@@ -179,6 +179,7 @@ export const api = {
     request<{ id: string; username: string }>("/api/v1/users", { method: "POST", body }),
   patchUser: (id: string, body: { display_name?: string; disabled?: boolean; role_ids?: string[]; password?: string }) =>
     request<UserRow>(`/api/v1/users/${id}`, { method: "PATCH", body }),
+  deleteUser: (id: string) => request(`/api/v1/users/${id}`, { method: "DELETE" }),
   setUserGrant: (id: string, body: { library_id: string; can_download: boolean }) =>
     request(`/api/v1/users/${id}/grants`, { method: "POST", body }),
   deleteUserGrant: (id: string, libraryId: string) =>

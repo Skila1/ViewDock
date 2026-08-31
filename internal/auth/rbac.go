@@ -11,9 +11,11 @@ import (
 
 const (
 	RoleAdministrator = "sys-administrator"
+	RoleSuperadmin    = "sys-superadmin"
 	RoleUser          = "sys-user"
 
 	PermAdmin           = "admin"
+	PermSuperadmin      = "superadmin"
 	PermUsersManage     = "users.manage"
 	PermRolesManage     = "roles.manage"
 	PermLibrariesManage = "libraries.manage"
@@ -26,7 +28,12 @@ const (
 	PermLogsRead       = "logs.read"
 )
 
-var ErrLastAdmin = errors.New("cannot remove the last administrator")
+var (
+	ErrLastAdmin           = errors.New("cannot remove the last administrator")
+	ErrProtectedUser       = errors.New("the original Superadmin cannot be changed or deleted")
+	ErrLocalLoginDisabled  = errors.New("local login is disabled while Discord sign-in is on")
+	ErrLocalSignupDisabled = errors.New("local accounts are disabled while Discord sign-in is on")
+)
 
 type Role struct {
 	ID          string   `json:"id"`
@@ -122,6 +129,18 @@ func (s *Service) AssignRoleByName(ctx context.Context, userID, name string) err
 }
 
 func (s *Service) SetUserRoles(ctx context.Context, userID string, roleIDs []string) error {
+	if s.OriginalAdminID(ctx) == userID {
+		hasSA := false
+		for _, id := range roleIDs {
+			if strings.TrimSpace(id) == RoleSuperadmin {
+				hasSA = true
+				break
+			}
+		}
+		if !hasSA {
+			roleIDs = append(append([]string{}, roleIDs...), RoleSuperadmin)
+		}
+	}
 	if err := s.guardLastAdmin(ctx, userID, false, roleIDs); err != nil {
 		return err
 	}

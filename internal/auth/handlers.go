@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -53,6 +54,10 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, exp, u, err := s.Login(r.Context(), body.Username, body.Password, httpapi.ClientIPString(r, s.Cfg), r.UserAgent())
 	if err != nil {
+		if errors.Is(err, ErrLocalLoginDisabled) {
+			httpapi.WriteErr(w, http.StatusForbidden, "local_login_disabled", err.Error())
+			return
+		}
 		httpapi.WriteErr(w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
 		return
 	}
@@ -95,9 +100,24 @@ func meJSON(u User, pin bool) map[string]any {
 	if roles == nil {
 		roles = []string{}
 	}
+	isSA := false
+	for _, r := range roles {
+		if r == "Superadmin" {
+			isSA = true
+			break
+		}
+	}
+	if !isSA {
+		for _, p := range perms {
+			if p == PermSuperadmin {
+				isSA = true
+				break
+			}
+		}
+	}
 	return map[string]any{
 		"id": u.ID, "username": u.Username, "display_name": u.DisplayName,
-		"is_admin": u.IsAdmin, "kind": KindUser, "pin_locked": pin,
+		"is_admin": u.IsAdmin, "is_superadmin": isSA, "kind": KindUser, "pin_locked": pin,
 		"has_password": u.HasPassword, "has_pin": u.PINHash != "",
 		"permissions": perms, "roles": roles,
 	}

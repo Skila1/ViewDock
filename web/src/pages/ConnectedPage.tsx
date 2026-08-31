@@ -15,7 +15,10 @@ export function ConnectedPage() {
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <h1 className="text-lg font-semibold">Connected services</h1>
-      <p className="text-sm text-dim">Optional Discord sign-in. Configure it in Admin → Discord.</p>
+      <p className="text-sm text-dim">
+        Link Discord to this local account. When Discord sign-in is on, this is how an existing username
+        stays usable — after linking, sign in with Discord.
+      </p>
       {linked ? <p className="text-xs text-accent">Discord linked.</p> : null}
       {err ? <p className="text-xs text-danger">{err}</p> : null}
       <div className="rounded-md border border-line p-4">
@@ -35,7 +38,7 @@ export function ConnectedPage() {
           ) : (
             <p className="text-xs text-dim">Discord sign-in is not configured on this server.</p>
           )}
-          {discord ? (
+          {discord && !system?.discord_configured ? (
             <button
               type="button"
               className="rounded-full border border-line px-4 py-1.5 text-sm"

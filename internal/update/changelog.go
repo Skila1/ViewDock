@@ -89,6 +89,18 @@ func ParseChangelog(md, current string) (latest string, entries []ChangelogEntry
 	return latest, entries
 }
 
+// versionUpdateAvailable is true only when latest is a strictly newer semver
+// than installed. Same version (or a missing latest) is never an update, even
+// if the :latest digest changed or the running digest is unknown.
+func versionUpdateAvailable(installed, latest string) bool {
+	installed = strings.TrimSpace(installed)
+	latest = strings.TrimSpace(latest)
+	if latest == "" || installed == "" {
+		return false
+	}
+	return compareVersions(latest, installed) > 0
+}
+
 func compareVersions(a, b string) int {
 	as := versionParts(a)
 	bs := versionParts(b)

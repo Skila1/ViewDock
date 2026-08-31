@@ -87,10 +87,11 @@ func Load(ctx context.Context, kv *settings.Store) Status {
 		cp := prog
 		progress = &cp
 	}
-	latestVer := st.LatestVersion
+	latestVer := strings.TrimSpace(st.LatestVersion)
 	if latestVer == "" {
 		latestVer = version.Version
 	}
+	available := versionUpdateAvailable(version.Version, latestVer)
 	reason := ""
 	switch {
 	case helper:
@@ -105,7 +106,7 @@ func Load(ctx context.Context, kv *settings.Store) Status {
 		HelperOK:      helper,
 		SocketOK:      sock,
 		CanApply:      helper || sock,
-		Available:     st.Available,
+		Available:     available,
 		Version:       version.Version,
 		LatestVersion: latestVer,
 		Image:         ImageRef(),
@@ -191,16 +192,13 @@ func Check(ctx context.Context, kv *settings.Store) (Status, error) {
 	}
 	st.CurrentDigest = current
 	st.LatestDigest = latest
-	st.Available = latest != "" && (current == "" || !digestEqual(current, latest))
 	if lv, notes := FetchReleaseNotes(ctx, version.Version); lv != "" || len(notes) > 0 {
 		if lv != "" {
 			st.LatestVersion = lv
-			if compareVersions(lv, version.Version) > 0 {
-				st.Available = true
-			}
 		}
 		st.Changelog = notes
 	}
+	st.Available = versionUpdateAvailable(version.Version, st.LatestVersion)
 	st.LastStatus = "ok"
 	_ = save(ctx, kv, st)
 	return Load(ctx, kv), nil
@@ -369,7 +367,7 @@ func reconcile(ctx context.Context, kv *settings.Store) {
 	st.LastAppliedAt = &now
 	st.LastStatus = "ok"
 	st.LastError = ""
-	st.Available = st.LatestDigest != "" && !digestEqual(d, st.LatestDigest)
+	st.Available = versionUpdateAvailable(version.Version, st.LatestVersion)
 	_ = save(ctx, kv, st)
 }
 

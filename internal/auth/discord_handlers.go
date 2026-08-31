@@ -34,7 +34,7 @@ func (s *Service) handleDiscordStart(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, 500, "oauth", err.Error())
 		return
 	}
-	http.Redirect(w, r, discordAuthURL(oauth.ClientID, s.DiscordCallbackURL(r), state, ch), http.StatusFound)
+	http.Redirect(w, r, discordAuthURL(oauth.ClientID, s.DiscordCallbackURL(r), state, ch, DiscordLoginScope(oauth.DiscordRegistration)), http.StatusFound)
 }
 
 func (s *Service) handleDiscordCallback(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +55,7 @@ func (s *Service) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		fail("invalid_state")
 		return
 	}
-	prof, err := exchangeDiscordCode(r.Context(), oauth.ClientID, oauth.Secret, s.DiscordCallbackURL(r), r.URL.Query().Get("code"), ver)
+	prof, access, err := exchangeDiscordCode(r.Context(), oauth.ClientID, oauth.Secret, s.DiscordCallbackURL(r), r.URL.Query().Get("code"), ver)
 	if err != nil {
 		fail("token_exchange")
 		return
@@ -71,6 +71,14 @@ func (s *Service) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		}
 		http.Redirect(w, r, "/settings/connected?linked=1", http.StatusFound)
 		return
+	}
+	if _, exists := s.userByDiscord(r.Context(), prof.ID); exists != nil {
+		if !isAdminDiscordID(prof.ID, oauth.AdminDiscordIDs) {
+			if err := CheckDiscordRegistration(r.Context(), access, oauth.DiscordRegistration); err != nil {
+				fail(err.Error())
+				return
+			}
+		}
 	}
 	u, err := s.UpsertDiscordUser(r.Context(), prof)
 	if err != nil {
@@ -128,6 +136,11 @@ func (s *Service) handleAdminDiscordPut(w http.ResponseWriter, r *http.Request) 
 		ClientSecret        *string `json:"client_secret"`
 		RegistrationEnabled *bool   `json:"registration_enabled"`
 		AdminDiscordIDs     *string `json:"admin_discord_ids"`
+		SuperadminDiscordID *string `json:"superadmin_discord_id"`
+		GuildEnabled        *bool   `json:"registration_guild_enabled"`
+		GuildID             *string `json:"registration_guild_id"`
+		RoleEnabled         *bool   `json:"registration_role_enabled"`
+		RoleID              *string `json:"registration_role_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpapi.WriteErr(w, 400, "bad_request", "invalid json")
@@ -146,9 +159,34 @@ func (s *Service) handleAdminDiscordPut(w http.ResponseWriter, r *http.Request) 
 	if body.AdminDiscordIDs != nil {
 		cur.AdminDiscordIDs = *body.AdminDiscordIDs
 	}
+	if body.SuperadminDiscordID != nil {
+		cur.SuperadminDiscordID = strings.TrimSpace(*body.SuperadminDiscordID)
+	}
+	if body.GuildEnabled != nil {
+		cur.GuildEnabled = *body.GuildEnabled
+	}
+	if body.GuildID != nil {
+		cur.GuildID = *body.GuildID
+	}
+	if body.RoleEnabled != nil {
+		cur.RoleEnabled = *body.RoleEnabled
+	}
+	if body.RoleID != nil {
+		cur.RoleID = *body.RoleID
+	}
 	updateSecret := body.ClientSecret != nil && strings.TrimSpace(*body.ClientSecret) != ""
 	if updateSecret {
 		cur.Secret = strings.TrimSpace(*body.ClientSecret)
+	}
+	if id := strings.TrimSpace(cur.SuperadminDiscordID); id != "" {
+		if err := s.AssociateSuperadminDiscord(r.Context(), id); err != nil {
+			httpapi.WriteErr(w, 400, "discord", err.Error())
+			return
+		}
+		cur.AdminDiscordIDs = mergeDiscordIDs(id, cur.AdminDiscordIDs)
+	} else if cur.LoginEnabled {
+		httpapi.WriteErr(w, 400, "discord", "set your Superadmin Discord user ID before enabling Discord sign-in")
+		return
 	}
 	if err := s.SaveDiscord(r.Context(), cur, updateSecret); err != nil {
 		httpapi.WriteErr(w, 500, "discord", err.Error())

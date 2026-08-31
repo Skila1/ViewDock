@@ -41,6 +41,9 @@ export function UpdatesPage() {
     },
   });
   const d = q.data || ({} as UpdateStatus);
+  const available = Boolean(
+    d.available && d.latest_version && d.version && d.latest_version !== d.version,
+  );
   const updating = !!(
     d.updating ||
     d.last_status === "updating" ||
@@ -77,7 +80,7 @@ export function UpdatesPage() {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Badge tone={d.available ? "warn" : "ok"}>{d.available ? "Update available" : "Up to date"}</Badge>
+        <Badge tone={available ? "warn" : "ok"}>{available ? "Update available" : "Up to date"}</Badge>
         {updating ? (
           <Badge tone="accent">Updating</Badge>
         ) : d.can_apply ? (
@@ -109,11 +112,9 @@ export function UpdatesPage() {
         {d.last_error ? <p className="mt-2 text-sm text-danger">{d.last_error}</p> : null}
         {d.apply_reason ? <p className="mt-2 text-sm text-dim">{d.apply_reason}</p> : null}
 
-        {d.available && !updating ? (
+        {available && !updating ? (
           <div className="mt-4 rounded-lg border border-line bg-overlay p-4">
-            <div className="text-sm font-medium">
-              {d.latest_version && d.latest_version !== d.version ? `Version ${d.latest_version}` : "Newer image"}
-            </div>
+            <div className="text-sm font-medium">Version {d.latest_version}</div>
             {changelog.length ? (
               <ul className="mt-3 space-y-3">
                 {changelog.map((rel) => (
@@ -185,7 +186,7 @@ export function UpdatesPage() {
           <button
             type="button"
             className="btn-green rounded-md px-3 py-1.5 text-sm disabled:opacity-50"
-            disabled={busy || updating || !d.can_apply || !d.available}
+            disabled={busy || updating || !d.can_apply || !available}
             onClick={() => {
               void (async () => {
                 setBusy(true);
