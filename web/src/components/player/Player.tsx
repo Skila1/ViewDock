@@ -22,6 +22,7 @@ import type { ItemKind, PlaybackSession } from "@/types/api.gen";
 import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
+import { shouldExitFullscreen } from "./fullscreenToggle";
 import { canSeekInWindow, generatedMediaEndSec, holdNativeStart, seekableBounds } from "./seekWindow";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
@@ -487,8 +488,16 @@ export function Player({
     const video = videoRef.current;
     const root = video?.parentElement;
     if (!video) return;
-    if (document.fullscreenElement || isNativeFullscreen(video) || pageFs) {
+    if (
+      shouldExitFullscreen({
+        documentFs: Boolean(document.fullscreenElement),
+        nativeFs: isNativeFullscreen(video),
+        pageFs,
+        chromeFs: fs,
+      })
+    ) {
       noteMedia(video, "fullscreen_exit_tap", sessionRef.current?.id);
+      report("play.fullscreen", { action: "exit_tap", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       if (document.fullscreenElement) void document.exitFullscreen();
       exitNativeFullscreen(video);
       noteMedia(video, "webkitExitFullscreen", sessionRef.current?.id);
@@ -509,12 +518,16 @@ export function Player({
         displaying: apple.webkitDisplayingFullscreen,
         session_id: sessionRef.current?.id,
       });
+      // AVKit often never presents for MMS. Flip chrome immediately so the
+      // minimize button works; still try native in the same gesture.
+      setPageFs(true);
+      setFs(true);
       if (enterAvkitFromUserGesture(video)) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
-        return;
+      } else {
+        noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
+        report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       }
-      noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
-      report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       return;
     }
     const req = root?.requestFullscreen?.() ?? video.requestFullscreen?.();
@@ -776,7 +789,7 @@ export function Player({
               <button
                 type="button"
                 className="tap text-white"
-                aria-label="Fullscreen"
+                aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
                 onClick={toggleFullscreen}
               >
                 {fs ? <Minimize size={18} /> : <Maximize size={18} />}

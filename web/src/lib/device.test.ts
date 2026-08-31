@@ -48,7 +48,7 @@ describe("device", () => {
       removeAttribute: vi.fn(),
     } as unknown as HTMLVideoElement;
     expect(enterNativeFullscreen(video)).toBe(true);
-    expect(video.disableRemotePlayback).toBe(false);
+    expect(video.disableRemotePlayback).toBe(true);
     expect(enter).toHaveBeenCalledOnce();
     expect(present).not.toHaveBeenCalled();
   });

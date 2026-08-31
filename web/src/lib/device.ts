@@ -38,12 +38,6 @@ export function isNativeFullscreen(video: HTMLVideoElement): boolean {
   return Boolean(v.webkitDisplayingFullscreen) || v.webkitPresentationMode === "fullscreen";
 }
 
-/** MMS needs this on; AVKit will not present while it stays true. */
-export function allowAvkitRemotePlayback(video: HTMLVideoElement) {
-  video.disableRemotePlayback = false;
-  video.removeAttribute("disableremoteplayback");
-}
-
 export function restoreMmsRemotePlaybackLock(video: HTMLVideoElement) {
   video.disableRemotePlayback = true;
   video.setAttribute("disableremoteplayback", "");
@@ -53,10 +47,9 @@ export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
   const apple = asApple(video);
   try {
     // iPhone only presents AVKit from HTMLVideoElement.webkitEnterFullscreen.
-    // Element.requestFullscreen / CSS page-fs stay inside Safari.
-    // disableRemotePlayback (required for MMS attach) blocks that handoff until lifted.
+    // Do not lift disableRemotePlayback here: MMS attach requires it, and
+    // toggling it never produced webkitbeginfullscreen (it did reattach).
     if (isIOSDevice()) {
-      allowAvkitRemotePlayback(video);
       const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
       if (typeof enter === "function") {
         enter.call(video);

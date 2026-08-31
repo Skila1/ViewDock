@@ -9,8 +9,8 @@
  * hls.js, and a dead video element — so fullscreen never becomes available.
  *
  * MMS precondition is disableRemotePlayback = true for the hls.js attach.
- * Lift that flag in the same user gesture as webkitEnterFullscreen (see
- * allowAvkitRemotePlayback) or AVKit never presents. Restore it on exit.
+ * Leave that flag on. Lifting it for AVKit did not present native
+ * fullscreen and correlated with MMS reattach storms.
  */
 
 export function disableRemotePlaybackForMms(video: HTMLVideoElement) {
