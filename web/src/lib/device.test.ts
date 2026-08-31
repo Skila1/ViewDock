@@ -41,11 +41,14 @@ describe("device", () => {
     const enter = vi.fn();
     const present = vi.fn();
     const video = {
+      disableRemotePlayback: true,
       webkitEnterFullscreen: enter,
       webkitSetPresentationMode: present,
       webkitSupportsFullscreen: true,
+      removeAttribute: vi.fn(),
     } as unknown as HTMLVideoElement;
     expect(enterNativeFullscreen(video)).toBe(true);
+    expect(video.disableRemotePlayback).toBe(false);
     expect(enter).toHaveBeenCalledOnce();
     expect(present).not.toHaveBeenCalled();
   });
@@ -61,7 +64,9 @@ describe("device", () => {
     const video = {
       paused: true,
       play,
+      disableRemotePlayback: true,
       webkitEnterFullscreen: enter,
+      removeAttribute: vi.fn(),
     } as unknown as HTMLVideoElement;
     expect(enterAvkitFromUserGesture(video)).toBe(true);
     expect(play).toHaveBeenCalledOnce();

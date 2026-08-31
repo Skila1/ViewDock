@@ -1,16 +1,28 @@
 import { noteCurrentTimeWrite } from "@/playback/attachTrace";
 
+/** Seconds of media actually generated/buffered. Not the pinned movie duration. */
+export function generatedMediaEndSec(video: HTMLVideoElement): number | undefined {
+  if (video.buffered.length === 0) return undefined;
+  const end = video.buffered.end(video.buffered.length - 1);
+  return Number.isFinite(end) ? end : undefined;
+}
+
 /** True if the movie timestamp can be seeked inside the current HLS/MSE window. */
 export function canSeekInWindow(opts: {
   targetMs: number;
   originMs: number;
   seekableStartSec?: number;
   seekableEndSec?: number;
+  /** EVENT playlist / buffer edge. Pinned movie duration must not be used here. */
+  generatedEndSec?: number;
   /** EVENT/live playlists on iOS report a sliding seekable start near the frontier. */
   ignoreSeekableStart?: boolean;
 }): boolean {
-  const { targetMs, originMs, seekableStartSec, seekableEndSec, ignoreSeekableStart } = opts;
+  const { targetMs, originMs, seekableStartSec, seekableEndSec, generatedEndSec, ignoreSeekableStart } = opts;
   if (targetMs < originMs - 500) return false;
+  if (generatedEndSec != null && Number.isFinite(generatedEndSec) && targetMs > originMs + generatedEndSec * 1000 + 8000) {
+    return false;
+  }
   if (seekableStartSec == null || seekableEndSec == null || !Number.isFinite(seekableStartSec) || !Number.isFinite(seekableEndSec)) {
     return Math.abs(targetMs - originMs) <= 2000;
   }

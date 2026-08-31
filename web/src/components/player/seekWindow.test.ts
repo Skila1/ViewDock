@@ -44,6 +44,30 @@ describe("canSeekInWindow", () => {
     expect(canSeekInWindow({ targetMs: 55 * 60_000, originMs: 55 * 60_000 })).toBe(true);
   });
 
+  it("rejects a far skip when only a short EVENT window has been generated", () => {
+    expect(
+      canSeekInWindow({
+        targetMs: 409_000,
+        originMs: 0,
+        seekableStartSec: 0,
+        seekableEndSec: 7200,
+        generatedEndSec: 30,
+      }),
+    ).toBe(false);
+  });
+
+  it("allows a skip a few seconds past the generated edge", () => {
+    expect(
+      canSeekInWindow({
+        targetMs: 35_000,
+        originMs: 0,
+        seekableStartSec: 0,
+        seekableEndSec: 7200,
+        generatedEndSec: 30,
+      }),
+    ).toBe(true);
+  });
+
   it("ignores a live-edge seekable start on Apple EVENT playlists", () => {
     expect(
       canSeekInWindow({

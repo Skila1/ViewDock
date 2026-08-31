@@ -5,11 +5,12 @@ import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
 import { inspectPlaylistBody } from "@/playback/playlistInspect";
 import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
-import { captureSeekHold, seekHoldAction } from "@/playback/seekHold";
+import { captureSeekHold, seekHoldAction, shouldReplaceForGenerated } from "@/playback/seekHold";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
   engine: PlaybackEngine;
+  generatedEndSec?: () => number;
   destroy: () => void;
 };
 
@@ -25,6 +26,7 @@ export async function attachSession(
   session: PlaybackSession,
   onGone: () => void,
   onEngine?: (engine: PlaybackEngine) => void,
+  onBeyondGenerated?: (movieMs: number) => void,
 ): Promise<AttachHandle> {
   let aborted = false;
   const gone = () => {
@@ -75,7 +77,7 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, session, () => aborted, gone);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated);
   }
   return attachNativeHls(video, playlist, () => aborted, gone);
 }
@@ -95,6 +97,7 @@ async function attachWithHls(
   session: PlaybackSession,
   isAborted: () => boolean,
   gone: () => void,
+  onBeyondGenerated?: (movieMs: number) => void,
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
   const hls = new Hls({
@@ -221,8 +224,17 @@ async function attachWithHls(
       void pollHoldPlaylist();
     }, 400);
   };
+  let farSeekAt = 0;
   const onAvkitSeeking = () => {
-    const captured = captureSeekHold(video.currentTime, playlistEdge, movieSec);
+    const now = video.currentTime;
+    if (onBeyondGenerated && shouldReplaceForGenerated(now, playlistEdge) && Date.now() - farSeekAt > 400) {
+      farSeekAt = Date.now();
+      const origin = session.seekable_from_ms ?? 0;
+      noteAttach(video, "beyond_generated_replace", `t=${now} edge=${playlistEdge}`);
+      onBeyondGenerated(origin + now * 1000);
+      return;
+    }
+    const captured = captureSeekHold(now, playlistEdge, movieSec);
     if (captured != null) {
       seekHold = captured;
       seekHoldAt = Date.now();
@@ -320,6 +332,7 @@ async function attachWithHls(
   }
   return {
     engine: "hlsjs",
+    generatedEndSec: () => playlistEdge,
     destroy() {
       stopHoldPoll();
       video.removeEventListener("seeking", onAvkitSeeking);

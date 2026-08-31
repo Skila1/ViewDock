@@ -8,8 +8,9 @@
  * playlists that produces a seg0.ts fetch storm, dual ownership with
  * hls.js, and a dead video element — so fullscreen never becomes available.
  *
- * MMS precondition is satisfied by disableRemotePlayback = true for the
- * whole hls.js attach. AirPlay stays off on that path.
+ * MMS precondition is disableRemotePlayback = true for the hls.js attach.
+ * Lift that flag in the same user gesture as webkitEnterFullscreen (see
+ * allowAvkitRemotePlayback) or AVKit never presents. Restore it on exit.
  */
 
 export function disableRemotePlaybackForMms(video: HTMLVideoElement) {

@@ -1,5 +1,10 @@
 export type SeekHoldAction = "begin" | "keep" | "apply" | "clear" | "timeout" | "ignore";
 
+/** Far past the generated edge: start a new FFmpeg session instead of waiting for remux from 0. */
+export function shouldReplaceForGenerated(nowSec: number, playlistEdgeSec: number, slackSec = 8): boolean {
+  return Number.isFinite(nowSec) && Number.isFinite(playlistEdgeSec) && nowSec > playlistEdgeSec + slackSec;
+}
+
 /** AVKit can seek to a movie time remux has not written yet. */
 export function captureSeekHold(nowSec: number, playlistEdgeSec: number, movieSec: number | null): number | null {
   if (!Number.isFinite(nowSec) || nowSec <= 0) return null;

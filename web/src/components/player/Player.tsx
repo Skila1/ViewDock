@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
-import { enterAvkitFromUserGesture, enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen } from "@/lib/device";
+import { enterAvkitFromUserGesture, enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
@@ -22,7 +22,7 @@ import type { ItemKind, PlaybackSession } from "@/types/api.gen";
 import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
-import { canSeekInWindow, holdNativeStart, seekableBounds } from "./seekWindow";
+import { canSeekInWindow, generatedMediaEndSec, holdNativeStart, seekableBounds } from "./seekWindow";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
 
@@ -198,6 +198,14 @@ export function Player({
             if (genRef.current !== gen) return;
             engineRef.current = eng;
             setEngine(eng);
+          },
+          (movieMs) => {
+            pendingSeekRef.current = movieMs;
+            resumeRef.current = movieMs;
+            window.clearTimeout(seekTimer.current);
+            seekTimer.current = window.setTimeout(() => {
+              void createAndAttach("QUALITY");
+            }, 350);
           },
         );
         if (genRef.current !== gen) {
@@ -457,6 +465,7 @@ export function Player({
       report("play.fullscreen", { action: "exit", currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
       noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
+      restoreMmsRemotePlaybackLock(video);
       setFs(false);
       setPageFs(false);
     };
@@ -488,11 +497,20 @@ export function Player({
       return;
     }
     if (fullscreenStrategy() === "avkit") {
+      const apple = video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean; webkitDisplayingFullscreen?: boolean };
       noteMedia(video, "fullscreen_tap", sessionRef.current?.id);
-      report("play.fullscreen", { action: "tap", currentTime: video.currentTime, session_id: sessionRef.current?.id });
+      report("play.fullscreen", {
+        action: "tap",
+        currentTime: video.currentTime,
+        readyState: video.readyState,
+        paused: video.paused,
+        disableRemotePlayback: video.disableRemotePlayback,
+        supports: apple.webkitSupportsFullscreen,
+        displaying: apple.webkitDisplayingFullscreen,
+        session_id: sessionRef.current?.id,
+      });
       if (enterAvkitFromUserGesture(video)) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
-        setFs(true);
         return;
       }
       noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
@@ -520,24 +538,12 @@ export function Player({
   const togglePlay = (via: "chrome" | "keyboard" | "video_click" = "chrome") => {
     const video = videoRef.current;
     if (!video) return;
-    const avkit = fullscreenStrategy() === "avkit";
     if (video.paused) {
       userPausedRef.current = false;
       report("play.resume", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
       noteUserControl(video, "play", via);
       void video.play();
-      if (avkit) {
-        report("play.fullscreen", { action: "play_enter", via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
-        if (enterAvkitFromUserGesture(video)) setFs(true);
-      }
       return;
-    }
-    if (avkit && via === "video_click") {
-      report("play.fullscreen", { action: "video_tap", currentTime: video.currentTime, session_id: sessionRef.current?.id });
-      if (enterNativeFullscreen(video)) {
-        setFs(true);
-        return;
-      }
     }
     userPausedRef.current = true;
     report("play.pause", { via, currentTime: video.currentTime, session_id: sessionRef.current?.id });
@@ -559,11 +565,13 @@ export function Player({
     resumeRef.current = target;
     lastStablePosRef.current = target;
     const bounds = !attachBusyRef.current ? seekableBounds(video) : {};
+    const generatedEnd = attachRef.current?.generatedEndSec?.() ?? generatedMediaEndSec(video);
     const inWindow = canSeekInWindow({
       targetMs: target,
       originMs: origin,
       seekableStartSec: bounds.startSec,
       seekableEndSec: bounds.endSec,
+      generatedEndSec: generatedEnd,
       ignoreSeekableStart: engineRef.current === "native-hls",
     });
     report("play.seek", { source, target, inWindow, origin, currentTime: video.currentTime, session_id: sessionRef.current?.id });
