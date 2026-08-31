@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
-import { enterAvkitFromUserGesture, enterNativeFullscreen, exitNativeFullscreen, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
+import { allowInlinePlayback, enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
@@ -467,6 +467,7 @@ export function Player({
       noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
       noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
       restoreMmsRemotePlaybackLock(video);
+      allowInlinePlayback(video, true);
       setFs(false);
       setPageFs(false);
     };
@@ -483,11 +484,10 @@ export function Player({
   }, [pageFs]);
 
   const toggleFullscreen = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
-    e.preventDefault();
-    e.stopPropagation();
     const video = videoRef.current;
     const root = video?.parentElement;
     if (!video) return;
+    // Enter AVKit before preventDefault so the touch is still a media gesture.
     if (
       shouldExitFullscreen({
         documentFs: Boolean(document.fullscreenElement),
@@ -503,30 +503,39 @@ export function Player({
       noteMedia(video, "webkitExitFullscreen", sessionRef.current?.id);
       setPageFs(false);
       setFs(false);
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     if (fullscreenStrategy() === "avkit") {
       const apple = video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean; webkitDisplayingFullscreen?: boolean };
+      if (video.paused) void video.play().catch(() => undefined);
+      const result = enterAvkitDetailed(video);
       noteMedia(video, "fullscreen_tap", sessionRef.current?.id);
       report("play.fullscreen", {
-        action: "tap",
+        action: result.threw ? "enter_threw" : "tap",
         currentTime: video.currentTime,
         readyState: video.readyState,
         paused: video.paused,
         disableRemotePlayback: video.disableRemotePlayback,
         supports: apple.webkitSupportsFullscreen,
         displaying: apple.webkitDisplayingFullscreen,
+        currentSrc: (video.currentSrc || "").slice(0, 120),
+        threw: result.threw ?? null,
         session_id: sessionRef.current?.id,
       });
-      // Native HLS on iOS: AVKit is the fullscreen. Do not use CSS page-fs.
-      if (enterAvkitFromUserGesture(video)) {
+      if (result.ok) {
         noteMedia(video, "webkitEnterFullscreen", sessionRef.current?.id);
       } else {
         noteMedia(video, "webkitEnterFullscreen_failed", sessionRef.current?.id);
-        report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, session_id: sessionRef.current?.id });
+        report("play.fullscreen", { action: "enter_failed", currentTime: video.currentTime, threw: result.threw, session_id: sessionRef.current?.id });
       }
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
+    e.preventDefault();
+    e.stopPropagation();
     const req = root?.requestFullscreen?.() ?? video.requestFullscreen?.();
     if (req) {
       void req.then(() => setFs(true)).catch(() => {
@@ -787,7 +796,19 @@ export function Player({
                 type="button"
                 className="tap text-white"
                 aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
-                onClick={toggleFullscreen}
+                onPointerUp={(e) => {
+                  // WebKit only treats touchend/click as a media gesture. React
+                  // onClick is too late on iPhone and webkitEnterFullscreen no-ops.
+                  if (isIOSDevice()) toggleFullscreen(e);
+                }}
+                onClick={(e) => {
+                  if (isIOSDevice()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                  }
+                  toggleFullscreen(e);
+                }}
               >
                 {fs ? <Minimize size={18} /> : <Maximize size={18} />}
               </button>

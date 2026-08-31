@@ -43,39 +43,62 @@ export function restoreMmsRemotePlaybackLock(video: HTMLVideoElement) {
   video.setAttribute("disableremoteplayback", "");
 }
 
-export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
+/** playsinline is Apple's opt-out of AVKit. Strip it before webkitEnterFullscreen. */
+export function allowInlinePlayback(video: HTMLVideoElement, on: boolean) {
+  video.playsInline = on;
+  if (on) {
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+  } else {
+    video.removeAttribute("playsinline");
+    video.removeAttribute("webkit-playsinline");
+  }
+}
+
+export type AvkitEnterResult = { ok: boolean; threw?: string };
+
+/**
+ * Apple: custom controls call webkitEnterFullscreen in a user gesture
+ * (touchend/click). WebKit throws InvalidStateError if the gesture is missing
+ * or webkitSupportsFullscreen is false; already-fullscreen is a silent no-op.
+ */
+export function enterAvkitDetailed(video: HTMLVideoElement): AvkitEnterResult {
   const apple = asApple(video);
   try {
-    // iPhone presents AVKit from webkitEnterFullscreen on a native HLS
-    // video.src. MMS/blob never handed off; do not CSS page-fs instead.
     if (isIOSDevice()) {
+      allowInlinePlayback(video, false);
       const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
       if (typeof enter === "function") {
         enter.call(video);
-        return true;
+        return { ok: true };
       }
     }
     if (typeof apple.webkitSetPresentationMode === "function") {
       apple.webkitSetPresentationMode("fullscreen");
-      return true;
+      return { ok: true };
     }
     const enter = apple.webkitEnterFullscreen ?? apple.webkitEnterFullScreen;
     if (typeof enter === "function") {
       enter.call(video);
-      return true;
+      return { ok: true };
     }
-  } catch {
-    return false;
+  } catch (err) {
+    const threw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    return { ok: false, threw };
   }
-  return false;
+  return { ok: false };
 }
 
-/** Play if needed, then AVKit. Safari rejects webkitEnterFullscreen while paused. */
+export function enterNativeFullscreen(video: HTMLVideoElement): boolean {
+  return enterAvkitDetailed(video).ok;
+}
+
+/** Must run inside the same touchend/click as the tap — not a React-delayed click. */
 export function enterAvkitFromUserGesture(video: HTMLVideoElement): boolean {
   if (video.paused) {
     void video.play().catch(() => undefined);
   }
-  return enterNativeFullscreen(video);
+  return enterAvkitDetailed(video).ok;
 }
 
 export function exitNativeFullscreen(video: HTMLVideoElement): boolean {

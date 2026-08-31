@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { enterAvkitFromUserGesture, enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
+import { allowInlinePlayback, enterAvkitFromUserGesture, enterAvkitDetailed, enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
 
 describe("device", () => {
   it("detects iPhone and iPad", () => {
@@ -71,6 +71,38 @@ describe("device", () => {
     expect(enterAvkitFromUserGesture(video)).toBe(true);
     expect(play).toHaveBeenCalledOnce();
     expect(enter).toHaveBeenCalledOnce();
+  });
+
+  it("strips playsinline before AVKit (Apple opt-out of native fullscreen)", () => {
+    const video = document.createElement("video");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.playsInline = true;
+    allowInlinePlayback(video, false);
+    expect(video.hasAttribute("playsinline")).toBe(false);
+    expect(video.hasAttribute("webkit-playsinline")).toBe(false);
+    expect(video.playsInline).toBe(false);
+  });
+
+  it("returns InvalidStateError text when webkitEnterFullscreen throws", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)",
+      platform: "iPhone",
+      maxTouchPoints: 5,
+    });
+    const video = {
+      paused: false,
+      playsInline: true,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+      webkitEnterFullscreen: () => {
+        throw new DOMException("The object is in an invalid state.", "InvalidStateError");
+      },
+    } as unknown as HTMLVideoElement;
+    expect(enterAvkitDetailed(video)).toEqual({
+      ok: false,
+      threw: "InvalidStateError: The object is in an invalid state.",
+    });
   });
 });
 
