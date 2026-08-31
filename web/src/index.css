@@ -93,7 +93,7 @@ button {
   touch-action: manipulation;
 }
 
-input,
+input:not([type="range"]),
 select,
 textarea {
   background: var(--vd-surface-1);
@@ -103,11 +103,74 @@ textarea {
   font-size: 16px;
 }
 
-input:focus,
+input:not([type="range"]):focus,
 select:focus,
 textarea:focus {
   outline: 2px solid var(--vd-ring);
   outline-offset: 1px;
+}
+
+/* Player sliders: no form padding. Thumb travel is the full track. */
+.player-range {
+  --player-range-pct: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  accent-color: var(--vd-accent);
+  cursor: pointer;
+  overflow: visible;
+}
+
+.player-range:focus {
+  outline: none;
+}
+
+.player-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--vd-accent) 0,
+    var(--vd-accent) var(--player-range-pct),
+    rgb(255 255 255 / 22%) var(--player-range-pct),
+    rgb(255 255 255 / 22%) 100%
+  );
+}
+
+.player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
+  box-shadow: none;
+}
+
+.player-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 22%);
+}
+
+.player-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--vd-accent);
+}
+
+.player-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
 }
 
 .poster-grid {

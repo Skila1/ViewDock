@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   Maximize,
   Loader2,
@@ -695,6 +695,10 @@ export function Player({
 
   const applePlayer = isIOSDevice();
   const duration = movieDurationMs(session, movieDurRef.current || dur);
+  const seekMax = Math.max(1, duration);
+  const seekValue = Math.min(pos, duration);
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (seekValue / seekMax) * 100)) : 0;
+  const volumePct = (muted ? 0 : volume) * 100;
   const qualities = session?.qualities ?? [];
   const attaching =
     phase === "creatingSession" ||
@@ -765,10 +769,11 @@ export function Player({
             <input
               type="range"
               min={0}
-              max={Math.max(1, duration)}
-              value={Math.min(pos, duration)}
+              max={seekMax}
+              value={seekValue}
               onChange={(e) => seek(Number(e.target.value), "slider")}
-              className="mb-2 h-8 w-full accent-[var(--accent)]"
+              className="player-range mb-2 h-8 w-full"
+              style={{ "--player-range-pct": `${progressPct}%` } as CSSProperties}
             />
             <span className="text-xs tabular-nums text-white/80">
               {formatClock(pos)} / {formatClock(duration)}
@@ -820,10 +825,11 @@ export function Player({
         <input
           type="range"
           min={0}
-          max={Math.max(1, duration)}
-          value={Math.min(pos, duration)}
+          max={seekMax}
+          value={seekValue}
           onChange={(e) => seek(Number(e.target.value), "slider")}
-          className="mb-3 h-8 w-full accent-[var(--accent)]"
+          className="player-range mb-3 h-8 w-full"
+          style={{ "--player-range-pct": `${progressPct}%` } as CSSProperties}
         />
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
@@ -873,7 +879,8 @@ export function Player({
               step={0.05}
               value={muted ? 0 : volume}
               aria-label="Volume"
-              className={cn("h-8 accent-[var(--accent)] transition-all", volOpen ? "w-24" : "w-16")}
+              className={cn("player-range h-8 transition-all", volOpen ? "w-24" : "w-16")}
+              style={{ "--player-range-pct": `${volumePct}%` } as CSSProperties}
               onChange={(e) => {
                 const v = videoRef.current;
                 const next = Number(e.target.value);
