@@ -117,24 +117,10 @@ func BuildArgs(opt Opts) ([]string, error) {
 		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "160k")
 	}
 	args = append(args, "-max_muxing_queue_size", "2048")
-	if copyV && opt.HEVC {
-		args = append(args, hlsFMP4(opt.SessionDir, opt.SegmentTime)...)
-	} else {
-		args = append(args, hlsMPEGTS(opt.SessionDir, opt.SegmentTime)...)
-	}
+	// Always EVENT fMP4. hls.js cannot demux EC-3/AC-3 from MPEG-TS
+	// ("Unsupported EC-3 in M2TS") even when Safari MMS reports eac3.
+	args = append(args, hlsFMP4(opt.SessionDir, opt.SegmentTime)...)
 	return args, nil
-}
-
-func hlsMPEGTS(dir string, seg int) []string {
-	return []string{
-		"-f", "hls",
-		"-hls_time", fmt.Sprintf("%d", seg),
-		"-hls_playlist_type", "event",
-		"-hls_segment_type", "mpegts",
-		"-hls_flags", "independent_segments",
-		"-hls_segment_filename", filepath.Join(dir, "seg%d.ts"),
-		filepath.Join(dir, "index.m3u8"),
-	}
 }
 
 func hlsFMP4(dir string, seg int) []string {

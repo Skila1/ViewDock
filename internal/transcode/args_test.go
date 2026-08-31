@@ -80,6 +80,23 @@ func TestBuildArgs_BothTranscode(t *testing.T) {
 	}
 }
 
+func TestBuildArgs_PartialTranscodeUsesFMP4(t *testing.T) {
+	args, err := BuildArgs(Opts{
+		AbsPath: "/media/x.mkv", SessionDir: "/cache/s1",
+		CopyVideo: false, CopyAudio: true, SrcHeight: 1080,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !hasSeq(args, "-hls_segment_type", "fmp4") || !strings.Contains(joined, "seg%d.m4s") {
+		t.Fatalf("hls.js cannot parse EC-3 in MPEG-TS: %v", args)
+	}
+	if strings.Contains(joined, "mpegts") || strings.Contains(joined, ".ts") {
+		t.Fatal("partial transcode must not write MPEG-TS")
+	}
+}
+
 func TestBuildArgs_HLSIsGrowingEvent(t *testing.T) {
 	args, err := BuildArgs(Opts{
 		AbsPath: "/media/x.mkv", SessionDir: "/cache/s1",
