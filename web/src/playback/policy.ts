@@ -10,13 +10,20 @@ export type EngineCaps = {
   nativeHls: boolean;
 };
 
-/** One owner. iOS uses native HLS so AVKit can present. Everyone else prefers hls.js. */
+/** One owner. Honor the server's hls_attach when present; otherwise iOS native / else hls.js. */
 export function selectEngine(
   delivery: PlaybackSession["delivery"] | undefined,
   caps: EngineCaps,
   ios = isIOSDevice(),
+  hlsAttach?: PlaybackSession["hls_attach"] | string,
 ): PlaybackEngine {
   if (delivery === "direct") return "direct";
+  if (hlsAttach === "native") return "native-hls";
+  if (hlsAttach === "mse") {
+    if (caps.hlsJsSupported) return "hlsjs";
+    if (caps.nativeHls) return "native-hls";
+    throw new Error("HLS is not supported in this browser");
+  }
   if (ios && caps.nativeHls) return "native-hls";
   if (caps.hlsJsSupported) return "hlsjs";
   if (caps.nativeHls) return "native-hls";
@@ -38,18 +45,6 @@ export const IOS_AVKIT_NATIVE_HLS = {
   seek: "avkit_native",
   exit: "webkitendfullscreen",
   same_session: true,
-  restore_currentTime_on_exit: false,
-} as const;
-
-/** @deprecated MMS never handed off to AVKit on the live phone. Kept for log comparison. */
-export const IOS_AVKIT_MMS_VALIDATED = {
-  engine: "hls-mms",
-  enter: "webkitEnterFullscreen",
-  seek: "avkit_native",
-  exit: "webkitendfullscreen",
-  same_blob: true,
-  same_session: true,
-  seek_position_preserved: true,
   restore_currentTime_on_exit: false,
 } as const;
 

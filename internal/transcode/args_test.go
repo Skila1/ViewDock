@@ -166,3 +166,23 @@ func TestBuildArgs_HLSIsGrowingEvent(t *testing.T) {
 		t.Fatal("do not advertise VOD while FFmpeg is still appending")
 	}
 }
+
+func TestBuildArgs_StartNumberKeepsEvent(t *testing.T) {
+	args, err := BuildArgs(Opts{
+		AbsPath: "/media/x.mkv", SessionDir: "/cache/s1",
+		CopyVideo: false, CopyAudio: false, SrcHeight: 1080,
+		StartMS: 600_000, StartNumber: 150, InitFilename: "init.unused.mp4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSeq(args, "-ss", "600.000") || !hasSeq(args, "-start_number", "150") {
+		t.Fatalf("want aligned -ss/-start_number: %v", args)
+	}
+	if !hasSeq(args, "-hls_fmp4_init_filename", "init.unused.mp4") {
+		t.Fatalf("restart must preserve first init.mp4: %v", args)
+	}
+	if !hasSeq(args, "-hls_playlist_type", "event") {
+		t.Fatalf("ffmpeg still EVENT: %v", args)
+	}
+}

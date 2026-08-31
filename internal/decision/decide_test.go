@@ -231,6 +231,23 @@ func TestScarfaceClientB_FullTranscode(t *testing.T) {
 	}
 }
 
+func TestPromoteRemuxToVideoXcode(t *testing.T) {
+	got := Decide(Input{Info: info("h264", "aac", "mkv", 1920, 1080), Quality: "auto", LAN: true})
+	if got.Mode != ModeRemux || got.NeedVideoXcode {
+		t.Fatalf("precondition remux: %+v", got)
+	}
+	got = PromoteRemuxToVideoXcode(got, hwaccel.Info{})
+	if !got.NeedVideoXcode || got.CopyVideo || !NeedsVideoSlot(got) {
+		t.Fatalf("promote xcode v=%v copy=%v slot=%v", got.NeedVideoXcode, got.CopyVideo, NeedsVideoSlot(got))
+	}
+	if got.Mode != ModeTranscodeVid {
+		t.Fatalf("mode %s", got.Mode)
+	}
+	if !has(got.Reasons, RemuxKeyframeIncomplete) {
+		t.Fatalf("reasons %v", got.Reasons)
+	}
+}
+
 func TestNeedsVideoSlotMatrix(t *testing.T) {
 	direct := Decide(Input{Info: info("h264", "aac", "mp4", 1920, 1080), Quality: "auto", LAN: true})
 	remux := Decide(Input{Info: info("h264", "aac", "mkv", 1920, 1080), Quality: "auto", LAN: true})

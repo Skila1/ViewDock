@@ -26,11 +26,13 @@ type Opts struct {
 	LibraryID   string
 	AbsPath     string
 	HW          hwaccel.Info
-	SegmentTime int
-	CopyVideo   bool
-	CopyAudio   bool
-	HEVC        bool
-	Stderr      io.Writer
+	SegmentTime  int
+	StartNumber  int
+	InitFilename string
+	CopyVideo    bool
+	CopyAudio    bool
+	HEVC         bool
+	Stderr       io.Writer
 }
 
 func Start(ctx context.Context, ff *ffmpeg.Tool, locator library.MediaLocator, opt Opts) (*exec.Cmd, error) {
@@ -123,21 +125,32 @@ func BuildArgs(opt Opts) ([]string, error) {
 	args = append(args, "-max_muxing_queue_size", "2048")
 	// Always EVENT fMP4. hls.js cannot demux EC-3/AC-3 from MPEG-TS
 	// ("Unsupported EC-3 in M2TS") even when Safari MMS reports eac3.
-	args = append(args, hlsFMP4(opt.SessionDir, opt.SegmentTime)...)
+	// iOS VOD-on-demand serves a separate immutable playlist; FFmpeg still
+	// appends EVENT so desktop/MMS are unchanged.
+	args = append(args, hlsFMP4(opt.SessionDir, opt.SegmentTime, opt.StartNumber, opt.InitFilename)...)
 	return args, nil
 }
 
-func hlsFMP4(dir string, seg int) []string {
-	return []string{
+func hlsFMP4(dir string, seg, startNumber int, initName string) []string {
+	if initName == "" {
+		initName = "init.mp4"
+	}
+	args := []string{
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", seg),
 		"-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_fmp4_init_filename", initName,
 		"-hls_flags", "independent_segments",
+	}
+	if startNumber > 0 {
+		args = append(args, "-start_number", fmt.Sprintf("%d", startNumber))
+	}
+	args = append(args,
 		"-hls_segment_filename", filepath.Join(dir, "seg%d.m4s"),
 		filepath.Join(dir, "index.m3u8"),
-	}
+	)
+	return args
 }
 
 func Kill(cmd *exec.Cmd) {

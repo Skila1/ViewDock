@@ -365,6 +365,10 @@ export interface PlaybackSession {
   next_episode?: { id: string; title?: string } | null;
   duration_ms?: number;
   seekable_from_ms?: number;
+  vod_ondemand?: boolean;
+  vod_plan_kind?: string;
+  gen_start_seg?: number;
+  generation_id?: number;
 }
 
 export interface ProgressPut {
@@ -556,6 +560,13 @@ export interface Inspector {
   client?: InspectorClient | null;
   decision?: InspectorDecision | null;
   gpu?: InspectorGPU | null;
+  vod_ondemand?: boolean;
+  vod_plan_kind?: string;
+  gen_start_seg?: number;
+  generation_id?: number;
+  hls_attach?: string;
+  seekable_from_ms?: number;
+  origin_ms?: number;
 }
 
 export interface UserRow {

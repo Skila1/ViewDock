@@ -782,3 +782,10 @@ components:
           $ref: "#/components/schemas/InspectorDecision"
         gpu:
           $ref: "#/components/schemas/InspectorGPU"
+        vod_ondemand: { type: boolean }
+        vod_plan_kind: { type: string }
+        gen_start_seg: { type: integer }
+        generation_id: { type: integer }
+        hls_attach: { type: string, enum: [native, mse] }
+        seekable_from_ms: { type: integer }
+        origin_ms: { type: integer }

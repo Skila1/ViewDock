@@ -5,17 +5,20 @@ import {
   Minimize,
   Pause,
   Play,
+  SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
+import { nativeHlsSupported } from "@/api/profile";
 import { cn } from "@/lib/cn";
 import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
+import { isVodOnDemand, logicalPositionMs, seekReplacesSession, selectPlaybackEngine, sessionOriginMs } from "@/playback/controller";
 import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
@@ -23,7 +26,7 @@ import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedi
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { shouldExitFullscreen } from "./fullscreenToggle";
-import { canSeekInWindow, generatedMediaEndSec, holdNativeStart, seekableBounds } from "./seekWindow";
+import { canSeekInWindow, generatedMediaEndSec, seekableBounds, vodMovieSeekable } from "./seekWindow";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
 
@@ -60,6 +63,8 @@ export function Player({
   const { phase, session, setPhase, setSession, setResumeMs, reset } = usePlayerStore();
   const [showUi, setShowUi] = useState(true);
   const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [volOpen, setVolOpen] = useState(false);
   const [fs, setFs] = useState(false);
   const [pageFs, setPageFs] = useState(false);
   const [pos, setPos] = useState(0);
@@ -177,10 +182,11 @@ export function Player({
           replace: replaceId ?? "",
         });
         noteAttach(video, "session_created", `reason=${reason} id=${sess.id} replace=${replaceId ?? ""}`);
-        originRef.current = sess.seekable_from_ms ?? startAt;
+        const vod = isVodOnDemand(sess);
+        originRef.current = sessionOriginMs(sess, startAt);
         setAttachMeta(video, { originMs: originRef.current, sessionId: sess.id });
         setSession(sess);
-        const predicted: PlaybackEngine = sess.delivery === "direct" ? "direct" : sess.hls_attach === "native" ? "native-hls" : "hlsjs";
+        const predicted = selectPlaybackEngine(sess, { hlsJsSupported: true, nativeHls: nativeHlsSupported() }, isIOSDevice());
         engineRef.current = predicted;
         setEngine(predicted);
         if (sess.duration_ms && sess.duration_ms > 0) {
@@ -205,6 +211,7 @@ export function Player({
             setEngine(eng);
           },
           (movieMs) => {
+            if (isVodOnDemand(sessionRef.current)) return;
             pendingSeekRef.current = movieMs;
             resumeRef.current = movieMs;
             window.clearTimeout(seekTimer.current);
@@ -222,26 +229,26 @@ export function Player({
         bump("ATTACHED");
         attachedAtRef.current = Date.now();
         lastStablePosRef.current = originRef.current;
-        if (attachRef.current.engine === "native-hls") {
-          if (video.currentTime > 0.25) {
-            noteCurrentTimeWrite(video, 0, "createAndAttach.nativeHlsReset", sess.id);
-            video.currentTime = 0;
-          }
+        if (attachRef.current.engine === "native-hls" && vod && startAt > 2500) {
+          noteCurrentTimeWrite(video, startAt / 1000, "createAndAttach.vodResume", sess.id);
+          video.currentTime = startAt / 1000;
         }
         const later = pendingSeekRef.current;
         if (later != null && Math.abs(later - originRef.current) > 2500) {
-          attachBusyRef.current = false;
-          resumeRef.current = later;
-          void createAndAttach("QUALITY");
-          return;
+          if (vod) {
+            noteCurrentTimeWrite(video, later / 1000, "createAndAttach.vodPendingSeek", sess.id);
+            video.currentTime = later / 1000;
+            pendingSeekRef.current = null;
+          } else {
+            attachBusyRef.current = false;
+            resumeRef.current = later;
+            void createAndAttach("QUALITY");
+            return;
+          }
         }
         pendingSeekRef.current = null;
         try {
           await video.play();
-          if (engineRef.current === "native-hls" && video.currentTime > 0.25) {
-            noteCurrentTimeWrite(video, 0, "createAndAttach.nativeHlsResetAfterPlay", sess.id);
-            video.currentTime = 0;
-          }
           setBuffering(false);
           bump("PLAY");
         } catch (playErr) {
@@ -291,8 +298,8 @@ export function Player({
       genRef.current += 1;
       const sess = sessionRef.current;
       const video = videoRef.current;
-      const origin = sess?.seekable_from_ms ?? originRef.current;
-      const lastPos = sess && video ? Math.floor(origin + (video.currentTime || 0) * 1000) : 0;
+      const origin = originRef.current;
+      const lastPos = sess && video ? Math.floor(logicalPositionMs(origin, video.currentTime || 0)) : 0;
       const lastDur = sess && video ? Math.floor(sess.duration_ms || (video.duration || 0) * 1000) : 0;
       teardownAttach();
       void (async () => {
@@ -319,10 +326,7 @@ export function Player({
       if (pendingSeekRef.current != null || attachBusyRef.current) return;
       const origin = originRef.current;
       const rel = video.currentTime || 0;
-      const ms = origin + rel * 1000;
-      if (engineRef.current === "native-hls" && holdNativeStart(video, attachedAtRef.current, lastStablePosRef.current, origin)) {
-        return;
-      }
+      const ms = logicalPositionMs(origin, rel);
       lastStablePosRef.current = ms;
       setPos(ms);
       resumeRef.current = ms;
@@ -353,10 +357,15 @@ export function Player({
         void video.play().then(() => bump("PLAY")).catch(() => {});
       }
     };
-    const onWaiting = () => setBuffering(true);
+    const onWaiting = () => {
+      setBuffering(true);
+      bump("WAITING");
+    };
     const onCanPlay = () => {
       if (!attachBusyRef.current && pendingSeekRef.current == null) setBuffering(false);
+      bump("CANPLAY");
     };
+    const onSeeked = () => bump("SEEKED");
     const onEnded = () => {
       bump("ENDED");
       onEnded?.();
@@ -374,6 +383,7 @@ export function Player({
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("canplay", onCanPlay);
     video.addEventListener("playing", onCanPlay);
+    video.addEventListener("seeked", onSeeked);
     video.addEventListener("ended", onEnded);
     for (const name of domEv) video.addEventListener(name, onDom);
     return () => {
@@ -384,6 +394,7 @@ export function Player({
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("playing", onCanPlay);
+      video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("ended", onEnded);
       for (const name of domEv) video.removeEventListener(name, onDom);
     };
@@ -394,9 +405,9 @@ export function Player({
       const sess = sessionRef.current;
       const video = videoRef.current;
       if (!sess || !video || phaseRef.current !== "playing") return;
-      const origin = sess.seekable_from_ms ?? 0;
+      const origin = originRef.current;
       void api.putProgress(sess.id, {
-        position_ms: Math.floor(origin + video.currentTime * 1000),
+        position_ms: Math.floor(logicalPositionMs(origin, video.currentTime)),
         duration_ms: Math.floor(sess.duration_ms || (video.duration || 0) * 1000),
       });
     }, 10_000);
@@ -590,14 +601,17 @@ export function Player({
     lastStablePosRef.current = target;
     const bounds = !attachBusyRef.current ? seekableBounds(video) : {};
     const generatedEnd = attachRef.current?.generatedEndSec?.() ?? generatedMediaEndSec(video);
-    const inWindow = canSeekInWindow({
-      targetMs: target,
-      originMs: origin,
-      seekableStartSec: bounds.startSec,
-      seekableEndSec: bounds.endSec,
-      generatedEndSec: generatedEnd,
-      ignoreSeekableStart: engineRef.current === "native-hls",
-    });
+    const vod = isVodOnDemand(sessionRef.current);
+    const inWindow = vod
+      ? vodMovieSeekable({ targetMs: target, durationMs: movieDur })
+      : canSeekInWindow({
+          targetMs: target,
+          originMs: origin,
+          seekableStartSec: bounds.startSec,
+          seekableEndSec: bounds.endSec,
+          generatedEndSec: generatedEnd,
+          ignoreSeekableStart: engineRef.current === "native-hls" && !vod,
+        });
     report("play.seek", {
       source,
       target,
@@ -608,7 +622,7 @@ export function Player({
       currentTime: video.currentTime,
       session_id: sessionRef.current?.id,
     });
-    if (!inWindow || attachBusyRef.current) {
+    if (seekReplacesSession(vod, inWindow) || (attachBusyRef.current && !vod)) {
       noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: false, origin }));
       pendingSeekRef.current = target;
       setBuffering(true);
@@ -619,6 +633,7 @@ export function Player({
       }, 350);
       return;
     }
+    bump("SEEK");
     pendingSeekRef.current = null;
     const rel = Math.max(0, (target - origin) / 1000);
     noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: true, rel }));
@@ -662,7 +677,7 @@ export function Player({
         e.preventDefault();
         togglePlay("keyboard");
       }
-      if (e.key === "f") toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
+      if (e.key === "f" && !isIOSDevice()) toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
       if (e.key === "ArrowRight") seek(pos + 10_000);
       if (e.key === "ArrowLeft") seek(Math.max(0, pos - 10_000));
       if (e.key === "m") {
@@ -685,7 +700,8 @@ export function Player({
     phase === "creatingSession" ||
     phase === "attaching" ||
     phase === "switchingQuality" ||
-    phase === "recreating";
+    phase === "recreating" ||
+    phase === "buffering";
   const showSpinner = !err && (buffering || attaching);
 
   return (
@@ -700,8 +716,6 @@ export function Player({
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
-        playsInline
-        controls={applePlayer}
         preload="auto"
         onClick={applePlayer ? undefined : (e) => {
           e.stopPropagation();
@@ -815,22 +829,63 @@ export function Player({
           <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
             {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
           </button>
-          <span className="text-xs tabular-nums text-white/80">
-            {formatClock(pos)} / {formatClock(duration)}
-          </span>
           <button
             type="button"
             className="tap text-white"
-            onClick={() => {
-              const v = videoRef.current;
-              if (!v) return;
-              v.muted = !v.muted;
-              setMuted(v.muted);
-            }}
-            aria-label="Mute"
+            aria-label="Back 10 seconds"
+            onClick={() => seek(Math.max(0, pos - 10_000), "skip_back")}
           >
-            {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            <SkipBack size={20} />
           </button>
+          <button
+            type="button"
+            className="tap text-white"
+            aria-label="Forward 10 seconds"
+            onClick={() => seek(pos + 10_000, "skip_forward")}
+          >
+            <SkipForward size={20} />
+          </button>
+          <span className="text-xs tabular-nums text-white/80">
+            {formatClock(pos)} / {formatClock(duration)}
+          </span>
+          <div
+            className="flex items-center gap-2"
+            onMouseEnter={() => setVolOpen(true)}
+            onMouseLeave={() => setVolOpen(false)}
+          >
+            <button
+              type="button"
+              className="tap text-white"
+              onClick={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                v.muted = !v.muted;
+                setMuted(v.muted);
+              }}
+              aria-label="Mute"
+            >
+              {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={muted ? 0 : volume}
+              aria-label="Volume"
+              className={cn("h-8 accent-[var(--accent)] transition-all", volOpen ? "w-24" : "w-16")}
+              onChange={(e) => {
+                const v = videoRef.current;
+                const next = Number(e.target.value);
+                setVolume(next);
+                if (v) {
+                  v.volume = next;
+                  v.muted = next === 0;
+                }
+                setMuted(next === 0);
+              }}
+            />
+          </div>
           <div className="ml-auto flex items-center gap-2">
             {session?.next_episode ? (
               <button

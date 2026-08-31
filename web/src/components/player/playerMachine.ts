@@ -2,8 +2,11 @@ export type PlayerPhase =
   | "idle"
   | "creatingSession"
   | "attaching"
+  | "ready"
   | "playing"
   | "paused"
+  | "seeking"
+  | "buffering"
   | "switchingQuality"
   | "recreating"
   | "ended"
@@ -15,6 +18,10 @@ export type PlayerEvent =
   | "ATTACHED"
   | "PLAY"
   | "PAUSE"
+  | "SEEK"
+  | "SEEKED"
+  | "WAITING"
+  | "CANPLAY"
   | "QUALITY"
   | "GONE"
   | "ENDED"
@@ -29,15 +36,26 @@ const TABLE: Record<PlayerPhase, Partial<Record<PlayerEvent, PlayerPhase>>> = {
     ERROR: "idle",
   },
   attaching: {
-    ATTACHED: "paused",
+    ATTACHED: "ready",
     PLAY: "playing",
     PAUSE: "paused",
     GONE: "recreating",
     DESTROY: "destroyed",
     ERROR: "idle",
   },
+  ready: {
+    PLAY: "playing",
+    PAUSE: "paused",
+    SEEK: "seeking",
+    QUALITY: "switchingQuality",
+    GONE: "recreating",
+    DESTROY: "destroyed",
+    ERROR: "idle",
+  },
   playing: {
     PAUSE: "paused",
+    SEEK: "seeking",
+    WAITING: "buffering",
     QUALITY: "switchingQuality",
     GONE: "recreating",
     ENDED: "ended",
@@ -46,10 +64,25 @@ const TABLE: Record<PlayerPhase, Partial<Record<PlayerEvent, PlayerPhase>>> = {
   },
   paused: {
     PLAY: "playing",
+    SEEK: "seeking",
     QUALITY: "switchingQuality",
     GONE: "recreating",
     ENDED: "ended",
     START: "creatingSession",
+    DESTROY: "destroyed",
+    ERROR: "idle",
+  },
+  seeking: {
+    SEEKED: "playing",
+    PLAY: "playing",
+    PAUSE: "paused",
+    DESTROY: "destroyed",
+    ERROR: "idle",
+  },
+  buffering: {
+    CANPLAY: "playing",
+    PLAY: "playing",
+    PAUSE: "paused",
     DESTROY: "destroyed",
     ERROR: "idle",
   },

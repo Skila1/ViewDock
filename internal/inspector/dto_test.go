@@ -103,6 +103,54 @@ func TestGPUFallbackEmitsObject(t *testing.T) {
 	}
 }
 
+func TestBuildGenerationTelemetry(t *testing.T) {
+	d := Build(Input{
+		ID: "s1", VODOnDemand: true, VODPlanKind: "keyframe",
+		GenStartSeg: 12, GenerationID: 3, HLSAttach: "native", SeekableFrom: 0,
+		Reasons: []string{},
+	})
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		`"vod_ondemand":true`,
+		`"vod_plan_kind":"keyframe"`,
+		`"gen_start_seg":12`,
+		`"generation_id":3`,
+		`"hls_attach":"native"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %s in %s", want, got)
+		}
+	}
+	if strings.Contains(got, `"seekable_from_ms"`) {
+		t.Fatal("origin 0 must omit seekable_from_ms")
+	}
+	if !strings.Contains(got, `"origin_ms":0`) {
+		t.Fatalf("VOD origin must be 0: %s", got)
+	}
+}
+
+func TestBuildVODOriginIgnoresWindowStart(t *testing.T) {
+	d := Build(Input{
+		ID: "s3", VODOnDemand: true, HLSAttach: "native", SeekableFrom: 55_000, Reasons: []string{},
+	})
+	if d.OriginMS != 0 {
+		t.Fatalf("VOD origin must be 0, got %d", d.OriginMS)
+	}
+}
+
+func TestBuildEVENTOriginIsWindowStart(t *testing.T) {
+	d := Build(Input{
+		ID: "s2", HLSAttach: "mse", SeekableFrom: 55_000, Reasons: []string{},
+	})
+	if d.VODOnDemand || d.OriginMS != 55_000 {
+		t.Fatalf("EVENT origin: vod=%v origin=%d", d.VODOnDemand, d.OriginMS)
+	}
+}
+
 func TestGPUUsedFalseWhenFallback(t *testing.T) {
 	d := Build(Input{
 		ID: "s1", GPUAvail: true, NVENC: true, Encoder: "h264_nvenc",

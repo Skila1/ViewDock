@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canSeekInWindow, nativeGeneratedEndSec, pinNativeLiveEdge } from "./seekWindow";
+import { seekReplacesSession } from "@/playback/controller";
+import { canSeekInWindow, nativeGeneratedEndSec, vodMovieSeekable } from "./seekWindow";
 
 describe("canSeekInWindow", () => {
   it("rejects targets before the session origin", () => {
@@ -102,6 +103,15 @@ describe("canSeekInWindow", () => {
   });
 });
 
+describe("vodMovieSeekable", () => {
+  it("allows forward and back seeks on the same VOD timeline", () => {
+    expect(vodMovieSeekable({ targetMs: 3_600_000, durationMs: 10_193_184 })).toBe(true);
+    expect(vodMovieSeekable({ targetMs: 10_000, durationMs: 10_193_184 })).toBe(true);
+    expect(vodMovieSeekable({ targetMs: 10_193_184, durationMs: 10_193_184 })).toBe(true);
+    expect(vodMovieSeekable({ targetMs: -1, durationMs: 10_193_184 })).toBe(false);
+  });
+});
+
 describe("nativeGeneratedEndSec", () => {
   it("ignores video.duration and a movie-length seekable when the buffer is short", () => {
     const video = {
@@ -122,22 +132,10 @@ describe("nativeGeneratedEndSec", () => {
   });
 });
 
-describe("pinNativeLiveEdge", () => {
-  it("snaps back to 0 if Safari jumps to the frontier right after attach", () => {
-    expect(
-      pinNativeLiveEdge({ relSec: 70, seekableEndSec: 72, attachedAgoMs: 400, lastStableRelSec: 0 }),
-    ).toBe(0);
-  });
-
-  it("snaps back after a live-edge jump later in playback", () => {
-    expect(
-      pinNativeLiveEdge({ relSec: 90, seekableEndSec: 92, attachedAgoMs: 60_000, lastStableRelSec: 20 }),
-    ).toBe(20);
-  });
-
-  it("leaves a normal playhead alone", () => {
-    expect(
-      pinNativeLiveEdge({ relSec: 12, seekableEndSec: 90, attachedAgoMs: 12_000, lastStableRelSec: 11.7 }),
-    ).toBeNull();
+describe("native VOD must not pin a live edge", () => {
+  it("treats every movie timestamp as in-window and never recreates the session", () => {
+    expect(vodMovieSeekable({ targetMs: 70_000, durationMs: 10_193_000 })).toBe(true);
+    expect(vodMovieSeekable({ targetMs: 3_600_000, durationMs: 10_193_000 })).toBe(true);
+    expect(seekReplacesSession(true, false)).toBe(false);
   });
 });

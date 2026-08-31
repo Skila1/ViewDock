@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -132,8 +133,19 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		tok, _ := auth.RandomToken(24)
 		sess.Stoken = tok
 		sess.StokenExp = time.Now().Add(stokenTTL)
-		if err := a.startPipeline(r.Context(), sess); err != nil {
-			if needSlot {
+		if err := a.prepareVOD(r.Context(), sess); err != nil {
+			if sess.SlotHeld {
+				a.Lim.Release()
+			}
+			a.HLS.Remove(sess.ID)
+			httpapi.WriteErr(w, 500, "cache", err.Error())
+			return
+		}
+		sess.jobMu.Lock()
+		err = a.startPipeline(r.Context(), sess)
+		sess.jobMu.Unlock()
+		if err != nil {
+			if sess.SlotHeld {
 				a.Lim.Release()
 			}
 			a.HLS.Remove(sess.ID)
@@ -231,10 +243,19 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 
 	pctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
+	startMS := s.StartMS
+	startNum := 0
+	initName := "init.mp4"
+	if s.VOD {
+		startMS = s.vodStartMS()
+		startNum = s.vodStartNumber()
+		initName = s.vodInitName()
+	}
 	if dec.Mode == decision.ModeRemux {
 		s.EncoderType = "cpu"
 		cmd, err := hls.Remux(pctx, a.FF, s.AbsPath, s.Dir, hls.RemuxOpts{
-			StartMS: s.StartMS, AudioIndex: s.AudioIndex, HEVC: dec.HEVCRemuxTag,
+			StartMS: startMS, StartNumber: startNum, InitFilename: initName,
+			AudioIndex: s.AudioIndex, HEVC: dec.HEVCRemuxTag,
 			Stderr: &s.stderr,
 		})
 		if err != nil {
@@ -250,9 +271,14 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 		} else {
 			s.EncoderType = "cpu"
 		}
+		srcW, srcH, hdr := 0, 0, ""
+		if s.Info != nil {
+			srcW, srcH, hdr = s.Info.Width, s.Info.Height, s.Info.HDR
+		}
 		cmd, err := transcode.Start(pctx, a.FF, a.Locator, transcode.Opts{
-			StartMS: s.StartMS, AudioIndex: s.AudioIndex, Height: s.Height,
-			SrcWidth: s.Info.Width, SrcHeight: s.Info.Height, HDR: s.Info.HDR,
+			StartMS: startMS, StartNumber: startNum, InitFilename: initName,
+			AudioIndex: s.AudioIndex, Height: s.Height,
+			SrcWidth: srcW, SrcHeight: srcH, HDR: hdr,
 			BurnPath: burn, SessionDir: s.Dir, LibraryID: s.LibraryID, AbsPath: s.AbsPath,
 			HW: s.HW, CopyVideo: dec.CopyVideo && !dec.NeedBurn, CopyAudio: dec.CopyAudio,
 			HEVC:   s.Info != nil && decisionHEVC(s.Info.VideoCodec),
@@ -264,20 +290,21 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 		}
 		s.cmd = cmd
 	}
-	go a.waitFFmpeg(s)
+	cmd := s.cmd
+	s.mu.Lock()
+	s.restarting = false
+	s.mu.Unlock()
+	go a.waitFFmpeg(s, cmd)
 	return nil
 }
 
-func (a *API) waitFFmpeg(s *Session) {
-	s.mu.Lock()
-	cmd := s.cmd
-	s.mu.Unlock()
+func (a *API) waitFFmpeg(s *Session, cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
 	err := cmd.Wait()
 	s.mu.Lock()
-	killed := s.killed
+	killed := s.killed || s.restarting || s.cmd != cmd
 	s.mu.Unlock()
 	if err != nil && !killed {
 		stderr := s.stderr.String()
@@ -316,7 +343,10 @@ func (a *API) fallbackCPU(s *Session, stderr string) bool {
 	if a.Log != nil {
 		a.Log.Warn("hw fallback cpu", "category", "playback", "id", s.ID, "stderr", stderr)
 	}
-	if err := a.startPipeline(context.Background(), s); err != nil {
+	s.jobMu.Lock()
+	err := a.startPipeline(context.Background(), s)
+	s.jobMu.Unlock()
+	if err != nil {
 		if a.Log != nil {
 			a.Log.Error("cpu fallback start", "category", "playback", "id", s.ID, "err", err.Error())
 		}
@@ -339,7 +369,7 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		urls["subtitle"] = "/api/v1/playback/sessions/" + s.ID + "/subtitles"
 	}
 	qualities := []string{"auto", "1080", "720", "480"}
-	return map[string]any{
+	out := map[string]any{
 		"id": s.ID, "delivery": s.Delivery, "hls_attach": s.HLSAttach,
 		"urls": urls, "qualities": qualities,
 		"audio": a.audioTracks(s.Info), "subtitles": a.subTracks(s.Info),
@@ -351,6 +381,14 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		"intro": s.Intro, "next_episode": s.NextEpisode,
 		"duration_ms": s.DurationMS, "seekable_from_ms": s.SeekableFromMS,
 	}
+	if s.VOD {
+		out["vod_ondemand"] = true
+		out["seekable_from_ms"] = 0
+		out["vod_plan_kind"] = s.VODPlanKind
+		out["gen_start_seg"] = s.genStartSeg
+		out["generation_id"] = s.GenerationID
+	}
+	return out
 }
 
 func (a *API) audioTracks(info *ffmpeg.MediaInfo) []map[string]any {

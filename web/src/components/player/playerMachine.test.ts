@@ -33,4 +33,19 @@ describe("player machine", () => {
   it("destroy is terminal", () => {
     expect(run("playing", ["DESTROY", "START"])).toBe("destroyed");
   });
+
+  it("seek and buffer stay in-session", () => {
+    expect(reducePlayer("playing", "SEEK")).toBe("seeking");
+    expect(reducePlayer("seeking", "QUALITY")).toBe("seeking");
+    expect(reducePlayer("buffering", "QUALITY")).toBe("buffering");
+    expect(run("playing", ["WAITING", "CANPLAY"])).toBe("playing");
+  });
+
+  it("QUALITY is legal only from ready/playing/paused", () => {
+    expect(reducePlayer("ready", "QUALITY")).toBe("switchingQuality");
+    expect(reducePlayer("playing", "QUALITY")).toBe("switchingQuality");
+    expect(reducePlayer("paused", "QUALITY")).toBe("switchingQuality");
+    expect(reducePlayer("attaching", "QUALITY")).toBe("attaching");
+    expect(reducePlayer("creatingSession", "QUALITY")).toBe("creatingSession");
+  });
 });

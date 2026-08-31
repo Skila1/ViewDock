@@ -76,10 +76,17 @@ type API struct {
 	Reg          *Registry
 	Lease        time.Duration
 	PlaylistWait time.Duration
+	KF           Keyframer
+	testInstall  func(*Session) error
 
 	slotMu   sync.Mutex
 	stop     chan struct{}
 	stopOnce sync.Once
+}
+
+// Keyframer is ffprobe keyframe scan. Tests inject a stub.
+type Keyframer interface {
+	Keyframes(ctx context.Context, path string) ([]int64, error)
 }
 
 func New(d Deps) *API {

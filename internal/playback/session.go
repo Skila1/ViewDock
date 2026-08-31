@@ -10,6 +10,7 @@ import (
 	"github.com/viewdock/viewdock/internal/capability"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
+	"github.com/viewdock/viewdock/internal/hls"
 	"github.com/viewdock/viewdock/internal/hwaccel"
 	"github.com/viewdock/viewdock/internal/library"
 )
@@ -58,12 +59,21 @@ type Session struct {
 	FallbackReason string
 	HW             hwaccel.Info
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
+	// VOD-on-demand is iOS native HLS only. Desktop/MMS keep EVENT.
+	VOD         bool
+	VODPlan     hls.Plan
+	VODPlanKind string // keyframe | equal | promoted_xcode
+	genStartSeg int
+	GenerationID int
+
+	mu          sync.Mutex
+	cmd         *exec.Cmd
+	cancel      context.CancelFunc
 	killed      bool
+	restarting  bool
 	cpuFallback bool
 	stderr      lockedBuf
+	jobMu       sync.Mutex // start/replace only — never held across waits or HTTP
 }
 
 type lockedBuf struct {

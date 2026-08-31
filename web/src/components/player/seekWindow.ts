@@ -1,5 +1,3 @@
-import { noteCurrentTimeWrite } from "@/playback/attachTrace";
-
 /** Seconds of media actually generated/buffered. Not the pinned movie duration. */
 export function generatedMediaEndSec(video: HTMLVideoElement): number | undefined {
   if (video.buffered.length === 0) return undefined;
@@ -26,6 +24,12 @@ export function nativeGeneratedEndSec(video: HTMLVideoElement, listedSec?: numbe
   const candidates = [listed, buf, seekOk ? seek : undefined].filter((n): n is number => n != null);
   if (candidates.length === 0) return undefined;
   return Math.min(...candidates);
+}
+
+/** Native iOS VOD playlist is the full movie; every timestamp is in-window. */
+export function vodMovieSeekable(opts: { targetMs: number; durationMs: number }): boolean {
+  if (!(opts.durationMs > 0)) return opts.targetMs >= 0;
+  return opts.targetMs >= 0 && opts.targetMs <= opts.durationMs + 1000;
 }
 
 /** True if the movie timestamp can be seeked inside the current HLS/MSE window. */
@@ -55,46 +59,6 @@ export function canSeekInWindow(opts: {
   const start = ignoreSeekableStart ? originMs : originMs + seekableStartSec * 1000;
   const end = originMs + endSec * 1000;
   return targetMs >= start - 500 && targetMs <= end + 2000;
-}
-
-/** If Safari jumped an EVENT playlist to the live edge, the playhead to restore. */
-export function pinNativeLiveEdge(opts: {
-  relSec: number;
-  seekableEndSec: number;
-  attachedAgoMs: number;
-  lastStableRelSec: number;
-}): number | null {
-  const { relSec, seekableEndSec, attachedAgoMs, lastStableRelSec } = opts;
-  if (!Number.isFinite(relSec) || !Number.isFinite(seekableEndSec) || seekableEndSec <= 0) {
-    return null;
-  }
-  const nearLive = seekableEndSec - relSec < 5;
-  if (!nearLive) return null;
-  const justAttached = attachedAgoMs >= 0 && attachedAgoMs < 8000;
-  const jumpedAhead = relSec - lastStableRelSec > 8;
-  if (justAttached && relSec > 4) return 0;
-  if (jumpedAhead) return Math.max(0, lastStableRelSec);
-  return null;
-}
-
-export function holdNativeStart(
-  video: HTMLVideoElement,
-  attachedAt: number,
-  lastStableMs: number,
-  originMs: number,
-): boolean {
-  const end = video.seekable.length > 0 ? video.seekable.end(video.seekable.length - 1) : 0;
-  const pin = pinNativeLiveEdge({
-    relSec: video.currentTime || 0,
-    seekableEndSec: Number.isFinite(end) ? end : 0,
-    attachedAgoMs: attachedAt > 0 ? Date.now() - attachedAt : 0,
-    lastStableRelSec: (lastStableMs - originMs) / 1000,
-  });
-  if (pin == null) return false;
-  if (Math.abs((video.currentTime || 0) - pin) < 0.5) return false;
-  noteCurrentTimeWrite(video, pin, "holdNativeStart.pin");
-  video.currentTime = pin;
-  return true;
 }
 
 export function seekableBounds(video: HTMLVideoElement): { startSec?: number; endSec?: number } {

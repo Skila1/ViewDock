@@ -479,3 +479,31 @@ func unique(s []string) []string {
 	}
 	return out
 }
+
+// PromoteRemuxToVideoXcode is used when native VOD remux cannot build a
+// keyframe plan that FFmpeg copy will honor. Equal-length remux is forbidden.
+func PromoteRemuxToVideoXcode(r Result, hw hwaccel.Info) Result {
+	r.NeedVideoXcode = true
+	r.CopyVideo = false
+	r.Reasons = appendUnique(r.Reasons, RemuxKeyframeIncomplete)
+	if r.NeedAudioXcode {
+		r.Mode = ModeTranscodeAV
+	} else {
+		r.Mode = ModeTranscodeVid
+	}
+	r.Delivery = DeliveryHLS
+	r.Playback = playbackLabel(r)
+	r.Video.Action = ActionTranscode
+	r.Video.To = "h264"
+	if hw.VAAPI {
+		r.Reasons = appendUnique(r.Reasons, HWVAAPI)
+		r.Hardware = "VAAPI"
+	} else if hw.NVENC {
+		r.Reasons = appendUnique(r.Reasons, HWNVENC)
+		r.Hardware = "NVENC"
+	} else {
+		r.Reasons = appendUnique(r.Reasons, HWFallbackCPU)
+		r.Hardware = "CPU"
+	}
+	return r
+}

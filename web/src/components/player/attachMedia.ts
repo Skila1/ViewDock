@@ -12,7 +12,7 @@ import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
   engine: PlaybackEngine;
-  generatedEndSec?: () => number;
+  generatedEndSec?: () => number | undefined;
   destroy: () => void;
 };
 
@@ -56,18 +56,19 @@ export async function attachSession(
   const playlist = sessionUrl(session.urls, "hls", "playlist", "index", "master");
   if (!playlist) throw new Error("session missing HLS url");
   const playlistMeta = await waitForPlaylist(playlist);
+  const vodOnDemand = Boolean(session.vod_ondemand);
   setAttachMeta(video, {
     playlistUrl: playlist,
     playlistType: playlistMeta.type,
     playlistDurationMs: playlistMeta.durationMs,
   });
-  noteAttach(video, "playlist_ready", `type=${playlistMeta.type || "?"} listed_ms=${playlistMeta.durationMs ?? "?"}`);
+  noteAttach(video, "playlist_ready", `type=${playlistMeta.type || "?"} listed_ms=${playlistMeta.durationMs ?? "?"} vod=${vodOnDemand}`);
 
   const { default: Hls } = await import("hls.js");
   const engine = selectEngine(session.delivery, {
     hlsJsSupported: Hls.isSupported(),
     nativeHls: nativeHlsSupported(),
-  });
+  }, isIOSDevice(), session.hls_attach);
   const reason = `${engine} hlsJsSupported=${Hls.isSupported()} nativeHls=${nativeHlsSupported()} hls_attach=${session.hls_attach ?? ""}`;
   setAttachMeta(video, {
     engineReason: reason,
@@ -81,7 +82,7 @@ export async function attachSession(
   if (engine === "hlsjs") {
     return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated);
   }
-  return attachNativeHls(video, playlist, session, () => aborted, gone, onBeyondGenerated, playlistMeta.durationMs);
+  return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs);
 }
 
 function prepareVideo(video: HTMLVideoElement) {
@@ -349,10 +350,8 @@ async function attachWithHls(
 async function attachNativeHls(
   video: HTMLVideoElement,
   playlist: string,
-  session: PlaybackSession,
   isAborted: () => boolean,
   gone: () => void,
-  onBeyondGenerated?: (movieMs: number) => void,
   listedDurationMs?: number,
 ): Promise<AttachHandle> {
   video.disableRemotePlayback = false;
@@ -361,65 +360,32 @@ async function attachNativeHls(
   video.controls = true;
   video.src = playlist;
   noteAttach(video, "native_src");
-  let listedSec = listedDurationMs != null && listedDurationMs > 0 ? listedDurationMs / 1000 : undefined;
+  const listedSec = listedDurationMs != null && listedDurationMs > 0 ? listedDurationMs / 1000 : undefined;
   const generatedEndSec = () => nativeGeneratedEndSec(video, listedSec);
-  const pollListed = async () => {
-    try {
-      const res = await fetch(playlist, { credentials: "include", cache: "no-store" });
-      if (!res.ok) return;
-      const snap = inspectPlaylistBody(await res.text(), "native_edge", res.headers);
-      if (snap.sumExtinfSec > 0) listedSec = snap.sumExtinfSec;
-    } catch {
-      /* keep last edge */
-    }
-  };
-  const listedPoll = window.setInterval(() => {
-    void pollListed();
-  }, 1000);
-  let farSeekAt = 0;
-  const onSeeking = () => {
-    const edge = generatedEndSec();
-    if (edge == null || !onBeyondGenerated) return;
-    if (shouldReplaceForGenerated(video.currentTime, edge) && Date.now() - farSeekAt > 400) {
-      farSeekAt = Date.now();
-      const origin = session.seekable_from_ms ?? 0;
-      noteAttach(video, "beyond_generated_replace", `t=${video.currentTime} edge=${edge}`);
-      onBeyondGenerated(origin + video.currentTime * 1000);
-    }
-  };
   const onError = () => {
     void fetch(playlist, { credentials: "include" }).then((res) => {
       if (res.status === 410) gone();
     }).catch(() => undefined);
   };
   video.addEventListener("error", onError);
-  video.addEventListener("seeking", onSeeking);
   try {
     await waitCanPlay(video, isAborted);
-    if (video.currentTime > 0.25) {
-      noteCurrentTimeWrite(video, 0, "attachNativeHls.resetAfterCanPlay");
-      video.currentTime = 0;
-    }
   } catch (err) {
-    window.clearInterval(listedPoll);
     video.removeEventListener("error", onError);
-    video.removeEventListener("seeking", onSeeking);
     throw err;
   }
   return {
     engine: "native-hls",
     generatedEndSec,
     destroy() {
-      window.clearInterval(listedPoll);
       video.removeEventListener("error", onError);
-      video.removeEventListener("seeking", onSeeking);
       video.removeAttribute("src");
       video.load();
     },
   };
 }
 
-async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs?: number }> {
+async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs?: number; endlist?: boolean }> {
   const deadline = Date.now() + 50_000;
   while (Date.now() < deadline) {
     const res = await fetch(url, { credentials: "include" });
@@ -430,9 +396,11 @@ async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs
       const text = await res.text();
       if (text.includes("#EXTINF") || /seg\d+\.(m4s|ts)/.test(text)) {
         const listed = Number(res.headers.get("X-VD-Playlist-Duration-Ms"));
+        const snap = inspectPlaylistBody(text, "wait", res.headers);
         return {
-          type: res.headers.get("X-VD-Playlist-Type") || undefined,
+          type: res.headers.get("X-VD-Playlist-Type") || snap.type || undefined,
           durationMs: Number.isFinite(listed) && listed > 0 ? listed : undefined,
+          endlist: snap.endlist,
         };
       }
     }

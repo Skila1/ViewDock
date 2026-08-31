@@ -12,12 +12,14 @@ import (
 )
 
 type RemuxOpts struct {
-	StartMS     int64
-	AudioIndex  int
-	VideoIndex  int
-	HEVC        bool
-	SegmentTime int
-	Stderr      io.Writer
+	StartMS      int64
+	StartNumber  int
+	InitFilename string
+	AudioIndex   int
+	VideoIndex   int
+	HEVC         bool
+	SegmentTime  int
+	Stderr       io.Writer
 }
 
 func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxOpts) (*exec.Cmd, error) {
@@ -54,7 +56,7 @@ func Remux(ctx context.Context, ff *ffmpeg.Tool, src, destDir string, opt RemuxO
 	if opt.HEVC {
 		args = append(args, "-tag:v", "hvc1")
 	}
-	args = append(args, hlsArgs(destDir, opt.SegmentTime)...)
+	args = append(args, hlsArgs(destDir, opt.SegmentTime, opt.StartNumber, opt.InitFilename)...)
 	cmd := exec.CommandContext(ctx, ff.FFmpeg, args...)
 	ffmpegSetGroup(cmd)
 	cmd.Dir = destDir
@@ -76,17 +78,26 @@ func remuxInputFlags() []string {
 	}
 }
 
-func hlsArgs(destDir string, seg int) []string {
-	return []string{
+func hlsArgs(destDir string, seg, startNumber int, initName string) []string {
+	if initName == "" {
+		initName = "init.mp4"
+	}
+	args := []string{
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", seg),
 		"-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_fmp4_init_filename", initName,
 		"-hls_flags", "independent_segments",
+	}
+	if startNumber > 0 {
+		args = append(args, "-start_number", fmt.Sprintf("%d", startNumber))
+	}
+	args = append(args,
 		"-hls_segment_filename", filepath.Join(destDir, "seg%d.m4s"),
 		filepath.Join(destDir, "index.m3u8"),
-	}
+	)
+	return args
 }
 
 func ffmpegSetGroup(cmd *exec.Cmd) {

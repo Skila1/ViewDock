@@ -49,11 +49,18 @@ type GPU struct {
 }
 
 type DTO struct {
-	ID       string             `json:"id"`
-	Source   Source             `json:"source"`
-	Client   capability.Profile `json:"client"`
-	Decision DecisionCol        `json:"decision"`
-	GPU      *GPU               `json:"gpu"`
+	ID            string             `json:"id"`
+	Source        Source             `json:"source"`
+	Client        capability.Profile `json:"client"`
+	Decision      DecisionCol        `json:"decision"`
+	GPU           *GPU               `json:"gpu"`
+	VODOnDemand   bool               `json:"vod_ondemand,omitempty"`
+	VODPlanKind   string             `json:"vod_plan_kind,omitempty"`
+	GenStartSeg   int                `json:"gen_start_seg,omitempty"`
+	GenerationID  int                `json:"generation_id,omitempty"`
+	HLSAttach     string             `json:"hls_attach,omitempty"`
+	SeekableFrom  int64              `json:"seekable_from_ms,omitempty"`
+	OriginMS      int64              `json:"origin_ms"`
 }
 
 type Input struct {
@@ -88,6 +95,12 @@ type Input struct {
 	Video           StreamCol
 	Audio           StreamCol
 	Cont            StreamCol
+	VODOnDemand     bool
+	VODPlanKind     string
+	GenStartSeg     int
+	GenerationID    int
+	HLSAttach       string
+	SeekableFrom    int64
 }
 
 func sessionGPUUsed(in Input) bool {
@@ -116,12 +129,22 @@ func Build(in Input) DTO {
 			Width: in.Width, Height: in.Height, BitDepth: in.BitDepth, HDR: in.HDR,
 			DurationMS: in.DurationMS, Size: in.Size,
 		},
-		Client: in.Client,
+		Client:       in.Client,
+		VODOnDemand:  in.VODOnDemand,
+		VODPlanKind:  in.VODPlanKind,
+		GenStartSeg:  in.GenStartSeg,
+		GenerationID: in.GenerationID,
+		HLSAttach:    in.HLSAttach,
+		SeekableFrom: in.SeekableFrom,
+		OriginMS:     in.SeekableFrom,
 		Decision: DecisionCol{
 			Playback: in.Playback, Mode: in.Mode, Delivery: in.Delivery, Reasons: in.Reasons,
 			Height: in.OutHeight, Encoder: in.Encoder, EncoderType: encoderType(in.Encoder),
 			Hardware: in.Hardware, Container: in.Cont, Video: in.Video, Audio: in.Audio,
 		},
+	}
+	if in.VODOnDemand {
+		d.OriginMS = 0
 	}
 	if in.Reasons == nil {
 		d.Decision.Reasons = []string{}

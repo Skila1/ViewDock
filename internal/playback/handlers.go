@@ -1,7 +1,9 @@
 package playback
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -201,6 +203,10 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	if s == nil {
 		return
 	}
+	if s.VOD {
+		a.serveVODPlaylist(w, r, s)
+		return
+	}
 	path := filepath.Join(s.Dir, "index.m3u8")
 	wait := a.PlaylistWait
 	if wait <= 0 {
@@ -251,6 +257,48 @@ func (a *API) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *API) serveVODPlaylist(w http.ResponseWriter, r *http.Request, s *Session) {
+	if err := a.ensureInit(r.Context(), s); err != nil && !errors.Is(err, context.Canceled) {
+		a.writeVODErr(w, s, err)
+		return
+	}
+	need := s.genStartSeg
+	if err := a.ensureSegment(r.Context(), s, need); err != nil && !errors.Is(err, context.Canceled) {
+		a.writeVODErr(w, s, err)
+		return
+	}
+	body, err := a.vodPlaylistBody(s)
+	if err != nil {
+		httpapi.WriteErr(w, 500, "playlist", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-VD-Playlist-Type", "VOD")
+	w.Header().Set("X-VD-Playlist-Duration-Ms", strconv.FormatInt(s.VODPlan.ListedDurationMS(), 10))
+	w.Header().Set("X-VD-Movie-Duration-Ms", strconv.FormatInt(s.DurationMS, 10))
+	w.WriteHeader(200)
+	_, _ = w.Write(body)
+}
+
+func (a *API) writeVODErr(w http.ResponseWriter, s *Session, err error) {
+	s.mu.Lock()
+	failed, failCode := s.Failed, s.FailCode
+	s.mu.Unlock()
+	if failed {
+		httpapi.WriteJSON(w, http.StatusGone, map[string]any{"code": failCode, "resume_ms": s.snapshotResume()})
+		return
+	}
+	if errors.Is(err, errSegmentTimeout) {
+		w.Header().Set("Retry-After", "1")
+		httpapi.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code": "SEGMENT_PENDING", "resume_ms": s.snapshotResume(),
+		})
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusGone, map[string]any{"code": "SESSION_GONE", "resume_ms": s.snapshotResume()})
+}
+
 func (a *API) handleSegment(w http.ResponseWriter, r *http.Request) {
 	s := a.live(w, r)
 	if s == nil {
@@ -260,6 +308,19 @@ func (a *API) handleSegment(w http.ResponseWriter, r *http.Request) {
 	if !hls.SafeFile(name) {
 		httpapi.WriteErr(w, 404, "not_found", "not found")
 		return
+	}
+	if s.VOD {
+		if name == "init.mp4" {
+			if err := a.ensureInit(r.Context(), s); err != nil && !errors.Is(err, context.Canceled) {
+				a.writeVODErr(w, s, err)
+				return
+			}
+		} else if n, ok := hls.ParseSegIndex(name); ok {
+			if err := a.ensureSegment(r.Context(), s, n); err != nil && !errors.Is(err, context.Canceled) {
+				a.writeVODErr(w, s, err)
+				return
+			}
+		}
 	}
 	http.ServeFile(w, r, filepath.Join(s.Dir, name))
 }
@@ -307,6 +368,12 @@ func (a *API) handleAdminOne(w http.ResponseWriter, r *http.Request) {
 			Codec: s.Decision.Container.Codec, Action: s.Decision.Container.Action,
 			To: s.Decision.Container.To, Reason: s.Decision.Container.Reason,
 		},
+		VODOnDemand:  s.VOD,
+		VODPlanKind:  s.VODPlanKind,
+		GenStartSeg:  s.genStartSeg,
+		GenerationID: s.GenerationID,
+		HLSAttach:    s.HLSAttach,
+		SeekableFrom: s.SeekableFromMS,
 	}
 	if a.HW.VAAPI {
 		in.HWAccel = "vaapi"

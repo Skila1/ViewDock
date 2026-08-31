@@ -42,6 +42,9 @@ const (
 	HWFallbackCPU  = "HW_FALLBACK_CPU"
 	HWUnavailable  = "HW_UNAVAILABLE"
 	RefuseNoZScale = "REFUSE_4K_HDR_NO_ZSCALE"
+
+	// Native remux VOD cannot advertise equal-length copy segments.
+	RemuxKeyframeIncomplete = "REMUX_KEYFRAME_INCOMPLETE_PROMOTE_XCODE"
 )
 
 const (

@@ -91,6 +91,15 @@ export function InspectorPage() {
             {reasons.length ? reasons.map((r) => <li key={r}>{r}</li>) : <li className="text-dim">None</li>}
           </ul>
         </Col>
+        <Col title="Generation">
+          <Kv label="hls_attach" value={data?.hls_attach} />
+          <Kv label="vod_ondemand" value={data?.vod_ondemand} />
+          <Kv label="vod_plan_kind" value={data?.vod_plan_kind} />
+          <Kv label="gen_start_seg" value={data?.gen_start_seg} />
+          <Kv label="generation_id" value={data?.generation_id} />
+          <Kv label="seekable_from_ms" value={data?.seekable_from_ms} />
+          <Kv label="origin_ms" value={data?.origin_ms} />
+        </Col>
         <Col title="Hardware">
           <Kv label="available" value={gpu?.available} />
           <Kv label="vendor" value={gpu?.vendor} />

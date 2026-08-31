@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferDiagnosticOwner, IOS_AVKIT_MMS_VALIDATED, IOS_AVKIT_NATIVE_HLS, movieDurationMs, selectEngine, withVdDebug } from "./policy";
+import { inferDiagnosticOwner, IOS_AVKIT_NATIVE_HLS, movieDurationMs, selectEngine, withVdDebug } from "./policy";
 
 describe("playback policy", () => {
   it("uses native HLS on iOS so AVKit can present; hls.js elsewhere when MSE exists", () => {
@@ -7,6 +7,8 @@ describe("playback policy", () => {
     expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true }, false)).toBe("hlsjs");
     expect(selectEngine("hls", { hlsJsSupported: false, nativeHls: true }, false)).toBe("native-hls");
     expect(selectEngine("direct", { hlsJsSupported: true, nativeHls: true }, true)).toBe("direct");
+    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true }, false, "native")).toBe("native-hls");
+    expect(selectEngine("hls", { hlsJsSupported: true, nativeHls: true }, true, "mse")).toBe("hlsjs");
   });
 
   it("uses session duration_ms, not a 30s HLS window", () => {
@@ -20,7 +22,6 @@ describe("playback policy", () => {
     expect(IOS_AVKIT_NATIVE_HLS.engine).toBe("native-hls");
     expect(IOS_AVKIT_NATIVE_HLS.enter).toBe("webkitEnterFullscreen");
     expect(IOS_AVKIT_NATIVE_HLS.restore_currentTime_on_exit).toBe(false);
-    expect(IOS_AVKIT_MMS_VALIDATED.restore_currentTime_on_exit).toBe(false);
   });
 
   it("appends vd_debug=1 to a watch URL", () => {

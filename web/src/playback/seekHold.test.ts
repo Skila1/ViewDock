@@ -33,6 +33,10 @@ describe("seekHoldAction", () => {
     expect(shouldReplaceForGenerated(35, 30)).toBe(false);
   });
 
+  it("does not replace when the VOD playlist already lists the full movie", () => {
+    expect(shouldReplaceForGenerated(3600, 10193)).toBe(false);
+  });
+
   it("captures an AVKit seek past the current playlist edge", () => {
     expect(captureSeekHold(6000, 1274, 10193)).toBe(6000);
     expect(captureSeekHold(1000, 1274, 10193)).toBeNull();
