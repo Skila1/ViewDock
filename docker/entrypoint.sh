@@ -1,4 +1,5 @@
 #!/bin/sh
+# CI cache probe — entrypoint only; npm/Go/apt layers must stay cached.
 set -eu
 
 PUID="${PUID:-1000}"
