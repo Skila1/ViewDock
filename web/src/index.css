@@ -182,6 +182,13 @@ textarea:focus {
   height: 100dvh;
 }
 
+/* EVENT remux has no ENDLIST yet; Safari labels that "Live Broadcast". Hide the label. */
+video::-webkit-media-controls-live-broadcast-container,
+video::-webkit-media-controls-live-broadcast-label,
+video::-webkit-media-controls-live-broadcast-indicator {
+  display: none !important;
+}
+
 @media (min-width: 768px) {
   body {
     font-size: 14px;

@@ -711,23 +711,32 @@ export function Player({
         />
       ) : null}
 
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-0 transition-opacity",
-          showUi ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <div
-          className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3"
-          style={{ paddingTop: "max(0.75rem, var(--sat))" }}
-        >
-          <div className="pointer-events-auto min-w-0">
-            <p className="truncate text-sm font-medium text-white">{title}</p>
-          </div>
+      {applePlayer ? (
+        <>
+          <p
+            className={cn(
+              "pointer-events-none absolute truncate text-sm font-medium text-white transition-opacity",
+              showUi ? "opacity-100" : "opacity-0",
+            )}
+            style={{
+              top: "max(3.5rem, calc(var(--sat) + 2.75rem))",
+              left: "1rem",
+              right: "4.5rem",
+            }}
+          >
+            {title}
+          </p>
           {onClose ? (
             <button
               type="button"
-              className="pointer-events-auto tap rounded-full bg-black/50 p-2 text-white"
+              className={cn(
+                "tap absolute rounded-full bg-black/50 p-2 text-white transition-opacity",
+                showUi ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+              )}
+              style={{
+                top: "max(0.5rem, calc(var(--sat) + 0.15rem))",
+                right: "0.75rem",
+              }}
               aria-label="Exit player"
               onClick={(e) => {
                 e.stopPropagation();
@@ -737,81 +746,113 @@ export function Player({
               <X size={20} />
             </button>
           ) : null}
-        </div>
-
+        </>
+      ) : (
         <div
-          className="pointer-events-auto absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10"
-          style={{
-            bottom: applePlayer ? "max(3.25rem, calc(var(--sab) + 2.75rem))" : 0,
-            paddingBottom: applePlayer ? "0.5rem" : "max(1rem, var(--sab))",
-          }}
+          className={cn(
+            "pointer-events-none absolute inset-0 transition-opacity",
+            showUi ? "opacity-100" : "opacity-0",
+          )}
         >
-          <input
-            type="range"
-            min={0}
-            max={Math.max(1, duration)}
-            value={Math.min(pos, duration)}
-            onChange={(e) => seek(Number(e.target.value), "slider")}
-            className="mb-3 h-8 w-full accent-[var(--accent)]"
-          />
-          <div className="flex flex-wrap items-center gap-3">
-            {applePlayer ? null : (
-              <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
-                {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+          <div
+            className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3"
+            style={{ paddingTop: "max(0.75rem, var(--sat))" }}
+          >
+            <div className="pointer-events-auto min-w-0">
+              <p className="truncate text-sm font-medium text-white">{title}</p>
+            </div>
+            {onClose ? (
+              <button
+                type="button"
+                className="pointer-events-auto tap rounded-full bg-black/50 p-2 text-white"
+                aria-label="Exit player"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+              >
+                <X size={20} />
               </button>
-            )}
-            <span className="text-xs tabular-nums text-white/80">
-              {formatClock(pos)} / {formatClock(duration)}
-            </span>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 transition-opacity",
+          showUi ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+        )}
+        style={{
+          bottom: 0,
+          paddingBottom: "max(1rem, var(--sab))",
+        }}
+      >
+        <input
+          type="range"
+          min={0}
+          max={Math.max(1, duration)}
+          value={Math.min(pos, duration)}
+          onChange={(e) => seek(Number(e.target.value), "slider")}
+          className="mb-3 h-8 w-full accent-[var(--accent)]"
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          {applePlayer ? null : (
+            <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
+              {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
+            </button>
+          )}
+          <span className="text-xs tabular-nums text-white/80">
+            {formatClock(pos)} / {formatClock(duration)}
+          </span>
+          {applePlayer ? null : (
+            <button
+              type="button"
+              className="tap text-white"
+              onClick={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                v.muted = !v.muted;
+                setMuted(v.muted);
+              }}
+              aria-label="Mute"
+            >
+              {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            </button>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {session?.next_episode ? (
+              <button
+                type="button"
+                className="tap flex items-center gap-1 rounded border border-white/20 px-2 text-xs text-white"
+                onClick={() => onEnded?.()}
+              >
+                <SkipForward size={14} /> Next
+              </button>
+            ) : null}
+            {qualities.length > 0 ? (
+              <select
+                className="tap rounded border border-white/20 bg-black/40 px-2 text-xs"
+                value={qualityRef.current ?? qualities[0]}
+                onChange={(e) => changeQuality(e.target.value)}
+              >
+                {qualities.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             {applePlayer ? null : (
               <button
                 type="button"
                 className="tap text-white"
-                onClick={() => {
-                  const v = videoRef.current;
-                  if (!v) return;
-                  v.muted = !v.muted;
-                  setMuted(v.muted);
-                }}
-                aria-label="Mute"
+                aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+                onClick={(e) => toggleFullscreen(e)}
               >
-                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                {fs ? <Minimize size={18} /> : <Maximize size={18} />}
               </button>
             )}
-            <div className="ml-auto flex items-center gap-2">
-              {session?.next_episode ? (
-                <button
-                  type="button"
-                  className="tap flex items-center gap-1 rounded border border-white/20 px-2 text-xs text-white"
-                  onClick={() => onEnded?.()}
-                >
-                  <SkipForward size={14} /> Next
-                </button>
-              ) : null}
-              {qualities.length > 0 ? (
-                <select
-                  className="tap rounded border border-white/20 bg-black/40 px-2 text-xs"
-                  value={qualityRef.current ?? qualities[0]}
-                  onChange={(e) => changeQuality(e.target.value)}
-                >
-                  {qualities.map((q) => (
-                    <option key={q} value={q}>
-                      {q}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
-              {applePlayer ? null : (
-                <button
-                  type="button"
-                  className="tap text-white"
-                  aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
-                  onClick={(e) => toggleFullscreen(e)}
-                >
-                  {fs ? <Minimize size={18} /> : <Maximize size={18} />}
-                </button>
-              )}
-            </div>
           </div>
         </div>
       </div>
