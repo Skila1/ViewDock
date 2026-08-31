@@ -6,19 +6,29 @@ COPY web/package.json web/package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
     if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else echo "no web lockfile"; fi
 COPY web/ ./
+# Image build skips tsc; local `npm run build` still typechecks.
 RUN --mount=type=cache,target=/root/.npm \
-    if [ -f package.json ] && grep -q '"build"' package.json; then npm run build; else mkdir -p dist && printf '%s\n' '<!doctype html><title>ViewDock</title><p>ViewDock</p>' > dist/index.html; fi
+    if [ -f package.json ] && grep -q '"build"' package.json; then npm exec -- vite build; else mkdir -p dist && printf '%s\n' '<!doctype html><title>ViewDock</title><p>ViewDock</p>' > dist/index.html; fi
 
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
+ENV GOCACHE=/src/.gocache GOFLAGS=-buildvcs=false
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
-COPY . .
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY migrations/ ./migrations/
+COPY web/embed.go ./web/embed.go
+COPY VERSION ./
+# Compile packages into the layer so a web-only change does not rebuild Go.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    mkdir -p web/dist /out \
+    && printf '%s\n' '<!doctype html><title>ViewDock</title>' > web/dist/index.html \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /tmp/viewdock-warmup ./cmd/viewdock
 COPY --from=web /src/web/dist ./web/dist
 ARG VERSION
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
     ver="${VERSION}"; \
     if [ -z "${ver}" ] && [ -f VERSION ]; then ver="$(tr -d '[:space:]' < VERSION)"; fi; \
     if [ -z "${ver}" ]; then ver=0.1.0; fi; \
@@ -39,9 +49,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && useradd --system --home /config --uid 1000 viewdock \
     && mkdir -p /config /cache /transcode /media \
     && chown viewdock:viewdock /config /cache /transcode
-COPY --from=build /out/viewdock /usr/local/bin/viewdock
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY --from=build --chmod=755 /out/viewdock /usr/local/bin/viewdock
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENV VD_HTTP_ADDR=:8080 \
     VD_CONFIG_DIR=/config \
     VD_CACHE_DIR=/cache \
