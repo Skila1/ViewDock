@@ -53,6 +53,9 @@ type Session struct {
 	Intro          any
 	NextEpisode    any
 	Encoder        string
+	EncoderType    string // cpu | nvidia_nvenc
+	Fallback       bool
+	FallbackReason string
 	HW             hwaccel.Info
 
 	mu     sync.Mutex

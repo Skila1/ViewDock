@@ -454,7 +454,12 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Inspector }
+        "200":
+          description: Inspector
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Inspector"
   /users:
     get:
       operationId: listUsers
@@ -623,6 +628,8 @@ components:
             mode: { type: string }
             playback: { type: string }
             hardware: { type: string }
+            encoder: { type: string }
+            encoder_type: { type: string, enum: [cpu, nvidia_nvenc] }
             video: { type: object, additionalProperties: true }
             audio: { type: object, additionalProperties: true }
             container: { type: object, additionalProperties: true }
@@ -657,3 +664,43 @@ components:
         media_file_id: { type: string }
         error: { type: string }
         expires_at: { type: string }
+    InspectorGPU:
+      type: object
+      nullable: true
+      properties:
+        available: { type: boolean }
+        vendor: { type: string, description: nvidia when NVENC is available or in use }
+        encoder: { type: string, description: h264_nvenc or libx264 }
+        gpu_used: { type: boolean, description: true only when this session encodes with NVENC }
+        fallback: { type: boolean }
+        fallback_reason: { type: string }
+        detection_reason: { type: string }
+        vaapi: { type: boolean }
+        nvenc: { type: boolean }
+        hwaccel: { type: string }
+    InspectorDecision:
+      type: object
+      properties:
+        playback: { type: string }
+        mode: { type: string }
+        delivery: { type: string }
+        reasons:
+          type: array
+          items: { type: string }
+        height: { type: integer }
+        encoder: { type: string }
+        encoder_type: { type: string, enum: [cpu, nvidia_nvenc] }
+        hardware: { type: string }
+        container: { type: object, additionalProperties: true }
+        video: { type: object, additionalProperties: true }
+        audio: { type: object, additionalProperties: true }
+    Inspector:
+      type: object
+      properties:
+        id: { type: string }
+        source: { type: object, additionalProperties: true }
+        client: { type: object, additionalProperties: true }
+        decision:
+          $ref: "#/components/schemas/InspectorDecision"
+        gpu:
+          $ref: "#/components/schemas/InspectorGPU"

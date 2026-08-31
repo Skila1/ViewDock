@@ -1,11 +1,9 @@
-# Overlay later: NVIDIA / jellyfin-ffmpeg image is not Phase 0.
-# Use: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# Optional NVIDIA overlay. Same :latest image as docker-compose.yml.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Or set COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml in .env
 services:
   viewdock:
-    image: ghcr.io/skila1/viewdock:nvidia
-    devices:
-      - /dev/dri:/dev/dri
-    # deploy.resources.reservations.devices:
-    #   - driver: nvidia
-    #     count: 1
-    #     capabilities: [gpu]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    gpus: all

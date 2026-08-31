@@ -583,6 +583,83 @@ EOF
   chmod 0644 "${PREFIX}/docker-compose.yml"
 }
 
+# Same overlay as repo docker-compose.gpu.yml. Written only when Docker's NVIDIA runtime is present.
+write_gpu_compose() {
+  cat > "${PREFIX}/docker-compose.gpu.yml" <<'EOF'
+services:
+  viewdock:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    gpus: all
+EOF
+  chmod 0644 "${PREFIX}/docker-compose.gpu.yml"
+}
+
+env_set_compose_file_gpu() {
+  local envf="${PREFIX}/.env"
+  [[ -f "${envf}" ]] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  if grep -q '^COMPOSE_FILE=' "${envf}"; then
+    awk '
+      /^COMPOSE_FILE=/ {
+        print "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml"
+        next
+      }
+      { print }
+    ' "${envf}" > "${tmp}"
+  else
+    cat "${envf}" > "${tmp}"
+    printf '\nCOMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml\n' >> "${tmp}"
+  fi
+  mv "${tmp}" "${envf}"
+  chmod 0600 "${envf}" || true
+}
+
+# Drop GPU overlay from COMPOSE_FILE on CPU-only / missing-runtime reinstall. Other .env keys stay.
+env_clear_gpu_compose_file() {
+  local envf="${PREFIX}/.env"
+  [[ -f "${envf}" ]] || return 0
+  grep -q '^COMPOSE_FILE=.*gpu' "${envf}" || return 0
+  local tmp
+  tmp="$(mktemp)"
+  grep -v '^COMPOSE_FILE=.*gpu' "${envf}" > "${tmp}" || true
+  mv "${tmp}" "${envf}"
+  chmod 0600 "${envf}" || true
+}
+
+# Detect NVIDIA GPU + Docker runtime. Never installs drivers. Never fails install.
+detect_nvidia_docker() {
+  local gpu_hint=0
+  local runtime_ok=0
+  local info=""
+
+  if command -v nvidia-smi >/dev/null 2>&1 || [[ -e /dev/nvidia0 ]]; then
+    gpu_hint=1
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    info="$(docker info 2>/dev/null || true)"
+    if printf '%s\n' "${info}" | grep -qi 'nvidia'; then
+      runtime_ok=1
+    fi
+  fi
+
+  if [[ "${gpu_hint}" -eq 1 && "${runtime_ok}" -eq 0 ]]; then
+    echo "NVIDIA GPU detected but Docker GPU runtime is unavailable. ViewDock will use CPU transcoding."
+  fi
+
+  if [[ "${runtime_ok}" -eq 1 ]]; then
+    write_gpu_compose
+    env_set_compose_file_gpu
+    msg_ok "NVIDIA Docker runtime detected; GPU overlay enabled"
+  else
+    env_clear_gpu_compose_file
+  fi
+  return 0
+}
+
 save_installer() {
   local src="${BASH_SOURCE[0]:-}"
   if [[ -n "${src}" && -f "${src}" && "${src}" != *bash ]]; then
@@ -637,6 +714,8 @@ EOF
     chmod 0600 "${PREFIX}/.env"
   fi
 
+  detect_nvidia_docker
+
   if [[ ! -f "${PREFIX}/docker-compose.yml" || ! -f "${PREFIX}/.env" ]]; then
     msg_err "Failed to write ${PREFIX}/docker-compose.yml and ${PREFIX}/.env"
     exit 1
@@ -666,6 +745,9 @@ EOF
   echo
   echo -e " ${BOLD}${BL}ViewDock files are in ${PREFIX}${CL}"
   echo "  ${PREFIX}/docker-compose.yml"
+  if [[ -f "${PREFIX}/docker-compose.gpu.yml" ]] && grep -q '^COMPOSE_FILE=.*gpu' "${PREFIX}/.env" 2>/dev/null; then
+    echo "  ${PREFIX}/docker-compose.gpu.yml (NVIDIA overlay)"
+  fi
   echo "  ${PREFIX}/.env"
   echo "  Open http://<this-host>:8080 and create the first administrator."
   echo "  First-run token: printed in docker compose logs after ViewDock starts (8 characters)."

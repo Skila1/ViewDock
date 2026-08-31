@@ -348,6 +348,8 @@ export interface PlaybackDecision {
   audio?: PlaybackStreamAction;
   container?: PlaybackStreamAction;
   hardware?: string;
+  encoder?: string;
+  encoder_type?: "cpu" | "nvidia_nvenc";
 }
 
 export interface PlaybackSession {
@@ -507,9 +509,10 @@ export interface InspectorSource {
   audio_codec?: string;
   width?: number;
   height?: number;
+  bit_depth?: number;
   duration_ms?: number;
   hdr?: string;
-  gpu?: string | null;
+  size?: number;
   size_bytes?: number;
   [key: string]: unknown;
 }
@@ -518,25 +521,41 @@ export interface InspectorClient extends Partial<ClientProfile> {
   [key: string]: unknown;
 }
 
+export interface InspectorGPU {
+  available: boolean;
+  vendor?: string;
+  encoder?: string;
+  gpu_used: boolean;
+  fallback?: boolean;
+  fallback_reason?: string;
+  detection_reason?: string;
+  vaapi?: boolean;
+  nvenc?: boolean;
+  hwaccel?: string;
+}
+
 export interface InspectorDecision {
   mode?: string;
   playback?: string;
   delivery?: string;
   quality?: string;
+  height?: number;
   reasons?: string[];
   hardware?: string;
+  encoder?: string;
+  encoder_type?: "cpu" | "nvidia_nvenc";
   video?: PlaybackStreamAction;
   audio?: PlaybackStreamAction;
   container?: PlaybackStreamAction;
-  gpu?: string | null;
-  [key: string]: unknown;
 }
 
 export interface Inspector {
+  id?: string;
   session_id?: string;
   source?: InspectorSource | null;
   client?: InspectorClient | null;
   decision?: InspectorDecision | null;
+  gpu?: InspectorGPU | null;
 }
 
 export interface UserRow {

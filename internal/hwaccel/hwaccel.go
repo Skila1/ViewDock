@@ -12,12 +12,17 @@ import (
 )
 
 type Info struct {
-	Available bool     `json:"available"`
-	VAAPI     bool     `json:"vaapi"`
-	NVENC     bool     `json:"nvenc"`
-	ZScale    bool     `json:"zscale"`
-	Encoders  []string `json:"encoders"`
-	HWAccel   []string `json:"hwaccel"`
+	Available       bool     `json:"available"`
+	VAAPI           bool     `json:"vaapi"`
+	NVENC           bool     `json:"nvenc"`
+	H264NVENC       bool     `json:"h264_nvenc,omitempty"`
+	HEVCNVENC       bool     `json:"hevc_nvenc,omitempty"`
+	AV1NVENC        bool     `json:"av1_nvenc,omitempty"`
+	NVDEC           bool     `json:"nvdec,omitempty"`
+	DetectionReason string   `json:"detection_reason,omitempty"`
+	ZScale          bool     `json:"zscale"`
+	Encoders        []string `json:"encoders"`
+	HWAccel         []string `json:"hwaccel"`
 }
 
 func FromDetect(d ffmpeg.DetectResult) Info {
@@ -36,31 +41,43 @@ func fromDetect(d ffmpeg.DetectResult, hasVAAPI, hasNVIDIA func() bool) Info {
 	if info.HWAccel == nil {
 		info.HWAccel = []string{}
 	}
-	compiledVAAPI, compiledNVENC := false, false
+	compiledVAAPI := false
+	listedH264NVENC := false
 	for _, h := range d.HWAccel {
 		switch strings.ToLower(h) {
 		case "vaapi":
 			compiledVAAPI = true
-		case "cuda", "nvenc", "nvdec":
-			compiledNVENC = true
+		case "nvdec":
+			info.NVDEC = true
 		}
 	}
 	for _, e := range d.Encoders {
 		el := strings.ToLower(e)
-		if strings.Contains(el, "nvenc") {
-			compiledNVENC = true
+		if strings.Contains(el, "h264_nvenc") {
+			listedH264NVENC = true
+		}
+		if strings.Contains(el, "hevc_nvenc") {
+			info.HEVCNVENC = true
+		}
+		if strings.Contains(el, "av1_nvenc") {
+			info.AV1NVENC = true
 		}
 		if strings.Contains(el, "vaapi") {
 			compiledVAAPI = true
 		}
 	}
-	// FFmpeg lists vaapi/nvenc whenever they were compiled in. Only use them
-	// when a device node is actually present or transcode dies immediately.
+	// FFmpeg lists vaapi whenever it was compiled in. Only use it when a
+	// device node is actually present or transcode dies immediately.
 	if compiledVAAPI && hasVAAPI() {
 		info.VAAPI = true
 	}
-	if compiledNVENC && hasNVIDIA() {
-		info.NVENC = true
+	// NVIDIA device is a hint only. NVENC/H264NVENC stay false until Apply
+	// proves h264_nvenc can encode a frame.
+	nvidiaHint := hasNVIDIA()
+	if listedH264NVENC {
+		info.DetectionReason = "nvenc_listed"
+	} else if nvidiaHint {
+		info.DetectionReason = "nvenc_not_listed"
 	}
 	info.Available = info.VAAPI || info.NVENC
 	return info
@@ -80,27 +97,85 @@ func nvidiaDevice() bool {
 	return false
 }
 
+func isForceCPU(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "off", "0", "cpu", "none", "software":
+		return true
+	}
+	return false
+}
+
+func hwAccelMode() string {
+	for _, key := range []string{"VD_HWACCEL", "VD_HW_ACCEL"} {
+		v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if v != "" && v != "auto" && !isForceCPU(v) {
+			return v
+		}
+	}
+	return ""
+}
+
+func hasEncoder(encoders []string, name string) bool {
+	for _, e := range encoders {
+		if strings.Contains(strings.ToLower(e), strings.ToLower(name)) {
+			return true
+		}
+	}
+	return false
+}
+
 // Apply disables hardware encode when the operator asked for CPU, or when a
 // compiled-in backend cannot actually initialize a device. /dev/dri often
 // exists on machines with no usable GPU; ffmpeg then dies on the first frame.
+// FFmpeg usability is authoritative for NVENC — not /dev/nvidia0 alone.
 func Apply(info Info, ffmpegBin string) Info {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("VD_HWACCEL"))) {
-	case "off", "0", "cpu", "none", "software":
+	if isForceCPU(os.Getenv("VD_HWACCEL")) || isForceCPU(os.Getenv("VD_HW_ACCEL")) {
 		info.VAAPI = false
 		info.NVENC = false
+		info.H264NVENC = false
 		info.Available = false
+		info.DetectionReason = "forced_cpu"
 		return info
+	}
+	mode := hwAccelMode()
+	switch mode {
 	case "vaapi":
 		info.NVENC = false
+		info.H264NVENC = false
 	case "nvenc", "cuda":
 		info.VAAPI = false
 	}
 	if info.VAAPI && ffmpegBin != "" && !probeVAAPI(ffmpegBin) {
 		info.VAAPI = false
 	}
-	if info.NVENC && ffmpegBin != "" && !probeNVENC(ffmpegBin) {
-		info.NVENC = false
+
+	listed := hasEncoder(info.Encoders, "h264_nvenc")
+	wantNVENC := mode != "vaapi"
+	info.NVENC = false
+	info.H264NVENC = false
+	if wantNVENC {
+		switch {
+		case strings.TrimSpace(ffmpegBin) == "":
+			if listed {
+				info.DetectionReason = "nvenc_listed"
+			} else {
+				info.DetectionReason = "nvenc_not_listed"
+			}
+		case !listed && mode != "nvenc" && mode != "cuda":
+			info.DetectionReason = "nvenc_not_listed"
+		case probeNVENC(ffmpegBin):
+			info.NVENC = true
+			info.H264NVENC = true
+			info.DetectionReason = "nvidia_nvenc_available"
+		default:
+			if listed {
+				info.DetectionReason = "nvenc_probe_failed"
+			} else {
+				info.DetectionReason = "nvenc_not_listed"
+			}
+		}
 	}
+
 	info.Available = info.VAAPI || info.NVENC
 	return info
 }
@@ -123,7 +198,7 @@ func probeVAAPI(bin string) bool {
 }
 
 func probeNVENC(bin string) bool {
-	if !nvidiaDevice() {
+	if strings.TrimSpace(bin) == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -143,7 +218,10 @@ func DeviceFailed(stderr string) bool {
 		strings.Contains(s, "no device available") ||
 		strings.Contains(s, "device setup failed") ||
 		strings.Contains(s, "cannot load libcuda") ||
-		strings.Contains(s, "no nvenc capable devices")
+		strings.Contains(s, "no nvenc capable devices") ||
+		strings.Contains(s, "cannot load libnvidia-encode") ||
+		strings.Contains(s, "no capable devices found") ||
+		strings.Contains(s, "createbitstreambuffer")
 }
 
 func Detect(d ffmpeg.Detector) Info {
@@ -172,8 +250,20 @@ func VideoEncoder(info Info) (name string, hw string) {
 	if info.VAAPI {
 		return "h264_vaapi", "vaapi"
 	}
-	if info.NVENC {
+	if info.NVENC || info.H264NVENC {
 		return "h264_nvenc", "nvenc"
 	}
 	return "libx264", ""
+}
+
+// StartupMessage is a single info-level line for playback startup.
+func StartupMessage(info Info) string {
+	switch {
+	case info.NVENC || info.H264NVENC:
+		return "Hardware acceleration: NVIDIA NVENC available"
+	case info.VAAPI:
+		return "Hardware acceleration: VAAPI available"
+	default:
+		return "Hardware acceleration: unavailable, using CPU transcoding"
+	}
 }

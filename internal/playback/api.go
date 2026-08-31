@@ -115,7 +115,7 @@ func New(d Deps) *API {
 		stop:         make(chan struct{}),
 	}
 	if d.Log != nil {
-		d.Log.Info("hwaccel", "category", "playback", "vaapi", a.HW.VAAPI, "nvenc", a.HW.NVENC, "available", a.HW.Available)
+		d.Log.Info(hwaccel.StartupMessage(a.HW), "category", "playback", "vaapi", a.HW.VAAPI, "nvenc", a.HW.NVENC, "available", a.HW.Available, "reason", a.HW.DetectionReason)
 	}
 	go a.sweep()
 	return a

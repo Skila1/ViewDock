@@ -2,10 +2,11 @@
 
 The image is Debian + ffmpeg + libzimg (`zscale`). VAAPI packages install on `linux/amd64` only.
 
-- Image: `ghcr.io/skila1/viewdock:latest`
+- Image: `ghcr.io/skila1/viewdock:latest` (same tag on CPU and GPU hosts)
 - Platforms: `linux/amd64`, `linux/arm64`
 - Tags: `latest` on the default branch, the `VERSION` file, git SHA, and semver from `v*` tags
-- NVIDIA / jellyfin-ffmpeg overlay is a later image (`:nvidia`), not required to start
+- CPU-only: `docker-compose.yml` only (no `gpus:`, no NVIDIA env)
+- GPU hosts: add `docker-compose.gpu.yml` via `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` or `docker compose -f docker-compose.yml -f docker-compose.gpu.yml`. ViewDock does not install the NVIDIA Container Toolkit or drivers.
 
 Production hosts should use the [one-line installer](install.md), then:
 
@@ -14,7 +15,7 @@ cd ~/viewdock
 docker compose pull && docker compose up -d
 ```
 
-The repo `docker-compose.yml` is for development (`build:`). The installer writes a pull-only Compose file with `./update` and the Docker socket so **Admin → Updates** can recreate the container.
+The repo `docker-compose.yml` is the CPU-safe production pull file. The installer writes the same shape (plus `./update` and the Docker socket) so **Admin → Updates** can recreate the container. On a host with a working NVIDIA Docker runtime, the installer also writes `docker-compose.gpu.yml` and sets `COMPOSE_FILE`. Re-running the installer on a CPU-only host drops that overlay from `.env`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | sudo bash

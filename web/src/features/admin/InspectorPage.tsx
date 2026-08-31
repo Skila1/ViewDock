@@ -48,6 +48,7 @@ export function InspectorPage() {
   const source = data?.source ?? {};
   const client = data?.client ?? {};
   const decision = data?.decision ?? {};
+  const gpu = data?.gpu ?? null;
   const reasons = decision.reasons ?? [];
 
   if (q.isLoading) return <p className="text-sm text-dim">Loading inspector…</p>;
@@ -57,7 +58,7 @@ export function InspectorPage() {
     <div>
       <h1 className="mb-3 text-base font-medium">Inspector</h1>
       <p className="mb-3 font-mono text-xs text-dim">{sessionId}</p>
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Col title="Source">
           <Kv label="container" value={source.container} />
           <Kv label="video" value={source.video_codec} />
@@ -80,6 +81,8 @@ export function InspectorPage() {
           <Kv label="mode" value={decision.mode} />
           <Kv label="delivery" value={decision.delivery} />
           <Kv label="hardware" value={decision.hardware} />
+          <Kv label="encoder" value={decision.encoder} />
+          <Kv label="encoder_type" value={decision.encoder_type} />
           <StreamBlock title="Container" s={decision.container} />
           <StreamBlock title="Video" s={decision.video} />
           <StreamBlock title="Audio" s={decision.audio} />
@@ -87,6 +90,15 @@ export function InspectorPage() {
           <ul className="mt-1 space-y-1 text-xs">
             {reasons.length ? reasons.map((r) => <li key={r}>{r}</li>) : <li className="text-dim">None</li>}
           </ul>
+        </Col>
+        <Col title="Hardware">
+          <Kv label="available" value={gpu?.available} />
+          <Kv label="vendor" value={gpu?.vendor} />
+          <Kv label="encoder" value={gpu?.encoder} />
+          <Kv label="gpu_used" value={gpu?.gpu_used} />
+          <Kv label="fallback" value={gpu?.fallback} />
+          <Kv label="fallback_reason" value={gpu?.fallback_reason} />
+          <Kv label="detection_reason" value={gpu?.detection_reason} />
         </Col>
       </div>
     </div>

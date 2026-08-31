@@ -290,6 +290,11 @@ func (a *API) handleAdminOne(w http.ResponseWriter, r *http.Request) {
 		Reasons: s.Reasons, OutHeight: s.Height, Encoder: s.Encoder,
 		GPUAvail: a.HW.Available, VAAPI: a.HW.VAAPI, NVENC: a.HW.NVENC,
 		Playback: s.Decision.Playback, Hardware: s.Decision.Hardware,
+		NeedVideoXcode:  s.Decision.NeedVideoXcode,
+		Fallback:        s.cpuFallback || s.Fallback,
+		FallbackReason:  s.FallbackReason,
+		DetectionReason: a.HW.DetectionReason,
+		GPUUsed:         s.Decision.NeedVideoXcode && s.Encoder == "h264_nvenc" && !s.cpuFallback && !s.Fallback,
 		Video: inspector.StreamCol{
 			Codec: s.Decision.Video.Codec, Action: s.Decision.Video.Action,
 			To: s.Decision.Video.To, Reason: s.Decision.Video.Reason,

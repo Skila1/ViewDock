@@ -117,6 +117,7 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		enc = "copy"
 	}
 	sess.Encoder = enc
+	sess.EncoderType = sessionEncoderType(enc, dec.NeedVideoXcode)
 
 	if dec.Delivery == decision.DeliveryHLS {
 		dir, err := a.HLS.Ensure(sess.ID)
@@ -231,6 +232,7 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 	pctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	if dec.Mode == decision.ModeRemux {
+		s.EncoderType = "cpu"
 		cmd, err := hls.Remux(pctx, a.FF, s.AbsPath, s.Dir, hls.RemuxOpts{
 			StartMS: s.StartMS, AudioIndex: s.AudioIndex, HEVC: dec.HEVCRemuxTag,
 			Stderr: &s.stderr,
@@ -241,6 +243,13 @@ func (a *API) startPipeline(ctx context.Context, s *Session) error {
 		}
 		s.cmd = cmd
 	} else {
+		copyV := dec.CopyVideo && !dec.NeedBurn
+		encName, _ := hwaccel.VideoEncoder(s.HW)
+		if !s.Fallback && encName == "h264_nvenc" && !copyV {
+			s.EncoderType = "nvidia_nvenc"
+		} else {
+			s.EncoderType = "cpu"
+		}
 		cmd, err := transcode.Start(pctx, a.FF, a.Locator, transcode.Opts{
 			StartMS: s.StartMS, AudioIndex: s.AudioIndex, Height: s.Height,
 			SrcWidth: s.Info.Width, SrcHeight: s.Info.Height, HDR: s.Info.HDR,
@@ -295,9 +304,13 @@ func (a *API) fallbackCPU(s *Session, stderr string) bool {
 	s.mu.Unlock()
 	s.HW.VAAPI = false
 	s.HW.NVENC = false
+	s.HW.H264NVENC = false
 	s.HW.Available = false
 	a.HW = s.HW
 	s.Encoder = "libx264"
+	s.EncoderType = "cpu"
+	s.Fallback = true
+	s.FallbackReason = fallbackReason(stderr)
 	s.Reasons = append(s.Reasons, decision.HWFallbackCPU)
 	s.Decision.Reasons = s.Reasons
 	if a.Log != nil {
@@ -333,7 +346,7 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		"decision": map[string]any{
 			"mode": s.Mode, "playback": s.Decision.Playback, "reasons": s.Reasons,
 			"video": s.Decision.Video, "audio": s.Decision.Audio, "container": s.Decision.Container,
-			"hardware": s.Decision.Hardware,
+			"hardware": s.Decision.Hardware, "encoder": s.Encoder, "encoder_type": s.EncoderType,
 		},
 		"intro": s.Intro, "next_episode": s.NextEpisode,
 		"duration_ms": s.DurationMS, "seekable_from_ms": s.SeekableFromMS,
@@ -400,6 +413,24 @@ func (a *API) supersedePlayback(p *auth.Principal, itemKind, itemID, replaceID s
 		a.Reg.Delete(s.ID)
 		a.kill(s)
 	}
+}
+
+func sessionEncoderType(enc string, needVideoXcode bool) string {
+	if needVideoXcode && enc == "h264_nvenc" {
+		return "nvidia_nvenc"
+	}
+	return "cpu"
+}
+
+func fallbackReason(stderr string) string {
+	s := strings.TrimSpace(stderr)
+	if s == "" {
+		return decision.HWFallbackCPU
+	}
+	if len(s) > 400 {
+		return s[len(s)-400:]
+	}
+	return s
 }
 
 func decisionHEVC(codec string) bool {

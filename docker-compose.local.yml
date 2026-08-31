@@ -1,5 +1,5 @@
-# Local-only overlay. Does not pull GHCR.
-#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Local-only overlay. Does not pull GHCR. No gpus here — add the GPU overlay explicitly.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.local.yml up -d --build
 services:
   viewdock:
     image: viewdock:local

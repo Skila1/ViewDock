@@ -110,6 +110,10 @@ func BuildArgs(opt Opts) ([]string, error) {
 				"-pix_fmt", "yuv420p", "-profile:v", "main", "-level", "4.0",
 				"-g", "48", "-keyint_min", "48", "-sc_threshold", "0")
 		}
+		if enc == "h264_nvenc" {
+			args = append(args, "-preset", "p1", "-tune", "ll", "-rc", "constqp", "-qp", "23",
+				"-pix_fmt", "yuv420p", "-profile:v", "main", "-level", "4.0", "-g", "48")
+		}
 	}
 	if opt.CopyAudio {
 		args = append(args, "-c:a", "copy")

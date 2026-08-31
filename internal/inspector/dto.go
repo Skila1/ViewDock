@@ -22,24 +22,30 @@ type StreamCol struct {
 }
 
 type DecisionCol struct {
-	Playback  string    `json:"playback"`
-	Mode      string    `json:"mode"`
-	Delivery  string    `json:"delivery"`
-	Reasons   []string  `json:"reasons"`
-	Height    int       `json:"height"`
-	Encoder   string    `json:"encoder,omitempty"`
-	Container StreamCol `json:"container"`
-	Video     StreamCol `json:"video"`
-	Audio     StreamCol `json:"audio"`
-	Hardware  string    `json:"hardware"`
+	Playback    string    `json:"playback"`
+	Mode        string    `json:"mode"`
+	Delivery    string    `json:"delivery"`
+	Reasons     []string  `json:"reasons"`
+	Height      int       `json:"height"`
+	Encoder     string    `json:"encoder,omitempty"`
+	EncoderType string    `json:"encoder_type,omitempty"` // cpu | nvidia_nvenc
+	Container   StreamCol `json:"container"`
+	Video       StreamCol `json:"video"`
+	Audio       StreamCol `json:"audio"`
+	Hardware    string    `json:"hardware"`
 }
 
 type GPU struct {
-	Available bool   `json:"available"`
-	VAAPI     bool   `json:"vaapi"`
-	NVENC     bool   `json:"nvenc"`
-	Encoder   string `json:"encoder,omitempty"`
-	HWAccel   string `json:"hwaccel,omitempty"`
+	Available       bool   `json:"available"`
+	Vendor          string `json:"vendor,omitempty"` // "nvidia" when NVENC
+	VAAPI           bool   `json:"vaapi"`
+	NVENC           bool   `json:"nvenc"`
+	Encoder         string `json:"encoder,omitempty"` // h264_nvenc or libx264
+	HWAccel         string `json:"hwaccel,omitempty"`
+	GPUUsed         bool   `json:"gpu_used"`
+	Fallback        bool   `json:"fallback,omitempty"`
+	FallbackReason  string `json:"fallback_reason,omitempty"`
+	DetectionReason string `json:"detection_reason,omitempty"`
 }
 
 type DTO struct {
@@ -51,31 +57,55 @@ type DTO struct {
 }
 
 type Input struct {
-	ID         string
-	Container  string
-	VideoCodec string
-	AudioCodec string
-	Width      int
-	Height     int
-	BitDepth   int
-	HDR        string
-	DurationMS int64
-	Size       int64
-	Client     capability.Profile
-	Mode       string
-	Delivery   string
-	Reasons    []string
-	OutHeight  int
-	Encoder    string
-	GPUAvail   bool
-	VAAPI      bool
-	NVENC      bool
-	HWAccel    string
-	Playback   string
-	Hardware   string
-	Video      StreamCol
-	Audio      StreamCol
-	Cont       StreamCol
+	ID              string
+	Container       string
+	VideoCodec      string
+	AudioCodec      string
+	Width           int
+	Height          int
+	BitDepth        int
+	HDR             string
+	DurationMS      int64
+	Size            int64
+	Client          capability.Profile
+	Mode            string
+	Delivery        string
+	Reasons         []string
+	OutHeight       int
+	Encoder         string
+	GPUAvail        bool
+	VAAPI           bool
+	NVENC           bool
+	HWAccel         string
+	Playback        string
+	Hardware        string
+	NeedVideoXcode  bool
+	GPUUsed         bool
+	Fallback        bool
+	FallbackReason  string
+	DetectionReason string
+	Vendor          string
+	Video           StreamCol
+	Audio           StreamCol
+	Cont            StreamCol
+}
+
+func sessionGPUUsed(in Input) bool {
+	if in.Fallback || in.Encoder != "h264_nvenc" {
+		return false
+	}
+	return in.GPUUsed || in.NeedVideoXcode
+}
+
+func encoderType(enc string) string {
+	switch enc {
+	case "h264_nvenc":
+		return "nvidia_nvenc"
+	case "":
+		return ""
+	default:
+		return "cpu"
+	}
 }
 
 func Build(in Input) DTO {
@@ -89,8 +119,8 @@ func Build(in Input) DTO {
 		Client: in.Client,
 		Decision: DecisionCol{
 			Playback: in.Playback, Mode: in.Mode, Delivery: in.Delivery, Reasons: in.Reasons,
-			Height: in.OutHeight, Encoder: in.Encoder, Hardware: in.Hardware,
-			Container: in.Cont, Video: in.Video, Audio: in.Audio,
+			Height: in.OutHeight, Encoder: in.Encoder, EncoderType: encoderType(in.Encoder),
+			Hardware: in.Hardware, Container: in.Cont, Video: in.Video, Audio: in.Audio,
 		},
 	}
 	if in.Reasons == nil {
@@ -99,10 +129,27 @@ func Build(in Input) DTO {
 	if d.Decision.Hardware == "" {
 		d.Decision.Hardware = "Not required"
 	}
-	if in.GPUAvail {
+	used := sessionGPUUsed(in)
+	if in.GPUAvail || used || in.Fallback {
+		enc := in.Encoder
+		if enc == "" {
+			enc = "libx264"
+		}
+		vendor := in.Vendor
+		if vendor == "" && (in.NVENC || used) {
+			vendor = "nvidia"
+		}
 		d.GPU = &GPU{
-			Available: true, VAAPI: in.VAAPI, NVENC: in.NVENC,
-			Encoder: in.Encoder, HWAccel: in.HWAccel,
+			Available:       in.GPUAvail,
+			Vendor:          vendor,
+			VAAPI:           in.VAAPI,
+			NVENC:           in.NVENC,
+			Encoder:         enc,
+			HWAccel:         in.HWAccel,
+			GPUUsed:         used,
+			Fallback:        in.Fallback,
+			FallbackReason:  in.FallbackReason,
+			DetectionReason: in.DetectionReason,
 		}
 	}
 	return d
