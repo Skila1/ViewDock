@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { allowInlinePlayback, enterAvkitFromUserGesture, enterAvkitDetailed, enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice } from "./device";
+import { allowInlinePlayback, enterAvkitFromUserGesture, enterAvkitDetailed, enterNativeFullscreen, isAppleWebKitPlayer, isIOSDevice, isIPhone } from "./device";
 
 describe("device", () => {
   it("detects iPhone and iPad", () => {
     expect(isIOSDevice("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")).toBe(true);
     expect(isIOSDevice("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)")).toBe(true);
     expect(isIOSDevice("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe(false);
+    expect(isIPhone("Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)")).toBe(true);
+    expect(isIPhone("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)")).toBe(false);
   });
 
   it("detects iPadOS desktop UA", () => {
@@ -40,7 +42,12 @@ describe("device", () => {
     });
     const enter = vi.fn();
     const present = vi.fn();
+    const pause = vi.fn();
+    const play = vi.fn().mockResolvedValue(undefined);
     const video = {
+      paused: false,
+      play,
+      pause,
       disableRemotePlayback: true,
       webkitEnterFullscreen: enter,
       webkitSetPresentationMode: present,
@@ -50,6 +57,8 @@ describe("device", () => {
     expect(enterNativeFullscreen(video)).toBe(true);
     expect(video.disableRemotePlayback).toBe(true);
     expect(enter).toHaveBeenCalledOnce();
+    expect(pause).toHaveBeenCalledOnce();
+    expect(play).toHaveBeenCalledOnce();
     expect(present).not.toHaveBeenCalled();
   });
 
@@ -90,8 +99,10 @@ describe("device", () => {
       platform: "iPhone",
       maxTouchPoints: 5,
     });
+    const play = vi.fn().mockResolvedValue(undefined);
     const video = {
-      paused: false,
+      paused: true,
+      play,
       playsInline: true,
       setAttribute: vi.fn(),
       removeAttribute: vi.fn(),
@@ -100,9 +111,10 @@ describe("device", () => {
       },
     } as unknown as HTMLVideoElement;
     expect(enterAvkitDetailed(video)).toEqual({
-      ok: false,
+      ok: true,
       threw: "InvalidStateError: The object is in an invalid state.",
     });
+    expect(play).toHaveBeenCalledOnce();
   });
 });
 

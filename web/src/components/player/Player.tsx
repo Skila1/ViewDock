@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
 import { cn } from "@/lib/cn";
-import { allowInlinePlayback, enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
+import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIPhone, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
 import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
@@ -448,8 +448,10 @@ export function Player({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.setAttribute("playsinline", "");
-    video.setAttribute("webkit-playsinline", "");
+    if (!isIPhone()) {
+      video.setAttribute("playsinline", "");
+      video.setAttribute("webkit-playsinline", "");
+    }
     const sync = () => {
       setFs(Boolean(document.fullscreenElement) || isNativeFullscreen(video) || pageFs);
     };
@@ -467,7 +469,6 @@ export function Player({
       noteLogical(video, "webkitendfullscreen", originRef.current, sessionRef.current?.id);
       noteAttach(video, "fs_exit_guard", `playing=${playingAtFsExitRef.current} suppress_replace_ms=2500`);
       restoreMmsRemotePlaybackLock(video);
-      allowInlinePlayback(video, true);
       setFs(false);
       setPageFs(false);
     };
@@ -509,7 +510,6 @@ export function Player({
     }
     if (fullscreenStrategy() === "avkit") {
       const apple = video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean; webkitDisplayingFullscreen?: boolean };
-      if (video.paused) void video.play().catch(() => undefined);
       const result = enterAvkitDetailed(video);
       noteMedia(video, "fullscreen_tap", sessionRef.current?.id);
       report("play.fullscreen", {
@@ -521,6 +521,7 @@ export function Player({
         supports: apple.webkitSupportsFullscreen,
         displaying: apple.webkitDisplayingFullscreen,
         currentSrc: (video.currentSrc || "").slice(0, 120),
+        playsinline: video.hasAttribute("playsinline"),
         threw: result.threw ?? null,
         session_id: sessionRef.current?.id,
       });
@@ -685,7 +686,7 @@ export function Player({
       <video
         ref={videoRef}
         className="h-full w-full object-contain"
-        playsInline
+        playsInline={!isIPhone()}
         preload="auto"
         onClick={(e) => {
           e.stopPropagation();

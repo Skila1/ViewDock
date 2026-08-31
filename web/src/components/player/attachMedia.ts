@@ -1,4 +1,5 @@
 import { nativeHlsSupported, sessionUrl } from "@/api/profile";
+import { allowInlinePlayback, isIPhone } from "@/lib/device";
 import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/airplay";
 import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMeta } from "@/playback/attachTrace";
 import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
@@ -84,9 +85,8 @@ export async function attachSession(
 
 function prepareVideo(video: HTMLVideoElement) {
   video.controls = false;
-  video.playsInline = true;
-  video.setAttribute("playsinline", "");
-  video.setAttribute("webkit-playsinline", "");
+  // iPhone: never set playsinline — play() is what opens AVKit.
+  allowInlinePlayback(video, !isIPhone());
   stripAlternateSources(video);
 }
 
