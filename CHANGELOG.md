@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
 
 - The Discord bot now shows as online, watching movies & TV. ViewDock keeps a lightweight Gateway connection with the active bot token (shared or separate) that reconnects and resumes on its own. Slash commands, verification and party invites still use the HTTP interactions endpoint; the Gateway uses no privileged intents and handles no interactions.
 - Admin → Discord diagnostics show the Gateway connection, presence and last connection separately from the HTTP bot and interactions checks, with a "Reconnect now" action and a clear message when Discord rejects the token.
