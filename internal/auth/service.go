@@ -79,6 +79,7 @@ type Service struct {
 	bot            *discordbot.Client
 	principals     *principalCache
 	setupDone      atomic.Bool
+	discordLookups lookupTimes
 }
 
 // Bot returns the official Discord bot client, or nil when no token is configured.

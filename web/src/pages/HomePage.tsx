@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutGrid, List } from "lucide-react";
 import { api } from "@/api/api";
-import { BrowseFilters } from "@/components/browse/BrowseFilters";
+import { BrowseToolbar } from "@/components/browse/BrowseFilters";
 import { BrowseResults } from "@/components/browse/BrowseResults";
 import { useBrowseData, useBrowseLayout, useBrowseQuery } from "@/components/browse/useBrowse";
 import { ContinueStrip } from "@/components/layout/ContinueStrip";
@@ -31,7 +31,7 @@ export function HomePage() {
       title={label}
       aria-pressed={layout === value}
       onClick={() => setLayout(value)}
-      className={cn("tap flex w-9 items-center justify-center rounded-md", layout === value ? "bg-overlay text-ink" : "text-dim hover:text-ink")}
+      className={cn("flex h-9 w-9 items-center justify-center rounded-lg", layout === value ? "bg-overlay text-ink" : "text-dim hover:text-ink")}
     >
       <Icon className="h-4 w-4" />
     </button>
@@ -41,13 +41,18 @@ export function HomePage() {
     <div>
       {!filtered ? <ContinueStrip items={cont.data ?? []} /> : null}
 
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <BrowseFilters query={query} genres={genres} onChange={setQuery} showSort />
-        <div role="group" aria-label="Layout" className="flex shrink-0 gap-1 rounded-lg border border-line p-0.5">
-          {layoutBtn("grid", "Grid", LayoutGrid)}
-          {layoutBtn("list", "Details", List)}
-        </div>
-      </div>
+      <BrowseToolbar
+        className="mb-3"
+        query={query}
+        genres={genres}
+        onChange={setQuery}
+        trailing={
+          <div role="group" aria-label="Layout" className="flex shrink-0 gap-0.5">
+            {layoutBtn("grid", "Grid", LayoutGrid)}
+            {layoutBtn("list", "Details", List)}
+          </div>
+        }
+      />
 
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
         <h2 className="text-[13px] font-medium text-dim">{heading}</h2>

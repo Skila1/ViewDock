@@ -10,11 +10,12 @@ import {
   type HouseholdInvite,
   type HouseholdMember,
 } from "@/api/households";
+import { Card } from "@/features/admin/ui";
 import { useAuth } from "@/store/auth";
 
 const MEMBER_ROLES: AssignableHouseholdRole[] = ["adult", "member", "child"];
 
-function HouseholdSection({ userId }: { userId: string }) {
+function HouseholdSection({ userId, className }: { userId: string; className?: string }) {
   const qc = useQueryClient();
   const view = useQuery({ queryKey: ["household"], queryFn: households.mine });
   const restriction = useQuery({ queryKey: ["content-restriction"], queryFn: households.myRestriction });
@@ -57,8 +58,7 @@ function HouseholdSection({ userId }: { userId: string }) {
     );
 
   return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-medium">Household</h2>
+    <Card id="household" title="Household" className={className}>
       {restriction.data && restriction.data.max_age > 0 ? (
         <p className="text-xs text-dim">
           Content on this account is limited to {ageLimitLabel(restriction.data.max_age).toLowerCase()}.
@@ -190,12 +190,12 @@ function HouseholdSection({ userId }: { userId: string }) {
       ) : null}
       {msg ? <p className="text-xs text-accent">{msg}</p> : null}
       {err ? <p className="text-xs text-danger">{err}</p> : null}
-    </div>
+    </Card>
   );
 }
 
 export function ProfilePage() {
-  const { me, boot } = useAuth();
+  const { me, system, boot } = useAuth();
   const qc = useQueryClient();
   const prefs = useQuery({ queryKey: ["prefs"], queryFn: api.getPreferences });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: api.listSessions });
@@ -232,15 +232,20 @@ export function ProfilePage() {
     }
   };
 
+  const localLogin = !(system?.discord_configured || system?.local_login_disabled);
+  const showPin = localLogin || Boolean(me?.has_pin);
+
   return (
-    <div className="mx-auto max-w-xl space-y-8">
-      <div>
-        <h1 className="text-lg font-semibold">Profile</h1>
-        <p className="text-sm text-dim">
-          Signed in as {me?.username}
-          {me?.roles?.length ? ` · ${me.roles.join(", ")}` : null}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-3 text-sm">
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">Profile</h1>
+          <p className="text-sm text-dim">
+            Signed in as {me?.username}
+            {me?.roles?.length ? ` · ${me.roles.join(", ")}` : null}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3 text-sm">
           <Link to="/settings/connected" className="text-accent">
             Connected services
           </Link>
@@ -252,147 +257,163 @@ export function ProfilePage() {
         </div>
       </div>
 
-      <form onSubmit={saveProfile} className="space-y-2">
-        <h2 className="text-sm font-medium">Display name</h2>
-        <input className="w-full" value={display} onChange={(e) => setDisplay(e.target.value)} />
-        <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
-          Save name
-        </button>
-      </form>
+      {msg ? <p className="text-xs text-accent">{msg}</p> : null}
+      {err ? <p className="text-xs text-danger">{err}</p> : null}
 
-      <form onSubmit={savePrefs} className="space-y-2">
-        <h2 className="text-sm font-medium">Playback</h2>
-        <label className="block text-xs text-dim">
-          Audio language
-          <input
-            className="mt-1 w-full"
-            value={prefs.data?.audio_lang ?? ""}
-            onChange={(e) =>
-              qc.setQueryData(["prefs"], { ...prefs.data, audio_lang: e.target.value })
-            }
-          />
-        </label>
-        <label className="block text-xs text-dim">
-          Subtitle language
-          <input
-            className="mt-1 w-full"
-            value={prefs.data?.subtitle_lang ?? ""}
-            onChange={(e) =>
-              qc.setQueryData(["prefs"], { ...prefs.data, subtitle_lang: e.target.value })
-            }
-          />
-        </label>
-        <label className="block text-xs text-dim">
-          Subtitles
-          <select
-            className="mt-1 w-full"
-            value={prefs.data?.subtitle_mode ?? "auto"}
-            onChange={(e) =>
-              qc.setQueryData(["prefs"], { ...prefs.data, subtitle_mode: e.target.value })
+      <div className="min-w-0 columns-1 gap-4 md:columns-2 xl:columns-3 [&>section]:mb-4 [&>section]:break-inside-avoid">
+        <Card id="display-name" title="Display name" description="Shown to other members in watch parties and households.">
+          <form onSubmit={saveProfile} className="space-y-3">
+            <input className="w-full" value={display} aria-label="Display name" onChange={(e) => setDisplay(e.target.value)} />
+            <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
+              Save name
+            </button>
+          </form>
+        </Card>
+
+        <Card id="playback" title="Playback">
+          <form onSubmit={savePrefs} className="space-y-3">
+            <label className="block text-xs text-dim">
+              Audio language
+              <input
+                className="mt-1 w-full"
+                value={prefs.data?.audio_lang ?? ""}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, audio_lang: e.target.value })}
+              />
+            </label>
+            <label className="block text-xs text-dim">
+              Subtitle language
+              <input
+                className="mt-1 w-full"
+                value={prefs.data?.subtitle_lang ?? ""}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, subtitle_lang: e.target.value })}
+              />
+            </label>
+            <label className="block text-xs text-dim">
+              Subtitles
+              <select
+                className="mt-1 w-full"
+                value={prefs.data?.subtitle_mode ?? "auto"}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, subtitle_mode: e.target.value })}
+              >
+                <option value="auto">Auto</option>
+                <option value="always">Always</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={prefs.data?.autoplay ?? true}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, autoplay: e.target.checked })}
+              />
+              Autoplay next episode
+            </label>
+            <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
+              Save playback
+            </button>
+          </form>
+        </Card>
+
+        {localLogin ? (
+          <Card
+            id="password"
+            title={me?.has_password ? "Change password" : "Set a password"}
+            description={me?.has_password ? undefined : "You signed in with Discord. Set a password to also use username login."}
+          >
+            <form
+              className="space-y-3"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setErr("");
+                try {
+                  await api.changePassword({ current, next });
+                  setCurrent("");
+                  setNext("");
+                  setMsg("Password updated. Other sessions were signed out.");
+                } catch (e2) {
+                  setErr(e2 instanceof Error ? e2.message : "password failed");
+                }
+              }}
+            >
+              {me?.has_password ? (
+                <input
+                  className="w-full"
+                  type="password"
+                  placeholder="Current password"
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                />
+              ) : null}
+              <input
+                className="w-full"
+                type="password"
+                placeholder="New password (8+ characters)"
+                value={next}
+                onChange={(e) => setNext(e.target.value)}
+                required
+              />
+              <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
+                Update password
+              </button>
+            </form>
+          </Card>
+        ) : null}
+
+        {showPin ? (
+          <Card
+            id="pin"
+            title="PIN lock"
+            description={
+              localLogin
+                ? "Optional 4 to 8 digit PIN after idle. Leave empty and save to clear."
+                : "Local sign-in is off while Discord sign-in is on. You can still remove the PIN set earlier."
             }
           >
-            <option value="auto">Auto</option>
-            <option value="always">Always</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={prefs.data?.autoplay ?? true}
-            onChange={(e) =>
-              qc.setQueryData(["prefs"], { ...prefs.data, autoplay: e.target.checked })
-            }
-          />
-          Autoplay next episode
-        </label>
-        <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
-          Save playback
-        </button>
-      </form>
+            <form
+              className="space-y-3"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setErr("");
+                try {
+                  if (localLogin && pin) {
+                    await api.setPin(pin);
+                    setPin("");
+                    setMsg("PIN set. Idle lock is 15 minutes.");
+                  } else {
+                    await api.clearPin();
+                    setPin("");
+                    setMsg("PIN cleared");
+                  }
+                  await boot();
+                } catch (e2) {
+                  setErr(e2 instanceof Error ? e2.message : "pin failed");
+                }
+              }}
+            >
+              {localLogin ? (
+                <input
+                  className="w-full"
+                  inputMode="numeric"
+                  placeholder={me?.has_pin ? "New PIN or empty to clear" : "PIN"}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                />
+              ) : null}
+              <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
+                {localLogin && pin ? "Set PIN" : "Clear PIN"}
+              </button>
+            </form>
+          </Card>
+        ) : null}
 
-      <form
-        className="space-y-2"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setErr("");
-          try {
-            await api.changePassword({ current, next });
-            setCurrent("");
-            setNext("");
-            setMsg("Password updated. Other sessions were signed out.");
-          } catch (e2) {
-            setErr(e2 instanceof Error ? e2.message : "password failed");
-          }
-        }}
-      >
-        <h2 className="text-sm font-medium">{me?.has_password ? "Change password" : "Set a password"}</h2>
-        {me?.has_password ? (
-          <input
-            className="w-full"
-            type="password"
-            placeholder="Current password"
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-          />
-        ) : (
-          <p className="text-xs text-dim">You signed in with Discord. Set a password to also use username login.</p>
-        )}
-        <input
-          className="w-full"
-          type="password"
-          placeholder="New password (8+ characters)"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          required
-        />
-        <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
-          Update password
-        </button>
-      </form>
+        <HouseholdSection userId={me?.id ?? ""} />
+      </div>
 
-      <form
-        className="space-y-2"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setErr("");
-          try {
-            if (pin) {
-              await api.setPin(pin);
-              setPin("");
-              setMsg("PIN set. Idle lock is 15 minutes.");
-            } else {
-              await api.clearPin();
-              setMsg("PIN cleared");
-            }
-            await boot();
-          } catch (e2) {
-            setErr(e2 instanceof Error ? e2.message : "pin failed");
-          }
-        }}
-      >
-        <h2 className="text-sm font-medium">PIN lock</h2>
-        <p className="text-xs text-dim">Optional 4–8 digit PIN after idle. Leave empty and save to clear.</p>
-        <input
-          className="w-full"
-          inputMode="numeric"
-          placeholder={me?.has_pin ? "New PIN or empty to clear" : "PIN"}
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
-        />
-        <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
-          {pin ? "Set PIN" : "Clear PIN"}
-        </button>
-      </form>
-
-      <HouseholdSection userId={me?.id ?? ""} />
-
-      <div>
-        <h2 className="mb-2 text-sm font-medium">Sessions</h2>
+      <Card id="sessions" title="Sessions" description="Devices signed in to this account.">
         <ul className="divide-y divide-line rounded-md border border-line">
           {(sessions.data ?? []).map((sess) => (
             <li key={sess.id} className="flex flex-col gap-2 px-3 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-              <span>
+              <span className="min-w-0">
                 {sess.current ? <span className="text-accent">This device · </span> : null}
                 {sess.ip || "unknown IP"}
                 <span className="ml-2 text-dim">{sess.user_agent?.slice(0, 48)}</span>
@@ -411,11 +432,9 @@ export function ProfilePage() {
               ) : null}
             </li>
           ))}
+          {sessions.isLoading ? <li className="px-3 py-3 text-xs text-dim">Loading…</li> : null}
         </ul>
-      </div>
-
-      {msg ? <p className="text-xs text-accent">{msg}</p> : null}
-      {err ? <p className="text-xs text-danger">{err}</p> : null}
+      </Card>
     </div>
   );
 }

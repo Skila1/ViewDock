@@ -319,6 +319,26 @@ const (
 
 // Guild is a server the bot belongs to. Permissions is the bot's server-wide
 // permission bitfield, before channel overwrites.
+// DiscordUser is the public profile of a Discord account.
+type DiscordUser struct {
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	GlobalName string `json:"global_name"`
+	Avatar     string `json:"avatar"`
+}
+
+// User looks up any Discord account's public profile with the bot token.
+func (c *Client) User(ctx context.Context, id string) (DiscordUser, error) {
+	if !ValidSnowflake(id) {
+		return DiscordUser{}, errors.New("invalid Discord user id")
+	}
+	var out DiscordUser
+	if err := c.do(ctx, http.MethodGet, "/users/"+id, nil, &out); err != nil {
+		return DiscordUser{}, err
+	}
+	return out, nil
+}
+
 type Guild struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

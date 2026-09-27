@@ -4,7 +4,7 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import { filenameTitle } from "@/lib/format";
 import { applyBrowse } from "@/lib/browse";
 import { cn } from "@/lib/cn";
-import { BrowseFilters } from "./BrowseFilters";
+import { BrowseFilterPanel } from "./BrowseFilters";
 import { useBrowseData, useBrowseQuery } from "./useBrowse";
 
 const SUGGESTIONS = 6;
@@ -61,7 +61,7 @@ export function HeaderSearch() {
 
   return (
     <div ref={root} className="relative min-w-0 flex-1 max-w-xl">
-      <form onSubmit={submit} className="flex items-center gap-2 rounded-lg border border-line bg-raised/60 pl-3 pr-1">
+      <form onSubmit={submit} className="flex items-center gap-2 rounded-xl border border-line bg-raised/50 pl-3 pr-1 focus-within:border-accent/60">
         <Search size={16} className="shrink-0 text-dim" />
         <input
           value={text}
@@ -76,7 +76,7 @@ export function HeaderSearch() {
           placeholder="Search movies, TV and anime"
           aria-label="Search"
           enterKeyHint="search"
-          className="h-10 w-full min-w-0 border-0 bg-transparent px-0"
+          className="h-10 w-full min-w-0 border-0 bg-transparent px-0 focus:outline-none"
         />
         {text ? (
           <button
@@ -104,9 +104,13 @@ export function HeaderSearch() {
       </form>
 
       {filtersOpen ? (
-        <div className="absolute left-0 right-0 top-full z-40 mt-1 space-y-2 rounded-lg border border-line bg-raised p-3 shadow-xl">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-dim">Filter results</p>
-          <BrowseFilters query={query} genres={genres} onChange={(patch) => setQuery({ ...patch, q: text })} showSort />
+        <div className="absolute right-0 top-full z-40 mt-2 w-[28rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-line bg-raised p-3 shadow-2xl">
+          <BrowseFilterPanel
+            query={query}
+            genres={genres}
+            onChange={(patch) => setQuery({ ...patch, q: text })}
+            onReset={() => setQuery({ q: text, kind: "", genre: "", tag: "", sort: "" })}
+          />
         </div>
       ) : null}
 

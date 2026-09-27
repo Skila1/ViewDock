@@ -5,6 +5,7 @@ import { Radio, Share2 } from "lucide-react";
 import { api } from "@/api/api";
 import { ContentRatingControl } from "@/features/admin/ContentRatingControl";
 import { WatchActions } from "@/components/media/WatchActions";
+import { SaveOfflineButton } from "@/components/offline/SaveOfflineButton";
 import { ShareModal } from "@/components/share/ShareModal";
 import { filenameTitle, formatClock } from "@/lib/format";
 import { hasPerm } from "@/lib/perms";
@@ -113,8 +114,8 @@ export function SeriesDetailPage() {
           const epResume = resumeById.get(ep.id) ?? 0;
           const to = epResume > 5000 ? `/watch/episode/${ep.id}?t=${Math.floor(epResume)}` : `/watch/episode/${ep.id}?t=0`;
           return (
-            <li key={ep.id}>
-              <Link to={to} className="flex min-h-12 items-center gap-3 px-3 py-3 hover:bg-raised">
+            <li key={ep.id} className="flex items-center pr-1 hover:bg-raised">
+              <Link to={to} className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-3">
                 <span className="w-12 shrink-0 text-xs text-dim">
                   S{ep.season}E{ep.number}
                 </span>
@@ -128,6 +129,13 @@ export function SeriesDetailPage() {
                   </span>
                 ) : null}
               </Link>
+              <SaveOfflineButton
+                compact
+                kind="episode"
+                id={ep.id}
+                title={`${filenameTitle(series.title)} S${ep.season}E${ep.number}`}
+                libraryId={series.library_id}
+              />
             </li>
           );
         })}

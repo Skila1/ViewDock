@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The home page filters sit in one toolbar: a media type switch, then Genre, Filters and Sort menus. The header search filter menu uses the same layout and is taller.
+- Offline shows only device storage and the titles saved on this device. Movies and episodes are saved from their own page with Save offline.
+- The account menu shows your Discord picture and @username. ViewDock refreshes them at each Discord sign-in and, when missing, looks them up with the bot.
+- The Profile page is laid out in cards. Change password and PIN lock are hidden while Discord sign-in is on, because local sign-in is off; a PIN set earlier can still be removed.
+- Scrollbars are no longer drawn anywhere; pages and lists still scroll. Dropdowns no longer clip their text.
+
 ## 0.2.1
 
 - The home page lists every title, local and Jellyfin, with a grid or details layout, sorting, media type (Movies, TV shows, Anime), genre, and Recommended, Most viewed and Unwatched filters. Recommendations follow each account's watch history.

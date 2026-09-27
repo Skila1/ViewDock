@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -480,7 +482,76 @@ func (s *Service) DiscordUserID(ctx context.Context, userID string) string {
 	return id
 }
 
+// storeDiscordProfile records the latest Discord username and avatar for a
+// linked account. Empty usernames never overwrite a known one.
+func (s *Service) storeDiscordProfile(ctx context.Context, userID, username, avatar string) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE user_identities SET provider_username = ?, avatar_hash = ? WHERE user_id = ? AND provider = 'discord'
+	`, username, strings.TrimSpace(avatar), userID); err != nil {
+		slog.Warn("store discord profile", "category", "auth", "err", err)
+	}
+}
+
+// discordProfileTTL is how long a bot lookup of a linked profile is trusted.
+const discordProfileTTL = 6 * time.Hour
+
+// refreshDiscordProfile fills in the username and avatar of a linked Discord
+// account with the bot, which can read any user's public profile. Lookups
+// happen at most once per TTL per account; failures keep the stored values.
+func (s *Service) refreshDiscordProfile(ctx context.Context, userID string) {
+	bot := s.Bot()
+	if bot == nil {
+		return
+	}
+	var discordID, username string
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT provider_user_id, provider_username FROM user_identities WHERE user_id = ? AND provider = 'discord'
+	`, userID).Scan(&discordID, &username); err != nil || discordID == "" {
+		return
+	}
+	if !s.discordLookups.due(userID, username == "", discordProfileTTL) {
+		return
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	du, err := bot.User(lookupCtx, discordID)
+	if err != nil {
+		slog.Debug("discord profile lookup", "category", "auth", "err", err)
+		return
+	}
+	s.storeDiscordProfile(ctx, userID, du.Username, du.Avatar)
+}
+
+type lookupTimes struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+// due reports whether a lookup should run now and records it. Missing data
+// is retried after a minute; complete data after ttl.
+func (l *lookupTimes) due(key string, missing bool, ttl time.Duration) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = map[string]time.Time{}
+	}
+	wait := ttl
+	if missing {
+		wait = time.Minute
+	}
+	if t, ok := l.last[key]; ok && time.Since(t) < wait {
+		return false
+	}
+	l.last[key] = time.Now()
+	return true
+}
+
 func (s *Service) ListIdentities(ctx context.Context, userID string) ([]map[string]any, error) {
+	s.refreshDiscordProfile(ctx, userID)
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT provider, provider_user_id, provider_username, avatar_hash, linked_at
 		FROM user_identities WHERE user_id = ?
@@ -542,6 +613,7 @@ func (s *Service) userByDiscord(ctx context.Context, discordID string) (User, er
 
 func (s *Service) UpsertDiscordUser(ctx context.Context, p DiscordProfile) (User, error) {
 	if u, err := s.userByDiscord(ctx, p.ID); err == nil {
+		s.storeDiscordProfile(ctx, u.ID, p.Username, p.Avatar)
 		return u, nil
 	}
 	cfg := s.LoadDiscord(ctx)

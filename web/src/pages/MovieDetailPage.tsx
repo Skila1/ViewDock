@@ -5,6 +5,7 @@ import { Radio, Share2 } from "lucide-react";
 import { api } from "@/api/api";
 import { ContentRatingControl } from "@/features/admin/ContentRatingControl";
 import { WatchActions } from "@/components/media/WatchActions";
+import { SaveOfflineButton } from "@/components/offline/SaveOfflineButton";
 import { ShareModal } from "@/components/share/ShareModal";
 import { filenameTitle } from "@/lib/format";
 import { hasPerm } from "@/lib/perms";
@@ -64,6 +65,7 @@ export function MovieDetailPage() {
               <Share2 size={14} /> Share
             </button>
           ) : null}
+          <SaveOfflineButton kind="movie" id={movie.id} title={filenameTitle(movie.title)} libraryId={movie.library_id} />
         </div>
       </div>
       <ShareModal open={share} onOpenChange={setShare} itemKind="movie" itemId={movie.id} />

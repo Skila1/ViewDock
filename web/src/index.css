@@ -73,6 +73,15 @@ body {
 
 * {
   box-sizing: border-box;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* No visible scrollbars anywhere; scrolling itself still works. */
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 a {
@@ -96,18 +105,34 @@ button {
 input:not([type="range"]),
 select,
 textarea {
-  background: var(--vd-surface-1);
-  border: 1px solid var(--vd-border);
-  border-radius: 12px;
-  padding: 0.65rem 0.85rem;
   font-size: 16px;
 }
 
-input:not([type="range"]):focus,
-select:focus,
-textarea:focus {
-  outline: 2px solid var(--vd-ring);
-  outline-offset: 1px;
+/* Layered so utility classes such as h-9, px-0 or border-0 can override them. */
+@layer base {
+  input:not([type="range"]),
+  select,
+  textarea {
+    background: var(--vd-surface-1);
+    border: 1px solid var(--vd-border);
+    border-radius: 12px;
+    padding: 0.65rem 0.85rem;
+  }
+
+  /* Vertical padding on a fixed-height select clips its text. Selects centre
+     their label natively, so only horizontal padding applies. */
+  select {
+    height: 2.75rem;
+    padding-block: 0;
+    line-height: 1.25;
+  }
+
+  input:not([type="range"]):focus,
+  select:focus,
+  textarea:focus {
+    outline: 2px solid var(--vd-ring);
+    outline-offset: 1px;
+  }
 }
 
 /* Player sliders: no form padding. Thumb travel is the full track. */
@@ -200,12 +225,7 @@ textarea:focus {
   gap: 10px;
   overflow-x: auto;
   padding-bottom: 4px;
-  scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
-}
-
-.continue-slip::-webkit-scrollbar {
-  height: 6px;
 }
 
 .scrim {
@@ -230,11 +250,6 @@ textarea:focus {
 .h-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.h-scroll::-webkit-scrollbar {
-  display: none;
 }
 
 .player-page-fs {

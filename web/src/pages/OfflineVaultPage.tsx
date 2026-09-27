@@ -1,41 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { AlertTriangle, CheckCircle2, Download, HardDrive, Pause, Play, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
-import { api } from "@/api/api";
+import { AlertTriangle, CheckCircle2, HardDrive, Pause, Play, RotateCcw, ShieldCheck, Trash2, X } from "lucide-react";
 import { getOfflinePolicy, type OfflinePolicy, type PolicySource } from "@/api/vault";
 import { useAuth } from "@/store/auth";
 import { formatBytes } from "@/lib/offlineVault";
 import type { VaultRecord } from "@/lib/vault/db";
 import {
-  discardPrepared,
   isDownloading,
   isWaiting,
   listDownloads,
   pauseDownload,
-  prepareDownload,
   reconcileVault,
   removeDownload,
   requestPersistence,
   resumeDownload,
   serviceWorkerServesVault,
   setVaultPolicy,
-  startDownload,
   storageEstimate,
   storagePersisted,
   subscribeVault,
   vaultBlob,
   vaultMediaUrl,
   verifyDownload,
-  type PreparedDownload,
   type ReconcileReport,
 } from "@/lib/vault/manager";
-import { isExpired, libraryAllowed } from "@/lib/vault/policy";
+import { isExpired } from "@/lib/vault/policy";
 import { PROGRESS_INTERVAL_MS, recordVaultProgress } from "@/lib/vault/progress";
 
 // Without a controlling service worker a title is decrypted into memory.
 const BLOB_FALLBACK_LIMIT = 2 * 1024 ** 3;
-
-type Movie = { id: string; title: string; libraryId?: string };
 
 function reportText(report: ReconcileReport): string {
   const parts: string[] = [];
@@ -52,13 +45,10 @@ export function OfflineVaultPage() {
   const downloadsOff = useAuth((s) => s.system?.features?.downloads === false);
   const userId = me?.id ?? "";
   const [items, setItems] = useState<VaultRecord[]>([]);
-  const [movies, setMovies] = useState<Movie[]>([]);
   const [policy, setPolicy] = useState<OfflinePolicy | null>(null);
   const [policySource, setPolicySource] = useState<PolicySource>("default");
   const [estimate, setEstimate] = useState<StorageEstimate>({});
   const [persisted, setPersisted] = useState(false);
-  const [prepared, setPrepared] = useState<PreparedDownload | null>(null);
-  const [preparing, setPreparing] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [unavailable, setUnavailable] = useState(false);
@@ -97,12 +87,6 @@ export function OfflineVaultPage() {
       }
       if (!cancelled) await refresh();
     })();
-    void api
-      .listMovies()
-      .then((list) => {
-        if (!cancelled) setMovies(list.map((movie) => ({ id: movie.id, title: movie.title, libraryId: movie.library_id })));
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -132,40 +116,7 @@ export function OfflineVaultPage() {
     [userId, refresh, refreshStorage],
   );
 
-  const saved = useMemo(() => new Map(items.map((item) => [`${item.itemKind}:${item.itemId}`, item])), [items]);
   const offlineAllowed = !downloadsOff && (policy?.enabled ?? true);
-  const available = movies.filter((movie) => !policy || libraryAllowed(policy, movie.libraryId));
-
-  const begin = async (movie: Movie) => {
-    setError("");
-    setPreparing(movie.id);
-    try {
-      setPrepared(await prepareDownload(userId, { kind: "movie", id: movie.id, title: movie.title, libraryId: movie.libraryId }, items.length));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Offline download failed.");
-    } finally {
-      setPreparing(null);
-    }
-  };
-
-  const confirm = async () => {
-    if (!prepared) return;
-    const next = prepared;
-    setPrepared(null);
-    await requestPersistence();
-    try {
-      await startDownload(next);
-    } catch (err) {
-      discardPrepared(next);
-      setError(err instanceof Error ? err.message : "Offline download failed.");
-    }
-    void refreshStorage();
-  };
-
-  const decline = () => {
-    if (prepared) discardPrepared(prepared);
-    setPrepared(null);
-  };
 
   if (!me) {
     return <p className="text-sm text-dim">Sign in to use the Offline Vault.</p>;
@@ -198,53 +149,36 @@ export function OfflineVaultPage() {
         }}
       />
 
-      {prepared ? <ConsentPanel prepared={prepared} onConfirm={() => void confirm()} onCancel={decline} /> : null}
-
-      {items.length ? (
-        <div className="space-y-3">
-          {items.map((item) => (
-            <VaultCard
-              key={item.key}
-              item={item}
-              userId={userId}
-              canResume={offlineAllowed}
-              onError={setError}
-            />
-          ))}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">
+            On this device{items.length ? <span className="ml-2 font-normal text-dim">{items.length}</span> : null}
+          </h2>
+          {!offlineAllowed ? (
+            <p className="text-xs text-dim">New downloads are turned off by the administrator. Saved titles remain playable.</p>
+          ) : null}
         </div>
-      ) : (
-        <p className="text-sm text-dim">No offline titles yet.</p>
-      )}
-
-      {!offlineAllowed ? (
-        <p className="text-sm text-dim">New downloads are turned off by the administrator. Saved titles remain playable.</p>
-      ) : (
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold">Available downloads</h2>
-          {available.length === 0 ? <p className="text-sm text-dim">No titles you can download are available.</p> : null}
-          {available.map((movie) => {
-            const existing = saved.get(`movie:${movie.id}`);
-            return (
-              <div key={movie.id} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised p-3">
-                <span className="truncate text-sm">{movie.title}</span>
-                {existing ? (
-                  <span className="text-xs text-dim">{existing.status === "complete" ? "Saved" : "In vault"}</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-green tap inline-flex items-center gap-2 rounded-full px-3 text-xs"
-                    onClick={() => void begin(movie)}
-                    disabled={preparing !== null || prepared !== null}
-                  >
-                    <Download className="h-4 w-4" />
-                    {preparing === movie.id ? "Checking…" : "Save offline"}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+        {items.length ? (
+          <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {items.map((item) => (
+              <VaultCard key={item.key} item={item} userId={userId} canResume={offlineAllowed} onError={setError} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-dim">
+            <p>No offline titles yet.</p>
+            {offlineAllowed ? (
+              <p className="mt-1">
+                Open a movie or episode from{" "}
+                <Link to="/" className="text-accent hover:underline">
+                  Home
+                </Link>{" "}
+                and choose <span className="text-ink">Save offline</span>.
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
@@ -314,29 +248,6 @@ function StoragePanel({ estimate, persisted, policy, policySource, count, onPers
   );
 }
 
-function ConsentPanel({ prepared, onConfirm, onCancel }: { prepared: PreparedDownload; onConfirm: () => void; onCancel: () => void }) {
-  const quota = prepared.estimate.quota;
-  const free = quota ? Math.max(0, quota - (prepared.estimate.usage ?? 0)) : undefined;
-  return (
-    <div role="dialog" aria-modal="false" aria-labelledby="vault-consent-title" className="space-y-3 rounded-lg border border-accent/50 bg-raised p-4 text-sm">
-      <h2 id="vault-consent-title" className="font-semibold">Save “{prepared.title.title}” to this device?</h2>
-      <ul className="list-disc space-y-1 pl-5 text-dim">
-        <li>Download size: <span className="text-ink">{formatBytes(prepared.size)}</span>{free !== undefined ? <> of about {formatBytes(free)} free for this site</> : null}.</li>
-        <li>Storage location: this browser's private storage for this site (IndexedDB), encrypted with a key kept on this device.</li>
-        <li>{prepared.persisted ? "Persistent storage is granted." : "The browser may remove offline titles when space runs low; you will be asked to allow persistent storage."}</li>
-        {!prepared.ranges ? <li>The server does not support resumable downloads, so pausing restarts from the beginning.</li> : null}
-      </ul>
-      <p className="text-dim">This uses your device's storage. You can pause, resume or remove the download at any time.</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-green tap inline-flex items-center gap-2 rounded-full px-4 text-xs" onClick={onConfirm}>
-          <Download className="h-4 w-4" />Use device storage and download
-        </button>
-        <button type="button" className="tap rounded-full border border-line px-4 text-xs" onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  );
-}
-
 function statusText(item: VaultRecord, waiting: boolean): string {
   if (waiting) return "Waiting for another download to finish";
   switch (item.status) {
@@ -379,7 +290,7 @@ function VaultCard({ item, userId, canResume, onError }: { item: VaultRecord; us
   };
 
   return (
-    <article className="space-y-2 rounded-lg border border-line bg-raised p-3">
+    <article className={`min-w-0 space-y-2 rounded-lg border border-line bg-raised p-3 ${playing ? "md:col-span-2 xl:col-span-3" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-medium">{item.title}</h3>
