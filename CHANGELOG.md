@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - The home page lists every title, local and Jellyfin, with a grid or details layout, sorting, media type (Movies, TV shows, Anime), genre, and Recommended, Most viewed and Unwatched filters. Recommendations follow each account's watch history.
 - The header search covers Jellyfin titles, suggests matches as you type, and has the same filters. The separate Search, Movies and TV pages are gone; old links open the matching home page view.
