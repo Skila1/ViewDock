@@ -2,7 +2,7 @@
 
 Used by .github/workflows/docker.yml on every DEPLOY: push to main:
 
-    python scripts/release_version.py --bump --notes "Summary"   # 0.1.1 -> 0.1.2
+    python scripts/release_version.py --bump --notes "Summary"   # 0.1.1 -> 0.1.2, 0.1.9 -> 0.2.0
     python scripts/release_version.py --notes "Summary"          # VERSION was set by hand
 
 The changelog gets a "## <version>" heading: an existing "## Unreleased"
@@ -32,7 +32,10 @@ def parse_version(text: str) -> tuple[int, int, int]:
 
 
 def next_patch(text: str) -> str:
+    """Patch numbers run 0 to 9; after .9 the minor version goes up (0.1.9 -> 0.2.0)."""
     major, minor, patch = parse_version(text)
+    if patch >= 9:
+        return f"{major}.{minor + 1}.0"
     return f"{major}.{minor}.{patch + 1}"
 
 

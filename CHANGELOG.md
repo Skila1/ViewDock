@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.10
+## 0.2.0
 
 - Admin, Media brings together Libraries (add, edit, scan and delete local libraries), Titles (search every movie and series, match it on TMDB, upload a poster, set its rating), Uploads, Library access and Jellyfin servers.
 - Media, Settings and Discord get their own sidebar in the admin area, with Back to admin at the top and their sections grouped below.
