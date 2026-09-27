@@ -85,7 +85,7 @@ To set it up:
 3. If the public host sits behind a login proxy such as Cloudflare Access, allow requests from Discord's proxy through; the Activity cannot complete an interactive proxy login. ViewDock still requires everyone to sign in.
 4. In **Admin → Discord**, turn on **Discord Activity**. The **Discord Activity** group in the diagnostics panel checks the requirements and whether Activities are enabled for the application.
 
-Discord adds the Activity's launch button (its entry point command) when you enable Activities. Registering slash commands globally from ViewDock keeps it.
+Discord adds the Activity's launch button (its entry point command) when you enable Activities. Registering slash commands globally from ViewDock keeps it, and adds it back if it is missing. If the Developer Portal warns that the app "has no commands registered to launch" the Activity, press **Register commands** on the Discord page with the server ID left blank.
 
 When someone opens the Activity, ViewDock signs them in with the Discord account running it, following the same rules as Discord sign-in on the web: registration restrictions apply to new accounts, and with Discord sign-in turned off only accounts already linked to Discord can use it. If the channel has no party yet, anyone who can start parties picks a title; everyone else waits and joins automatically when it starts.
 

@@ -12,14 +12,32 @@ import (
 	"github.com/viewdock/viewdock/internal/httpapi"
 )
 
+// entryPointLaunch matches the entry point Discord creates when Activities
+// are enabled: handler 2 lets Discord launch the Activity itself.
+var entryPointLaunch = discordbot.Command{
+	Type:             discordbot.CommandEntryPoint,
+	Name:             "launch",
+	Description:      "Watch together in ViewDock",
+	Handler:          2,
+	IntegrationTypes: []int{0, 1},
+	Contexts:         []int{0, 1, 2},
+}
+
 // withEntryPoints appends the Activity entry point commands Discord already
-// has, so a global overwrite keeps the Activity's launch button.
-func withEntryPoints(want, existing []discordbot.Command) []discordbot.Command {
+// has, so a global overwrite keeps the Activity's launch button. When the
+// application has Activities enabled but no entry point (an earlier
+// overwrite removed it), the default launch command is added back.
+func withEntryPoints(want, existing []discordbot.Command, activities bool) []discordbot.Command {
 	out := append([]discordbot.Command(nil), want...)
+	found := false
 	for _, c := range existing {
 		if c.Type == discordbot.CommandEntryPoint {
 			out = append(out, c)
+			found = true
 		}
+	}
+	if activities && !found {
+		out = append(out, entryPointLaunch)
 	}
 	return out
 }

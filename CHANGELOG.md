@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Registering slash commands globally adds the Discord Activity's launch command back when Activities are enabled but Discord has none, for example after an earlier registration removed it.
+
 ## 0.1.5
 
 - Admin → Updates shows "Updated" as soon as the host finishes, instead of about two minutes later, and the log only shows the current run.

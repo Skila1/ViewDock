@@ -192,7 +192,7 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 			s.discordFailure(w, "commands", err)
 			return
 		}
-		want = withEntryPoints(want, existing)
+		want = withEntryPoints(want, existing, app.Flags&discordbot.ApplicationFlagEmbedded != 0)
 	}
 	cmds, err := bot.OverwriteCommands(ctx, app.ID, body.GuildID, want)
 	if err != nil {

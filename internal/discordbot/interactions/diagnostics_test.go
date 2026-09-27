@@ -378,6 +378,45 @@ func TestRegisterKeepsActivityEntryPoint(t *testing.T) {
 	}
 }
 
+func TestRegisterRestoresMissingEntryPoint(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags uint64
+		want  bool
+	}{
+		{"activities enabled", discordbot.ApplicationFlagEmbedded, true},
+		{"activities off", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDiagHarness(t)
+			d.discord.app.Flags = tc.flags
+			d.discord.commands = Commands()
+			req := httptest.NewRequest(http.MethodPost, "/admin/integrations/discord/commands", strings.NewReader(`{}`))
+			req = req.WithContext(auth.WithPrincipal(req.Context(), &auth.Principal{Kind: auth.KindUser, UserID: "u-admin"}))
+			rec := httptest.NewRecorder()
+			d.svc.handleRegister(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("register = %d %s", rec.Code, rec.Body.String())
+			}
+			var entries []discordbot.Command
+			for _, c := range d.discord.put {
+				if c.Type == discordbot.CommandEntryPoint {
+					entries = append(entries, c)
+				}
+			}
+			if !tc.want {
+				if len(entries) != 0 {
+					t.Fatalf("entry point added without Activities: %+v", entries)
+				}
+				return
+			}
+			if len(entries) != 1 || entries[0].Name != "launch" || entries[0].Handler != 2 || entries[0].ID != "" || entries[0].Description == "" {
+				t.Fatalf("entry points = %+v", entries)
+			}
+		})
+	}
+}
+
 func TestRegisterSavesPublicKeyToActiveKey(t *testing.T) {
 	d := newDiagHarness(t)
 	d.key = ""

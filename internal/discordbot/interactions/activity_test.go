@@ -24,7 +24,7 @@ func TestWithEntryPointsKeepsOnlyEntryPoints(t *testing.T) {
 		{ID: "1", Name: "party", Type: 1},
 		{ID: "2", Name: "launch", Type: discordbot.CommandEntryPoint, Handler: 2, IntegrationTypes: []int{0, 1}},
 	}
-	got := withEntryPoints(want, existing)
+	got := withEntryPoints(want, existing, true)
 	if len(got) != 2 || got[1].ID != "2" || got[1].Handler != 2 || len(want) != 1 {
 		t.Fatalf("commands = %+v (want untouched: %+v)", got, want)
 	}

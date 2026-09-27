@@ -630,7 +630,10 @@ function ActivityCard({ discord, onSaved }: { discord: DiscordSettings | undefin
           If the public host sits behind a login proxy such as Cloudflare Access, let Discord&apos;s proxy through; ViewDock still
           requires every viewer to sign in.
         </li>
-        <li>Turn the Activity on here. Discord adds the launch button itself, and registering slash commands here keeps it.</li>
+        <li>
+          Turn the Activity on here, then press Register commands with the server ID left blank. That keeps the Activity&apos;s
+          launch button, or adds it back if Discord reports none.
+        </li>
       </ol>
       <p className="text-xs text-dim">
         People sign in with the Discord account running the Activity. Only accounts that could sign in with Discord on the web can use
