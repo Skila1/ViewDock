@@ -5,6 +5,7 @@ The image is Debian + ffmpeg + libzimg (`zscale`). VAAPI packages install on `li
 - Image: `ghcr.io/skila1/viewdock:latest` (same tag on CPU and GPU hosts)
 - Platforms: `linux/amd64`, `linux/arm64`
 - Tags: `latest` on the default branch, the `VERSION` file, git SHA, and semver from `v*` tags
+- Images are built from pushes to `main` whose commit message starts with `DEPLOY:`. Each one is a release: the patch version in `VERSION` goes up (unless the push already changed it), the `## Unreleased` section of `CHANGELOG.md` becomes that version, and a `Release X.Y.Z` commit is pushed to `main` before the image is built, so **Admin → Updates** offers it
 - One Compose file. Set `VD_GPU=true` or `VD_GPU=false` in `.env`. The installer sets `COMPOSE_PROFILES` to match (`gpu` or `cpu`) so CPU hosts never request an NVIDIA device.
 - `VD_GPU=true` needs the NVIDIA Container Toolkit on the host. ViewDock does not install drivers or the toolkit.
 
