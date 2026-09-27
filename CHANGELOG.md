@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7
 
 - The Discord Activity shows your movies and TV as the same poster grid as the home page, so you can pick a title without searching. Search narrows the grid.
 
