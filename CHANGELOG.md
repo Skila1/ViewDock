@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - The home page filters sit in one toolbar: a media type switch, then Genre, Filters and Sort menus. The header search filter menu uses the same layout and is taller.
 - Offline shows only device storage and the titles saved on this device. Movies and episodes are saved from their own page with Save offline.
