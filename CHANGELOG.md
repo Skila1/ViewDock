@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5
 
 - Admin → Updates shows "Updated" as soon as the host finishes, instead of about two minutes later, and the log only shows the current run.
 - Opening Admin replaces the main sidebar with the admin sidebar: **Back to app** first, then Overview and the admin pages in groups. Small screens get the same links as a scrollable bar.
