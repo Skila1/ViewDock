@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9
 
 - Admins can connect Jellyfin servers under Admin, Media sources. Their movies and shows (with posters and metadata) appear for every user and resync every 6 hours. A title that is also in a local library is listed once, plays locally by default, and the player can switch to the Jellyfin copy. Jellyfin playback supports seeking and works in watch parties. Credentials stay on the server.
 - Jellyfin sources can use an API key instead of an account. Each source has usage restrictions (posters, streaming, transcoding, activity log, maximum streams) that ViewDock enforces on itself, and a usage log of what ViewDock did with the source, plus optional Jellyfin activity for the ViewDock user.
