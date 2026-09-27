@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The Discord bot now shows as online, watching movies & TV. ViewDock keeps a lightweight Gateway connection with the active bot token (shared or separate) that reconnects and resumes on its own. Slash commands, verification and party invites still use the HTTP interactions endpoint; the Gateway uses no privileged intents and handles no interactions.
+- Admin → Discord diagnostics show the Gateway connection, presence and last connection separately from the HTTP bot and interactions checks, with a "Reconnect now" action and a clear message when Discord rejects the token.
+
 ## 0.1.3
 
 - Admin → Updates no longer shows "Updating" when nothing is running. The host helper's systemd unit could create `update/request` as a directory, which looked like an update that never finished; it is removed, and an update the host does not pick up now fails after 2 minutes with a hint instead of waiting 30.

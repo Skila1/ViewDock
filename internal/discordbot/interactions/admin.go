@@ -36,6 +36,7 @@ func (s *Service) AdminRoutes(r chi.Router) {
 			r.Use(auth.RateLimit(s.Cfg, 6, time.Minute))
 			r.Post("/admin/integrations/discord/commands", s.handleRegister)
 			r.Post("/admin/integrations/discord/endpoint", s.handleSetEndpoint)
+			r.Post("/admin/integrations/discord/gateway/reconnect", s.handleReconnectGateway)
 		})
 		r.Get("/admin/integrations/discord/diagnostics", s.handleDiagnostics)
 		r.Group(func(r chi.Router) {

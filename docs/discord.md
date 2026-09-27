@@ -15,7 +15,7 @@ To run the bot from a different application, tick **Use separate Discord bot con
 
 ## Status and diagnostics
 
-The **Status and diagnostics** panel (on the right on wide screens, at the top on smaller ones) reports the configuration mode, missing or incomplete credentials, sign-in readiness, the bot's connection to Discord, its server membership and permissions, slash command registration and the interactions endpoint. Each problem includes a short explanation and, where possible, a button that fixes it or takes you to the right setting, such as adding the bot to a server or registering commands.
+The **Status and diagnostics** panel (on the right on wide screens, at the top on smaller ones) reports the configuration mode, missing or incomplete credentials, sign-in readiness, the bot's connection to the Discord API, its online presence (the Gateway), its server membership and permissions, slash command registration and the interactions endpoint. Each problem includes a short explanation and, where possible, a button that fixes it or takes you to the right setting, such as adding the bot to a server or registering commands.
 
 The checks against Discord use a short timeout and a handful of requests. They run when you press **Run diagnostics**, and automatically when you open the page if there is no earlier result or the settings changed since the last one; otherwise the page shows the saved result and when it ran. Secrets are never shown in the results.
 
@@ -44,6 +44,12 @@ The bot receives slash commands through an HTTPS interactions endpoint on your V
 3. In **Admin → Discord**, paste the bot token and save. You can paste the public key too; if you leave it empty, ViewDock saves it automatically when you register commands. The page tells you if the saved key does not match the bot's application.
 4. Press **Register commands**. Enter a server ID to make the commands available in that server immediately, or leave it blank to register them for every server (global commands can take up to an hour to appear).
 5. Press **Set endpoint in Discord** so Discord sends interactions to ViewDock.
+
+### Online presence
+
+With a bot token saved, ViewDock also opens an outbound connection to the Discord Gateway so the bot shows as online, **Watching movies & TV**. It uses the active bot token: the sign-in application's, or the separate one when that option is on. Saving a different token or switching the option reconnects with the new credentials. The connection only sets presence; it requests no privileged intents, and slash commands, verification and party invites keep arriving through the HTTPS interactions endpoint, so they work even when the Gateway is offline.
+
+The connection sends heartbeats, resumes after network drops and retries with increasing delays when Discord is unavailable. If Discord rejects the token, ViewDock waits for you to save a new one, checking again only every 30 minutes. It needs no extra container, port or tunnel configuration, and a missing or invalid token never stops ViewDock from starting. The **Gateway (online presence)** group in the diagnostics panel shows the connection, the presence, when it last connected and any error, with a **Reconnect now** button.
 
 The bot token of the sign-in application can also be provided with `VD_DISCORD_BOT_TOKEN`; a value saved in the admin page takes precedence. The separate bot configuration is set on the admin page only. Tokens and secrets are stored encrypted with the [master key](environment.md).
 

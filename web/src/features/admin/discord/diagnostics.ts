@@ -1,15 +1,46 @@
-import type { DiscordCheck, DiscordCheckGroup, DiscordCheckStatus, DiscordDiagnostics } from "@/api/discordLabs";
+import type {
+  DiscordCheck,
+  DiscordCheckGroup,
+  DiscordCheckStatus,
+  DiscordDiagnostics,
+  DiscordGatewayStatus,
+} from "@/api/discordLabs";
 
 export const GROUP_LABELS: Record<DiscordCheckGroup, string> = {
   configuration: "Configuration",
   oauth: "Sign-in (OAuth)",
-  bot: "Bot connection",
+  bot: "Bot API (HTTP)",
+  gateway: "Gateway (online presence)",
   servers: "Servers and permissions",
   commands: "Slash commands",
-  interactions: "Interactions endpoint",
+  interactions: "HTTP interactions endpoint",
 };
 
-const GROUP_ORDER: DiscordCheckGroup[] = ["configuration", "oauth", "bot", "servers", "commands", "interactions"];
+const GROUP_ORDER: DiscordCheckGroup[] = ["configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions"];
+
+/** Short Gateway summary with the tone of its state. */
+export function gatewaySummary(g: DiscordGatewayStatus): { text: string; status: DiscordCheckStatus } {
+  switch (g.state) {
+    case "online":
+      return { text: `Online, ${g.activity}`, status: "ok" };
+    case "connecting":
+      return { text: "Connecting", status: "info" };
+    case "reconnecting":
+      return { text: `Reconnecting (attempt ${g.attempts})`, status: g.attempts > 1 ? "warn" : "info" };
+    case "failed":
+      return { text: g.token_rejected ? "Offline, token rejected" : "Offline, connection failed", status: "error" };
+    case "disabled":
+      return { text: "Offline, no bot token", status: "skipped" };
+    default:
+      return { text: "Offline", status: "skipped" };
+  }
+}
+
+/** While the Gateway is changing state, diagnostics refresh faster so the panel follows it. */
+export function diagnosticsRefetchMs(d: Pick<DiscordDiagnostics, "gateway"> | undefined): number {
+  const s = d?.gateway?.state;
+  return s === "connecting" || s === "reconnecting" ? 5_000 : 30_000;
+}
 
 const RANK: Record<DiscordCheckStatus, number> = { error: 3, warn: 2, ok: 1, info: 0, skipped: 0 };
 

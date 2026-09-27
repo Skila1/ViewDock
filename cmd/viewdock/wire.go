@@ -20,6 +20,7 @@ import (
 	"github.com/viewdock/viewdock/internal/config"
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/diagnostics"
+	"github.com/viewdock/viewdock/internal/discordbot/gateway"
 	"github.com/viewdock/viewdock/internal/discordbot/interactions"
 	"github.com/viewdock/viewdock/internal/download"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
@@ -69,6 +70,8 @@ type app struct {
 	// Interactions and Labs are nil on VD_ROLE=worker.
 	Interactions *interactions.Service
 	Labs         *labs.Broadcaster
+	// DiscordGateway keeps the bot online; nil on VD_ROLE=worker.
+	DiscordGateway *gateway.Manager
 }
 
 func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Logger, kv *settings.Store) *app {
@@ -202,7 +205,14 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 
 	var ix *interactions.Service
 	var vcam *labs.Broadcaster
+	var gw *gateway.Manager
 	if controlPlane {
+		// The presence connection uses the same active token as the bot API,
+		// so it follows the separate bot configuration switch.
+		gw = gateway.New(func() string { return discordBotToken(rc, os.Getenv) }, logger)
+		for _, key := range []string{cfgDiscordBot, cfgDiscordSepToken, cfgDiscordSeparate} {
+			rc.OnChange(key, func(string) { gw.Reload() })
+		}
 		ix = interactions.New(interactions.Deps{
 			DB: sqlDB, Cfg: cfg, Settings: kv, KV: kv, Audit: aud, Log: logger,
 			PublicKey: func() string {
@@ -231,6 +241,8 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 				}
 				return setup
 			},
+			Gateway:          gw.Status,
+			ReconnectGateway: gw.Reload,
 		})
 		vcam = labs.New(ff.FFmpeg, newLabsSources(parties, libs), kv, filepath.Join(cfg.CacheDir, "labs-vcam"))
 		vcam.Log = logger
@@ -358,5 +370,5 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		update.Routes(kv),
 		logs.Routes,
 	)
-	return &app{Auth: authSvc, Backend: backendMonitor, Playback: play, Uploads: up, Meta: meta, Logs: logs, Users: usersAPI, Mesh: dispatcher, Worker: workerAPI, Interactions: ix, Labs: vcam}
+	return &app{Auth: authSvc, Backend: backendMonitor, Playback: play, Uploads: up, Meta: meta, Logs: logs, Users: usersAPI, Mesh: dispatcher, Worker: workerAPI, Interactions: ix, Labs: vcam, DiscordGateway: gw}
 }

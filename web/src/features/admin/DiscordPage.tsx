@@ -6,7 +6,7 @@ import type { ConfigSetting, DiscordSettings } from "@/types/api.gen";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/store/auth";
 import { DiagnosticsPanel } from "./discord/DiagnosticsPanel";
-import { needsAutoRun } from "./discord/diagnostics";
+import { diagnosticsRefetchMs, needsAutoRun } from "./discord/diagnostics";
 
 const BOT_TOKEN_KEY = "discord.bot_token";
 const PUBLIC_KEY_KEY = "discord.public_key";
@@ -637,7 +637,11 @@ export function DiscordPage() {
   const boot = useAuth((s) => s.boot);
   const settings = useQuery({ queryKey: ["discord-admin"], queryFn: api.getDiscordSettings });
   const interactions = useQuery({ queryKey: ["discord-interactions"], queryFn: discordLabsApi.getDiscordInteractions });
-  const diag = useQuery({ queryKey: DIAG_KEY, queryFn: discordLabsApi.getDiscordDiagnostics, refetchInterval: 30_000 });
+  const diag = useQuery({
+    queryKey: DIAG_KEY,
+    queryFn: discordLabsApi.getDiscordDiagnostics,
+    refetchInterval: (q) => diagnosticsRefetchMs(q.state.data),
+  });
   const [running, setRunning] = useState(false);
   const [diagNote, setDiagNote] = useState<Note>(null);
   const autoRan = useRef<string | null>(null);
@@ -683,12 +687,27 @@ export function DiscordPage() {
     await runDiagnostics();
   });
 
+  const reconnectGateway = async () => {
+    setDiagNote(null);
+    try {
+      await discordLabsApi.reconnectDiscordGateway();
+      setDiagNote({ ok: true, text: "Reconnecting to the Discord Gateway" });
+      await qc.invalidateQueries({ queryKey: DIAG_KEY });
+    } catch (e) {
+      setDiagNote({ ok: false, text: errText(e, "Could not reconnect to the Gateway") });
+    }
+  };
+
   const onCheckAction = (c: DiscordCheck) => {
     const a = c.action;
     if (!a) return;
     if (a.id === "register_commands" || a.id === "set_endpoint") {
       setDiagNote(null);
       void (a.id === "register_commands" ? commandActions.register(interactions.data?.registration?.guild_id) : commandActions.setEndpoint());
+      return;
+    }
+    if (a.id === "reconnect_gateway") {
+      void reconnectGateway();
       return;
     }
     const target = FOCUS_TARGETS[a.id];

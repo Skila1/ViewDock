@@ -173,6 +173,11 @@ func main() {
 		}
 	}()
 	waitListen(cfg.HTTPAddr)
+	if app.DiscordGateway != nil {
+		app.DiscordGateway.Log = logger
+		app.DiscordGateway.Start(ctx)
+		defer app.DiscordGateway.Stop()
+	}
 	if controlPlane && setup.BootstrapPending(context.Background(), kv) {
 		setup.AnnounceToken(cfg, logger)
 	}

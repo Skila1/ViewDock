@@ -16,6 +16,7 @@ import (
 
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/discordbot"
+	"github.com/viewdock/viewdock/internal/discordbot/gateway"
 	"github.com/viewdock/viewdock/internal/httpapi"
 )
 
@@ -28,8 +29,9 @@ const (
 	CheckSkipped = "skipped"
 )
 
-// Check groups, in display order.
-var checkGroups = []string{"configuration", "oauth", "bot", "servers", "commands", "interactions"}
+// Check groups, in display order. "gateway" is the presence connection;
+// "interactions" is the HTTP endpoint that carries slash commands.
+var checkGroups = []string{"configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions"}
 
 // Corrective actions the admin page knows how to perform.
 const (
@@ -40,6 +42,7 @@ const (
 	ActionRegister     = "register_commands"
 	ActionSetEndpoint  = "set_endpoint"
 	ActionInviteBot    = "invite_bot"
+	ActionReconnect    = "reconnect_gateway"
 )
 
 // Bot permissions requested by the invite link: View Channel and Send Messages.
@@ -79,7 +82,9 @@ type Diagnostics struct {
 	Stale       bool            `json:"stale"`
 	Application *DiagnosticsApp `json:"application,omitempty"`
 	InviteURL   string          `json:"invite_url,omitempty"`
-	Checks      []Check         `json:"checks"`
+	// Gateway is the live presence connection; nil when this node does not run it.
+	Gateway *gateway.Status `json:"gateway,omitempty"`
+	Checks  []Check         `json:"checks"`
 }
 
 type diagnosticsCache struct {
@@ -183,6 +188,11 @@ func (s *Service) diagnostics(in diagInput) Diagnostics {
 		out.Application, out.InviteURL = s.diag.app, s.diag.invite
 	}
 	s.diag.mu.Unlock()
+	if s.Gateway != nil {
+		st := s.Gateway()
+		out.Gateway = &st
+		out.Checks = append(out.Checks, gatewayChecks(st, in.setup.Separate, s.ReconnectGateway != nil)...)
+	}
 	order := map[string]int{}
 	for i, g := range checkGroups {
 		order[g] = i

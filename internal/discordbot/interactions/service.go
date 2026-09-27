@@ -14,6 +14,7 @@ import (
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/config"
 	"github.com/viewdock/viewdock/internal/discordbot"
+	"github.com/viewdock/viewdock/internal/discordbot/gateway"
 	"github.com/viewdock/viewdock/internal/httpapi"
 )
 
@@ -117,6 +118,11 @@ type Deps struct {
 	OAuth func(ctx context.Context) auth.DiscordOAuthConfig
 	// Setup reports which bot credentials are in use. Optional.
 	Setup func() BotSetup
+	// Gateway reports the presence connection. Nil when this node does not
+	// run it; diagnostics then omit the Gateway checks.
+	Gateway func() gateway.Status
+	// ReconnectGateway asks the presence connection to retry now. Optional.
+	ReconnectGateway func()
 }
 
 // BotSetup describes the bot credentials in use, never their values.

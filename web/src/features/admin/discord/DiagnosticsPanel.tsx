@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, MinusCircle, RefreshCw, XCircle } from "lucide-react";
 import { Link } from "react-router";
-import type { DiscordCheck, DiscordCheckStatus, DiscordDiagnostics } from "@/api/discordLabs";
+import type { DiscordCheck, DiscordCheckStatus, DiscordDiagnostics, DiscordGatewayStatus } from "@/api/discordLabs";
 import { cn } from "@/lib/cn";
 import { formatAge } from "../diagnostics/format";
-import { groupChecks, modeLabel, overallLabel, statusTone } from "./diagnostics";
+import { gatewaySummary, groupChecks, modeLabel, overallLabel, statusTone } from "./diagnostics";
 
 function StatusIcon({ status, className }: { status: DiscordCheckStatus; className?: string }) {
   const cls = cn("h-4 w-4 shrink-0", statusTone(status), className);
@@ -44,6 +44,28 @@ function ActionButton({ check, busy, onAction }: { check: DiscordCheck; busy: bo
     <button type="button" className={cls} disabled={busy} onClick={() => onAction(check)}>
       {a.label}
     </button>
+  );
+}
+
+function GatewayRows({ gateway }: { gateway: DiscordGatewayStatus }) {
+  const summary = gatewaySummary(gateway);
+  const last = gateway.last_connected_at;
+  return (
+    <>
+      <dt className="text-dim">Gateway</dt>
+      <dd className={cn("flex items-center gap-1", statusTone(summary.status))}>
+        <StatusIcon status={summary.status} className="h-3.5 w-3.5" />
+        {summary.text}
+      </dd>
+      <dt className="text-dim">Last connected</dt>
+      <dd>
+        {last ? (
+          <span title={new Date(last).toLocaleString()}>{formatAge(last)}</span>
+        ) : (
+          "Never connected"
+        )}
+      </dd>
+    </>
   );
 }
 
@@ -127,6 +149,7 @@ export function DiagnosticsPanel({
                   ? "Separate application"
                   : "Sign-in application"}
             </dd>
+            {data.gateway ? <GatewayRows gateway={data.gateway} /> : null}
             <dt className="text-dim">Checked</dt>
             <dd>
               {data.checked_at ? (

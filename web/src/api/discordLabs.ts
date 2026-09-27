@@ -48,7 +48,7 @@ export type DiscordRegisterResult = {
 
 export type DiscordCheckStatus = "ok" | "warn" | "error" | "info" | "skipped";
 
-export type DiscordCheckGroup = "configuration" | "oauth" | "bot" | "servers" | "commands" | "interactions";
+export type DiscordCheckGroup = "configuration" | "oauth" | "bot" | "gateway" | "servers" | "commands" | "interactions";
 
 export type DiscordCheckActionId =
   | "edit_auth"
@@ -57,7 +57,8 @@ export type DiscordCheckActionId =
   | "open_settings"
   | "register_commands"
   | "set_endpoint"
-  | "invite_bot";
+  | "invite_bot"
+  | "reconnect_gateway";
 
 export type DiscordCheck = {
   id: string;
@@ -80,7 +81,29 @@ export type DiscordDiagnostics = {
   stale: boolean;
   application?: { id: string; name: string };
   invite_url?: string;
+  /** Live presence connection; absent when this server does not run it. */
+  gateway?: DiscordGatewayStatus;
   checks: DiscordCheck[];
+};
+
+export type DiscordGatewayState = "disabled" | "connecting" | "online" | "reconnecting" | "failed" | "stopped";
+
+/** The Gateway only keeps the bot online; slash commands use HTTP interactions. */
+export type DiscordGatewayStatus = {
+  state: DiscordGatewayState;
+  presence: string;
+  activity: string;
+  bot_id?: string;
+  bot_name?: string;
+  connected_since?: string;
+  last_connected_at?: string;
+  last_error?: string;
+  last_error_at?: string;
+  close_code?: number;
+  token_rejected: boolean;
+  attempts: number;
+  next_retry_at?: string;
+  latency_ms?: number;
 };
 
 export type LabsMode = "v4l2" | "rtmp" | "srt";
@@ -183,6 +206,8 @@ export const discordLabsApi = {
   getDiscordDiagnostics: () => request<DiscordDiagnostics>("/api/v1/admin/integrations/discord/diagnostics"),
   runDiscordDiagnostics: () =>
     request<DiscordDiagnostics>("/api/v1/admin/integrations/discord/diagnostics", { method: "POST", body: {} }),
+  reconnectDiscordGateway: () =>
+    request<{ ok: boolean }>("/api/v1/admin/integrations/discord/gateway/reconnect", { method: "POST", body: {} }),
 
   getLabs: (refresh = false) => request<LabsStatus>(`/api/v1/admin/labs/vcam${refresh ? "?refresh=1" : ""}`),
   getLabsHealth: () => request<LabsHealth>("/api/v1/admin/labs/vcam/health"),
