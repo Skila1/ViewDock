@@ -3,8 +3,9 @@ import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import { Logo } from "@/components/brand/Logo";
+import { PosterCard } from "@/components/layout/PosterCard";
+import { PosterGrid } from "@/components/layout/PosterGrid";
 import { activityInstanceId } from "@/lib/discordActivity";
-import type { SearchHit } from "@/types/api.gen";
 
 const WAIT_POLL_MS = 5_000;
 
@@ -75,32 +76,36 @@ export function ActivityPage() {
   }
 
   return (
-    <div className="flex min-h-dvh justify-center bg-bg p-4 pt-[max(1rem,var(--sat))]">
-      <div className="w-full max-w-lg space-y-4">
+    <div className="min-h-dvh bg-bg p-4 pt-[max(1rem,var(--sat))]">
+      <div className="mx-auto w-full max-w-6xl space-y-4">
         <div className="flex items-center gap-3">
           <Logo className="h-9 w-9" />
           <h1 className="text-lg font-semibold tracking-tight">Watch together</h1>
         </div>
-        <div className="space-y-3 rounded-2xl border border-line bg-raised p-4">{body}</div>
+        {body}
       </div>
     </div>
   );
 }
 
 type Item = { item_kind: "movie" | "episode"; item_id: string };
+type Picked = { id: string; title: string };
 
 function TitlePicker({ busy, error, onPick }: { busy: boolean; error: string; onPick: (item: Item) => void }) {
   const [q, setQ] = useState("");
-  const [series, setSeries] = useState<SearchHit | null>(null);
+  const [series, setSeries] = useState<Picked | null>(null);
   const term = useDebounced(q.trim(), 300);
+  const searching = term.length >= 2;
+  const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies, enabled: !searching && !series });
+  const shows = useQuery({ queryKey: ["series"], queryFn: api.listSeries, enabled: !searching && !series });
   const results = useQuery({
     queryKey: ["activity-search", term],
     queryFn: () => api.search(term),
-    enabled: term.length >= 2 && !series,
+    enabled: searching && !series,
   });
   const detail = useQuery({
-    queryKey: ["series", series?.item_id],
-    queryFn: () => api.getSeries(series!.item_id),
+    queryKey: ["series", series?.id],
+    queryFn: () => api.getSeries(series!.id),
     enabled: Boolean(series),
   });
 
@@ -110,13 +115,13 @@ function TitlePicker({ busy, error, onPick }: { busy: boolean; error: string; on
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm font-medium">{series.title}</p>
           <button type="button" className="text-xs text-dim hover:text-ink" onClick={() => setSeries(null)}>
-            Back to search
+            Back
           </button>
         </div>
         {error ? <p className="text-xs text-danger">{error}</p> : null}
         {detail.isPending ? <p className="text-sm text-dim">Loading episodes…</p> : null}
         {detail.isError ? <p className="text-sm text-danger">{errMessage(detail.error)}</p> : null}
-        <div className="max-h-[60dvh] space-y-3 overflow-y-auto">
+        <div className="space-y-3">
           {(detail.data?.seasons ?? []).map((season) => (
             <div key={season.id ?? season.number}>
               <p className="mb-1 text-xs font-medium text-dim">{season.title || `Season ${season.number}`}</p>
@@ -142,40 +147,84 @@ function TitlePicker({ busy, error, onPick }: { busy: boolean; error: string; on
   }
 
   const hits = results.data?.items ?? [];
+  const pickMovie = (id: string) => onPick({ item_kind: "movie", item_id: id });
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-dim">Pick something for everyone in this channel to watch.</p>
-      <input
-        type="search"
-        className="w-full"
-        placeholder="Search movies and shows"
-        aria-label="Search movies and shows"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
-      {error ? <p className="text-xs text-danger">{error}</p> : null}
-      {results.isError ? <p className="text-xs text-danger">{errMessage(results.error)}</p> : null}
-      {term.length >= 2 && results.isSuccess && hits.length === 0 ? <p className="text-sm text-dim">No matches.</p> : null}
-      <ul className="max-h-[60dvh] space-y-1 overflow-y-auto">
-        {hits.map((hit) => (
-          <li key={`${hit.item_kind}:${hit.item_id}`}>
-            <button
-              type="button"
-              disabled={busy}
-              className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-overlay disabled:opacity-50"
-              onClick={() => (hit.item_kind === "series" ? setSeries(hit) : onPick({ item_kind: hit.item_kind, item_id: hit.item_id }))}
-            >
-              {hit.poster_url ? <img src={hit.poster_url} alt="" className="h-12 w-8 shrink-0 rounded object-cover" /> : null}
-              <span className="min-w-0 flex-1 truncate">
-                {hit.title}
-                {hit.year ? <span className="text-dim"> ({hit.year})</span> : null}
-              </span>
-              <span className="text-xs text-dim">{hit.item_kind === "series" ? "Show" : hit.item_kind === "episode" ? "Episode" : "Movie"}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className="text-sm text-dim">Pick something for everyone in this channel to watch.</p>
+        <input
+          type="search"
+          className="w-full max-w-md"
+          placeholder="Search movies and TV"
+          aria-label="Search movies and TV"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        {error ? <p className="text-xs text-danger">{error}</p> : null}
+      </div>
+
+      {searching ? (
+        <section>
+          {results.isPending ? <p className="text-xs text-dim">Searching…</p> : null}
+          {results.isError ? <p className="text-xs text-danger">{errMessage(results.error)}</p> : null}
+          {results.isSuccess && hits.length === 0 ? <p className="text-xs text-dim">No matches.</p> : null}
+          <PosterGrid>
+            {hits.map((hit) => (
+              <PosterCard
+                key={`${hit.item_kind}:${hit.item_id}`}
+                title={hit.title}
+                posterUrl={hit.poster_url}
+                unmatched={hit.unmatched}
+                disabled={busy}
+                onSelect={() =>
+                  hit.item_kind === "series"
+                    ? setSeries({ id: hit.item_id, title: hit.title })
+                    : onPick({ item_kind: hit.item_kind, item_id: hit.item_id })
+                }
+              />
+            ))}
+          </PosterGrid>
+        </section>
+      ) : (
+        <>
+          <section>
+            <h2 className="mb-2 text-[13px] font-medium text-dim">Movies</h2>
+            {movies.isLoading ? <p className="text-xs text-dim">Loading…</p> : null}
+            {movies.isError ? <p className="text-xs text-danger">{errMessage(movies.error)}</p> : null}
+            <PosterGrid>
+              {(movies.data ?? []).map((m) => (
+                <PosterCard
+                  key={m.id}
+                  title={m.title}
+                  posterUrl={m.poster_url}
+                  unmatched={m.unmatched}
+                  disabled={busy}
+                  onSelect={() => pickMovie(m.id)}
+                />
+              ))}
+            </PosterGrid>
+            {movies.data && movies.data.length === 0 ? <p className="text-xs text-dim">No movies yet.</p> : null}
+          </section>
+          <section>
+            <h2 className="mb-2 text-[13px] font-medium text-dim">TV</h2>
+            {shows.isLoading ? <p className="text-xs text-dim">Loading…</p> : null}
+            {shows.isError ? <p className="text-xs text-danger">{errMessage(shows.error)}</p> : null}
+            <PosterGrid>
+              {(shows.data ?? []).map((s) => (
+                <PosterCard
+                  key={s.id}
+                  title={s.title}
+                  posterUrl={s.poster_url}
+                  unmatched={s.unmatched}
+                  disabled={busy}
+                  onSelect={() => setSeries({ id: s.id, title: s.title })}
+                />
+              ))}
+            </PosterGrid>
+            {shows.data && shows.data.length === 0 ? <p className="text-xs text-dim">No series yet.</p> : null}
+          </section>
+        </>
+      )}
     </div>
   );
 }

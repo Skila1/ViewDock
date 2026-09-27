@@ -2,17 +2,16 @@ import { Link } from "react-router";
 import { filenameTitle } from "@/lib/format";
 
 type Props = {
-  to: string;
   title: string;
   posterUrl?: string | null;
   unmatched?: boolean;
   progress?: number;
-};
+} & ({ to: string; onSelect?: never; disabled?: never } | { to?: never; onSelect: () => void; disabled?: boolean });
 
-export function PosterCard({ to, title, posterUrl, unmatched, progress }: Props) {
+export function PosterCard({ to, onSelect, disabled, title, posterUrl, unmatched, progress }: Props) {
   const label = filenameTitle(title);
-  return (
-    <Link to={to} className="group block min-w-0">
+  const body = (
+    <>
       <div className="poster-tile relative overflow-hidden rounded-md bg-raised">
         {posterUrl ? (
           <img src={posterUrl} alt="" className="h-full w-full object-cover" />
@@ -32,6 +31,18 @@ export function PosterCard({ to, title, posterUrl, unmatched, progress }: Props)
         ) : null}
       </div>
       <p className="mt-1 truncate text-[12px] text-ink">{label}</p>
+    </>
+  );
+  if (onSelect) {
+    return (
+      <button type="button" onClick={onSelect} disabled={disabled} className="group block min-w-0 text-left disabled:opacity-50">
+        {body}
+      </button>
+    );
+  }
+  return (
+    <Link to={to} className="group block min-w-0">
+      {body}
     </Link>
   );
 }

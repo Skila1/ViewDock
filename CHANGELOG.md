@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The Discord Activity shows your movies and TV as the same poster grid as the home page, so you can pick a title without searching. Search narrows the grid.
+
 ## 0.1.6
 
 - Registering slash commands globally adds the Discord Activity's launch command back when Activities are enabled but Discord has none, for example after an earlier registration removed it.
