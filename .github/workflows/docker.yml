@@ -1,0 +1,80 @@
+# Builds and publishes ghcr.io/skila1/viewdock from https://github.com/Skila1/ViewDock.
+# Runs on github.com only, so Actions-compatible runners on other forges never
+# build or push images (github.server_url is not github.com there).
+#
+# A push to main builds only when its latest commit message starts with
+# "DEPLOY:". Version tags and manual runs always build.
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  image:
+    if: >-
+      github.server_url == 'https://github.com' &&
+      (github.event_name != 'push' ||
+       startsWith(github.ref, 'refs/tags/') ||
+       startsWith(github.event.head_commit.message, 'DEPLOY:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: docker/setup-buildx-action@v3
+        id: buildx
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        run: |
+          echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+          echo "SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+      # BuildKit cache mounts (Go modules, Go build cache, npm) live in the
+      # throwaway builder, so they are carried between runs through
+      # actions/cache. The key changes every run so the newest cache is saved;
+      # restore-keys picks up the most recent one.
+      - uses: actions/cache@v4
+        with:
+          path: buildkit-mounts
+          key: buildkit-mounts-${{ github.sha }}
+          restore-keys: buildkit-mounts-
+      - uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: buildkit-mounts
+          cache-map: |
+            {
+              "go-mod": "/go/pkg/mod",
+              "go-build": "/root/.cache/go-build",
+              "npm": "/root/.npm"
+            }
+      # One BuildKit graph: npm, Vite, Go warmup, and apt overlap when they
+      # do not depend on each other. Layer cache lives in the registry
+      # (:buildcache), which does not expire like the Actions cache.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:${{ env.SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true

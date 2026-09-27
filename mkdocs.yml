@@ -1,0 +1,147 @@
+site_name: ViewDock Docs
+site_description: Install, configure and run ViewDock, the self-hosted video platform for movies and TV.
+site_url: https://wiki.viewdock.dev/
+repo_url: https://github.com/Skila1/ViewDock
+repo_name: Skila1/ViewDock
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; ViewDock contributors. Licensed under the GNU AGPL v3.0 or later.
+
+docs_dir: docs
+site_dir: site
+strict: true
+
+# Allowlist of published files. Everything else in docs/ is excluded from the
+# build, so a stray note never reaches the site. A new page must be added here
+# and to nav, and must pass scripts/docs_privacy_check.py.
+exclude_docs: |
+  *
+  !/index.md
+  !/install.md
+  !/docker.md
+  !/reverse-proxy.md
+  !/upgrade.md
+  !/environment.md
+  !/discord.md
+  !/labs-virtual-camera.md
+  !/uploads.md
+  !/backups.md
+  !/api.md
+  !/development.md
+  !/CNAME
+  !/assets/logo.svg
+  !/assets/favicon.png
+  !/stylesheets/viewdock.css
+  !/assets/javascripts/**
+  !/assets/stylesheets/**
+  !/assets/images/**
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/favicon.png
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil-outline
+  font:
+    text: Outfit
+    code: JetBrains Mono
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - content.tooltips
+
+extra_css:
+  - stylesheets/viewdock.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  generator: false
+  homepage: https://wiki.viewdock.dev/
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Skila1/ViewDock
+      name: ViewDock on GitHub
+    - icon: material/web
+      link: https://viewdock.dev
+      name: viewdock.dev
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: install.md
+      - Docker: docker.md
+      - Reverse proxy: reverse-proxy.md
+      - Upgrade: upgrade.md
+  - Configuration:
+      - Environment: environment.md
+      - Discord: discord.md
+      - "Labs: virtual camera": labs-virtual-camera.md
+      - Uploads: uploads.md
+      - Backups and restore: backups.md
+  - Reference:
+      - REST API: api.md
+  - Development:
+      - Development: development.md

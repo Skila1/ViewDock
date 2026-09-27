@@ -1,0 +1,4 @@
+ALTER TABLE backend_nodes ADD COLUMN secret TEXT NOT NULL DEFAULT '';
+ALTER TABLE backend_nodes ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE backend_nodes ADD COLUMN last_failure_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE backend_nodes ADD COLUMN last_error TEXT NOT NULL DEFAULT '';

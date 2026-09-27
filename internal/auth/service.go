@@ -1,0 +1,498 @@
+package auth
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/viewdock/viewdock/internal/audit"
+	"github.com/viewdock/viewdock/internal/config"
+	"github.com/viewdock/viewdock/internal/db"
+	"github.com/viewdock/viewdock/internal/discordbot"
+	"github.com/viewdock/viewdock/internal/session"
+	"github.com/viewdock/viewdock/internal/settings"
+)
+
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrDisabled           = errors.New("account disabled")
+	ErrSetupComplete      = errors.New("setup already complete")
+	ErrInvalidNewUser     = errors.New("username required and password must be at least 8 characters")
+	ErrUsernameTaken      = errors.New("that username is already taken")
+)
+
+const (
+	SessionCookie = "vd_session"
+	GuestCookie   = "vd_guest"
+	PINIdle       = 15 * time.Minute
+)
+
+type User struct {
+	ID          string
+	Username    string
+	DisplayName string
+	Email       string
+	IsAdmin     bool
+	Disabled    bool
+	PINHash     string
+	HasPassword bool
+	Permissions []string
+	Roles       []string
+	Temporary   bool
+	ExpiresAt   time.Time
+	MaxSessions int
+	PartyOnly   bool
+}
+
+// TemporaryExpired reports a temporary guest account past its expiry.
+func (u User) TemporaryExpired() bool {
+	return u.Temporary && !u.ExpiresAt.IsZero() && time.Now().After(u.ExpiresAt)
+}
+
+var ErrSessionLimit = errors.New("session limit reached for this account")
+
+type Service struct {
+	DB         *sql.DB
+	Sessions   *session.Store
+	Settings   *settings.Store
+	Audit      *audit.Log
+	Cfg        config.Config
+	Grants     *GrantStore
+	OnTMDBKey  func()
+	DiscordBot *discordbot.Client
+	// BotToken supplies the runtime-configured bot token; DiscordBot is the
+	// environment fallback when it is unset or empty.
+	BotToken func() string
+	// ApplyConfig stores runtime settings through the versioned configuration service.
+	ApplyConfig func(ctx context.Context, actorID, ip string, values map[string]string) error
+
+	botMu      sync.Mutex
+	bot        *discordbot.Client
+	principals *principalCache
+	setupDone  atomic.Bool
+}
+
+// Bot returns the official Discord bot client, or nil when no token is configured.
+func (s *Service) Bot() *discordbot.Client {
+	token := ""
+	if s.BotToken != nil {
+		token = strings.TrimSpace(s.BotToken())
+	}
+	if token == "" {
+		return s.DiscordBot
+	}
+	s.botMu.Lock()
+	defer s.botMu.Unlock()
+	if s.bot == nil || s.bot.Token != token {
+		s.bot = discordbot.New(token)
+	}
+	return s.bot
+}
+
+func New(db *sql.DB, cfg config.Config, kv *settings.Store, aud *audit.Log) *Service {
+	return &Service{
+		DB: db, Sessions: session.New(db), Settings: kv, Audit: aud, Cfg: cfg,
+		Grants: NewGrantStore(db), DiscordBot: discordbot.New(os.Getenv("VD_DISCORD_BOT_TOKEN")),
+		principals: newPrincipalCache(),
+	}
+}
+
+func (s *Service) SetupComplete(ctx context.Context) bool {
+	done, _ := s.setupState(ctx)
+	return done
+}
+
+// setupState reads the one-way setup flag, caching it once true.
+func (s *Service) setupState(ctx context.Context) (bool, error) {
+	if s.setupDone.Load() {
+		return true, nil
+	}
+	if s.Settings == nil {
+		return false, nil
+	}
+	v, err := s.Settings.Get(ctx, "setup.complete")
+	if err != nil {
+		return false, err
+	}
+	if v == "1" || v == "true" {
+		s.setupDone.Store(true)
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *Service) UserCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+func (s *Service) GetUser(ctx context.Context, id string) (User, error) {
+	u, err := s.scanUser(s.DB.QueryRowContext(ctx, `
+		SELECT id, username, display_name, email, is_admin, disabled, pin_hash, has_password,
+			is_temporary, expires_at, max_sessions, party_only
+		FROM users WHERE id = ?
+	`, id))
+	if err != nil {
+		return u, err
+	}
+	s.hydrateUser(ctx, &u)
+	return u, nil
+}
+
+func (s *Service) ByUsername(ctx context.Context, username string) (User, string, error) {
+	var u User
+	var hash string
+	var admin, dis, hp, temp, party int
+	var expires string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT id, username, display_name, email, is_admin, disabled, pin_hash, has_password, password_hash,
+			is_temporary, expires_at, max_sessions, party_only
+		FROM users WHERE username = ?
+	`, username).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &admin, &dis, &u.PINHash, &hp, &hash,
+		&temp, &expires, &u.MaxSessions, &party)
+	u.IsAdmin = admin == 1
+	u.Disabled = dis == 1
+	u.HasPassword = hp == 1
+	u.Temporary, u.PartyOnly = temp == 1, party == 1
+	u.ExpiresAt, _ = time.Parse(time.RFC3339, expires)
+	if err == nil {
+		s.hydrateUser(ctx, &u)
+	}
+	return u, hash, err
+}
+
+func (s *Service) scanUser(row *sql.Row) (User, error) {
+	var u User
+	var admin, dis, hp, temp, party int
+	var expires string
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &admin, &dis, &u.PINHash, &hp,
+		&temp, &expires, &u.MaxSessions, &party)
+	u.IsAdmin = admin == 1
+	u.Disabled = dis == 1
+	u.HasPassword = hp == 1
+	u.Temporary, u.PartyOnly = temp == 1, party == 1
+	u.ExpiresAt, _ = time.Parse(time.RFC3339, expires)
+	return u, err
+}
+
+func (s *Service) hydrateUser(ctx context.Context, u *User) {
+	u.Permissions = s.PermissionsFor(ctx, u.ID)
+	u.Roles = s.RoleNamesFor(ctx, u.ID)
+	if !u.IsAdmin {
+		for _, p := range u.Permissions {
+			if p == PermAdmin {
+				u.IsAdmin = true
+				break
+			}
+		}
+	}
+}
+
+func (s *Service) CreateAdmin(ctx context.Context, username, password, display string) (User, error) {
+	n, err := s.UserCount(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	if n > 0 {
+		return User{}, ErrSetupComplete
+	}
+	username = strings.TrimSpace(username)
+	if username == "" || len(password) < 8 {
+		return User{}, errors.New("username required and password must be at least 8 characters")
+	}
+	if display == "" {
+		display = username
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	u := User{ID: uuid.NewString(), Username: strings.TrimSpace(username), DisplayName: display, IsAdmin: true}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO server_settings(key, value) VALUES ('setup.admin_created', '1')`); err != nil {
+		return User{}, ErrSetupComplete
+	}
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&existing); err != nil {
+		return User{}, err
+	}
+	if existing > 0 {
+		return User{}, ErrSetupComplete
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO users(id, username, password_hash, display_name, email, is_admin, disabled, pin_hash, created_at, updated_at, has_password)
+		VALUES (?, ?, ?, ?, '', 1, 0, '', ?, ?, 1)
+	`, u.ID, u.Username, hash, u.DisplayName, now, now)
+	if err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+	_ = s.AssignRole(ctx, u.ID, RoleAdministrator)
+	_ = s.AssignRole(ctx, u.ID, RoleSuperadmin)
+	s.rememberOriginalAdmin(ctx, u.ID)
+	s.hydrateUser(ctx, &u)
+	return u, nil
+}
+
+func (s *Service) CreateUser(ctx context.Context, username, password, display string, admin bool) (User, error) {
+	if !s.LocalSignupAllowed(ctx) {
+		return User{}, ErrLocalSignupDisabled
+	}
+	username = strings.TrimSpace(username)
+	if username == "" || len(password) < 8 {
+		return User{}, ErrInvalidNewUser
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	if display == "" {
+		display = username
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	u := User{ID: uuid.NewString(), Username: strings.TrimSpace(username), DisplayName: display, IsAdmin: admin}
+	ai := 0
+	if admin {
+		ai = 1
+	}
+	_, err = s.DB.ExecContext(ctx, `
+		INSERT INTO users(id, username, password_hash, display_name, email, is_admin, disabled, pin_hash, created_at, updated_at, has_password)
+		VALUES (?, ?, ?, ?, '', ?, 0, '', ?, ?, 1)
+	`, u.ID, u.Username, hash, u.DisplayName, ai, now, now)
+	if db.IsUniqueViolation(err) {
+		return User{}, ErrUsernameTaken
+	}
+	if err != nil {
+		return User{}, err
+	}
+	if admin {
+		_ = s.AssignRole(ctx, u.ID, RoleAdministrator)
+	} else {
+		_ = s.AssignRole(ctx, u.ID, RoleUser)
+	}
+	s.hydrateUser(ctx, &u)
+	return u, nil
+}
+
+func (s *Service) UpdateDisplayName(ctx context.Context, userID, display string) error {
+	display = strings.TrimSpace(display)
+	if display == "" {
+		return errors.New("display name required")
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?`,
+		display, time.Now().UTC().Format(time.RFC3339), userID)
+	return err
+}
+
+func (s *Service) OriginalAdminID(ctx context.Context) string {
+	if s.Settings != nil {
+		id, _ := s.Settings.Get(ctx, "setup.original_admin_id")
+		return strings.TrimSpace(id)
+	}
+	var id string
+	_ = s.DB.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = 'setup.original_admin_id'`).Scan(&id)
+	return strings.TrimSpace(id)
+}
+
+func (s *Service) rememberOriginalAdmin(ctx context.Context, userID string) {
+	if strings.TrimSpace(userID) == "" {
+		return
+	}
+	if s.Settings != nil {
+		_ = s.Settings.Set(ctx, "setup.original_admin_id", userID)
+		return
+	}
+	_, _ = s.DB.ExecContext(ctx, `
+		INSERT INTO server_settings(key, value) VALUES ('setup.original_admin_id', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, userID)
+}
+
+func (s *Service) IsSuperadmin(ctx context.Context, userID string) bool {
+	if strings.TrimSpace(userID) == "" {
+		return false
+	}
+	if s.OriginalAdminID(ctx) == userID {
+		return true
+	}
+	for _, id := range s.RoleIDsFor(ctx, userID) {
+		if id == RoleSuperadmin {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) IsProtectedUser(ctx context.Context, userID string) bool {
+	return s.IsSuperadmin(ctx, userID)
+}
+
+func (s *Service) LocalLoginAllowed(ctx context.Context, userID string) bool {
+	return !s.LoadDiscord(ctx).Ready()
+}
+
+func (s *Service) LocalSignupAllowed(ctx context.Context) bool {
+	return !s.LoadDiscord(ctx).Ready()
+}
+
+func (s *Service) SetDisabled(ctx context.Context, actor *Principal, userID string, disabled bool) error {
+	if actor != nil && actor.UserID == userID && disabled {
+		return errors.New("cannot disable your own account")
+	}
+	if disabled && s.IsProtectedUser(ctx, userID) {
+		return ErrProtectedUser
+	}
+	if actor != nil {
+		if err := s.AssertCanModifyUser(ctx, actor, userID); err != nil {
+			return err
+		}
+	}
+	if disabled {
+		if err := s.guardLastAdmin(ctx, userID, true, nil); err != nil {
+			return err
+		}
+	}
+	d := 0
+	if disabled {
+		d = 1
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET disabled = ?, updated_at = ? WHERE id = ?`,
+		d, time.Now().UTC().Format(time.RFC3339), userID)
+	if err != nil {
+		return err
+	}
+	if disabled {
+		s.Sessions.DeleteAllForUser(ctx, userID)
+	}
+	return nil
+}
+
+func (s *Service) SetPassword(ctx context.Context, userID, next string) error {
+	if len(next) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	nh, err := HashPassword(next)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET password_hash = ?, has_password = 1, updated_at = ? WHERE id = ?`,
+		nh, time.Now().UTC().Format(time.RFC3339), userID)
+	return err
+}
+
+func (s *Service) Login(ctx context.Context, username, password, ip, ua string) (raw string, exp time.Time, u User, err error) {
+	u, hash, err := s.ByUsername(ctx, username)
+	if err != nil {
+		return "", time.Time{}, User{}, ErrInvalidCredentials
+	}
+	if u.Disabled || u.TemporaryExpired() {
+		return "", time.Time{}, User{}, ErrDisabled
+	}
+	// Temporary guests are administrator-issued local accounts and may sign in
+	// even when regular accounts are restricted to Discord login.
+	if !u.Temporary && !s.LocalLoginAllowed(ctx, u.ID) {
+		return "", time.Time{}, User{}, ErrLocalLoginDisabled
+	}
+	if !VerifyPassword(hash, password) {
+		return "", time.Time{}, User{}, ErrInvalidCredentials
+	}
+	if u.MaxSessions > 0 {
+		if n, err := s.Sessions.CountForUser(ctx, u.ID); err != nil {
+			return "", time.Time{}, User{}, err
+		} else if n >= u.MaxSessions {
+			return "", time.Time{}, User{}, ErrSessionLimit
+		}
+	}
+	raw, exp, err = s.Sessions.Create(ctx, u.ID, ip, ua)
+	if err == nil && u.Temporary && !u.ExpiresAt.IsZero() && exp.After(u.ExpiresAt) {
+		exp = u.ExpiresAt
+	}
+	return raw, exp, u, err
+}
+
+func (s *Service) DeleteUser(ctx context.Context, actor *Principal, userID string) error {
+	if actor != nil && actor.UserID == userID {
+		return errors.New("cannot delete your own account")
+	}
+	if s.IsProtectedUser(ctx, userID) {
+		return ErrProtectedUser
+	}
+	if err := s.AssertCanModifyUser(ctx, actor, userID); err != nil {
+		return err
+	}
+	if err := s.guardLastAdmin(ctx, userID, true, nil); err != nil {
+		return err
+	}
+	s.Sessions.DeleteAllForUser(ctx, userID)
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
+	return err
+}
+
+func (s *Service) ChangePassword(ctx context.Context, userID, current, next string) error {
+	var hash string
+	if err := s.DB.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&hash); err != nil {
+		return err
+	}
+	var hp int
+	_ = s.DB.QueryRowContext(ctx, `SELECT has_password FROM users WHERE id = ?`, userID).Scan(&hp)
+	if hp == 1 && !VerifyPassword(hash, current) {
+		return ErrInvalidCredentials
+	}
+	if len(next) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	nh, err := HashPassword(next)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET password_hash = ?, has_password = 1, updated_at = ? WHERE id = ?`, nh, time.Now().UTC().Format(time.RFC3339), userID)
+	if err != nil {
+		return err
+	}
+	s.Sessions.DeleteAllForUser(ctx, userID)
+	return nil
+}
+
+func (s *Service) SetPIN(ctx context.Context, userID, pin string) error {
+	if len(pin) < 4 || len(pin) > 8 {
+		return errors.New("pin must be 4-8 digits")
+	}
+	for _, c := range pin {
+		if c < '0' || c > '9' {
+			return errors.New("pin must be digits")
+		}
+	}
+	h, err := HashPassword(pin)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE users SET pin_hash = ?, updated_at = ? WHERE id = ?`, h, time.Now().UTC().Format(time.RFC3339), userID)
+	return err
+}
+
+func (s *Service) ClearPIN(ctx context.Context, userID string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET pin_hash = '', updated_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), userID)
+	return err
+}
+
+func (s *Service) VerifyPIN(ctx context.Context, userID, pin string) bool {
+	var h string
+	if err := s.DB.QueryRowContext(ctx, `SELECT pin_hash FROM users WHERE id = ?`, userID).Scan(&h); err != nil || h == "" {
+		return false
+	}
+	return VerifyPassword(h, pin)
+}
