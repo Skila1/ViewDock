@@ -22,6 +22,9 @@ const (
 	cfgGuestHours        = "guests.max_hours"
 	cfgMeshPlayback      = "mesh.route_playback"
 	cfgDiscordPublicKey  = "discord.public_key"
+	cfgDiscordSeparate   = "discord.bot.separate"
+	cfgDiscordSepToken   = "discord.bot.separate_token"
+	cfgDiscordSepKey     = "discord.bot.separate_public_key"
 	cfgBlockUnrated      = "content.block_unrated"
 	cfgCertCountry       = "metadata.certification_country"
 	cfgOfflineMaxItems   = "offline.max_items"
@@ -31,6 +34,27 @@ const (
 	cfgTelemetryBudget   = "diagnostics.telemetry_events_per_minute"
 )
 
+// discordBotKeys returns the runtime keys of the bot token and public key in
+// use. The shared keys belong to the sign-in application; the separate keys
+// are kept, unused, while the separate configuration is off.
+func discordBotKeys(rc *runtimecfg.Service) (token, publicKey string) {
+	if rc.Bool(cfgDiscordSeparate) {
+		return cfgDiscordSepToken, cfgDiscordSepKey
+	}
+	return cfgDiscordBot, cfgDiscordPublicKey
+}
+
+// discordBotToken returns the bot token in use. getenv supplies the
+// VD_DISCORD_BOT_TOKEN fallback for the shared token when the runtime
+// configuration could not provide it.
+func discordBotToken(rc *runtimecfg.Service, getenv func(string) string) string {
+	key, _ := discordBotKeys(rc)
+	if v := rc.String(key); v != "" || key != cfgDiscordBot {
+		return v
+	}
+	return getenv("VD_DISCORD_BOT_TOKEN")
+}
+
 func configDefs(cfg config.Config) []runtimecfg.Def {
 	return []runtimecfg.Def{
 		{Key: cfgPublicURL, Label: "Public URL", Category: "General", Kind: runtimecfg.KindURL,
@@ -38,10 +62,17 @@ func configDefs(cfg config.Config) []runtimecfg.Def {
 		{Key: cfgTMDBKey, Label: "TMDB API key", Category: "Metadata", Kind: runtimecfg.KindSecret,
 			Help: "Optional metadata and artwork provider.", Env: func() string { return cfg.TMDBAPIKey }},
 		{Key: cfgDiscordBot, Label: "Discord bot token", Category: "Discord", Kind: runtimecfg.KindSecret,
-			Help: "Enables the official bot: party invites, slash commands and command registration.", Env: func() string { return os.Getenv("VD_DISCORD_BOT_TOKEN") }},
+			Help: "Bot token of the Discord application used for sign-in. Enables the official bot: party invites, slash commands and command registration.",
+			Env:  func() string { return os.Getenv("VD_DISCORD_BOT_TOKEN") }},
 		{Key: cfgDiscordPublicKey, Label: "Discord application public key", Category: "Discord", Kind: runtimecfg.KindSecret,
-			Help: "Hex Ed25519 public key from the Discord developer portal (General Information). Used to verify interaction requests.",
+			Help: "Hex Ed25519 public key of the sign-in application (Developer Portal, General Information). Used to verify interaction requests.",
 			Env:  func() string { return os.Getenv("VD_DISCORD_PUBLIC_KEY") }},
+		{Key: cfgDiscordSeparate, Label: "Use separate Discord bot configuration", Category: "Discord", Kind: runtimecfg.KindBool, Default: "0",
+			Help: "Off: the official bot uses the bot token and public key of the sign-in application. On: it uses the separate bot token and public key instead."},
+		{Key: cfgDiscordSepToken, Label: "Separate Discord bot token", Category: "Discord", Kind: runtimecfg.KindSecret,
+			Help: "Bot token of a separate Discord application. Used only when the separate bot configuration is on."},
+		{Key: cfgDiscordSepKey, Label: "Separate Discord bot public key", Category: "Discord", Kind: runtimecfg.KindSecret,
+			Help: "Hex Ed25519 public key of the separate bot application. Used only when the separate bot configuration is on."},
 		{Key: cfgTranscodeSlots, Label: "Concurrent transcodes", Category: "Playback", Kind: runtimecfg.KindInt,
 			Default: strconv.Itoa(bandwidth.DefaultSlots), Min: 1, Max: 64,
 			Help: "Simultaneous FFmpeg transcodes on this node. New sessions beyond the limit are refused."},

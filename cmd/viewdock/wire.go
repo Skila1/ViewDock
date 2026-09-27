@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -183,7 +184,10 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		ExpiryDays: func() int { return rc.Int(cfgOfflineExpiryDays) },
 		MaxItemGB:  func() int { return rc.Int(cfgOfflineMaxItemGB) },
 	}
-	authSvc.BotToken = func() string { return rc.String(cfgDiscordBot) }
+	authSvc.BotToken = func() string { return discordBotToken(rc, os.Getenv) }
+	// discordBotToken applies the environment fallback to the shared token
+	// only; the separate bot must never fall back to it.
+	authSvc.DiscordBot = nil
 	authSvc.ApplyConfig = func(ctx context.Context, actorID, ip string, values map[string]string) error {
 		changes := make(map[string]runtimecfg.Change, len(values))
 		for k, v := range values {
@@ -201,14 +205,32 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	if controlPlane {
 		ix = interactions.New(interactions.Deps{
 			DB: sqlDB, Cfg: cfg, Settings: kv, KV: kv, Audit: aud, Log: logger,
-			PublicKey:          func() string { return rc.String(cfgDiscordPublicKey) },
-			Bot:                authSvc.Bot,
-			Accounts:           authSvc,
-			Parties:            discordParties{hub: parties},
-			Catalog:            discordCatalog{search: srch, grants: authSvc.Grants, libs: libs, hub: parties},
-			PartiesEnabled:     func() bool { return parties != nil && rc.Bool(cfgWatchTogether) },
-			SaveConfig:         authSvc.ApplyConfig,
-			PublicKeyConfigKey: cfgDiscordPublicKey,
+			PublicKey: func() string {
+				_, key := discordBotKeys(rc)
+				return rc.String(key)
+			},
+			Bot:            authSvc.Bot,
+			Accounts:       authSvc,
+			Parties:        discordParties{hub: parties},
+			Catalog:        discordCatalog{search: srch, grants: authSvc.Grants, libs: libs, hub: parties},
+			PartiesEnabled: func() bool { return parties != nil && rc.Bool(cfgWatchTogether) },
+			SaveConfig:     authSvc.ApplyConfig,
+			PublicKeyConfigKey: func() string {
+				_, key := discordBotKeys(rc)
+				return key
+			},
+			OAuth: authSvc.LoadDiscord,
+			Setup: func() interactions.BotSetup {
+				tokenKey, publicKey := discordBotKeys(rc)
+				setup := interactions.BotSetup{Separate: rc.Bool(cfgDiscordSeparate)}
+				if rc.String(tokenKey) != "" {
+					setup.TokenSource = rc.Source(tokenKey)
+				}
+				if rc.String(publicKey) != "" {
+					setup.PublicKeySource = rc.Source(publicKey)
+				}
+				return setup
+			},
 		})
 		vcam = labs.New(ff.FFmpeg, newLabsSources(parties, libs), kv, filepath.Join(cfg.CacheDir, "labs-vcam"))
 		vcam.Log = logger

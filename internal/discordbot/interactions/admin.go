@@ -37,6 +37,11 @@ func (s *Service) AdminRoutes(r chi.Router) {
 			r.Post("/admin/integrations/discord/commands", s.handleRegister)
 			r.Post("/admin/integrations/discord/endpoint", s.handleSetEndpoint)
 		})
+		r.Get("/admin/integrations/discord/diagnostics", s.handleDiagnostics)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RateLimit(s.Cfg, 10, time.Minute))
+			r.Post("/admin/integrations/discord/diagnostics", s.handleRunDiagnostics)
+		})
 	})
 }
 
@@ -86,16 +91,20 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 		key = strings.TrimSpace(s.PublicKey())
 	}
 	endpoint := s.endpointURL(ctx)
+	setup := s.setup()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"endpoint_url":     endpoint,
-		"endpoint_https":   strings.HasPrefix(endpoint, "https://"),
-		"public_key_set":   key != "",
-		"public_key_valid": discordbot.ValidPublicKey(key),
-		"bot_configured":   s.bot() != nil,
-		"parties_enabled":  s.partiesEnabled(),
-		"registration":     s.registration(ctx),
-		"commands":         commandNames(),
-		"links":            views,
+		"mode":              s.mode(),
+		"bot_token_source":  setup.TokenSource,
+		"public_key_source": setup.PublicKeySource,
+		"endpoint_url":      endpoint,
+		"endpoint_https":    strings.HasPrefix(endpoint, "https://"),
+		"public_key_set":    key != "",
+		"public_key_valid":  discordbot.ValidPublicKey(key),
+		"bot_configured":    s.bot() != nil,
+		"parties_enabled":   s.partiesEnabled(),
+		"registration":      s.registration(ctx),
+		"commands":          commandNames(),
+		"links":             views,
 	})
 }
 
@@ -163,7 +172,7 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 	case app.VerifyKey == "":
 		keyStatus = "unknown"
 	case current == "" && s.SaveConfig != nil && discordbot.ValidPublicKey(app.VerifyKey):
-		if err := s.SaveConfig(ctx, p.UserID, ip, map[string]string{s.PublicKeyConfigKey: app.VerifyKey}); err != nil {
+		if err := s.SaveConfig(ctx, p.UserID, ip, map[string]string{s.PublicKeyConfigKey(): app.VerifyKey}); err != nil {
 			s.Log.Warn("save discord public key", "category", "discord", "err", err)
 			keyStatus = "unset"
 		} else {

@@ -113,3 +113,58 @@ func TestApplicationAndCommandRegistration(t *testing.T) {
 		t.Fatalf("nil client = %v", err)
 	}
 }
+
+func TestGuildPermissions(t *testing.T) {
+	for perms, want := range map[string]bool{
+		"3072":             true,
+		"1024":             false,
+		"8":                true,
+		"0":                false,
+		"":                 false,
+		"not-a-number":     false,
+		"1125899906845696": true,
+	} {
+		if got := (Guild{Permissions: perms}).Has(PermViewChannel | PermSendMessages); got != want {
+			t.Errorf("Has(%q) = %v, want %v", perms, got, want)
+		}
+	}
+}
+
+func TestVerifyClientCredentials(t *testing.T) {
+	var gotForm string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, secret, _ := r.BasicAuth()
+		body, _ := io.ReadAll(r.Body)
+		gotForm = string(body)
+		switch {
+		case r.URL.Path != "/oauth2/token":
+			w.WriteHeader(http.StatusNotFound)
+		case secret == "limited":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"message":"You are being rate limited.","retry_after":2}`)
+		case id != "123456789012345678" || secret != "good-secret":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"invalid_client"}`)
+		default:
+			_, _ = io.WriteString(w, `{"access_token":"t","token_type":"Bearer"}`)
+		}
+	}))
+	defer ts.Close()
+	ctx := context.Background()
+	if err := VerifyClientCredentials(ctx, nil, ts.URL, "123456789012345678", "good-secret"); err != nil {
+		t.Fatalf("valid credentials = %v", err)
+	}
+	if !strings.Contains(gotForm, "grant_type=client_credentials") || strings.Contains(gotForm, "good-secret") {
+		t.Fatalf("form = %q; the secret belongs in the Authorization header", gotForm)
+	}
+	err := VerifyClientCredentials(ctx, nil, ts.URL, "123456789012345678", "bad-secret")
+	if !errors.Is(err, ErrInvalidClient) || strings.Contains(err.Error(), "bad-secret") {
+		t.Fatalf("invalid credentials = %v", err)
+	}
+	var apiErr *APIError
+	err = VerifyClientCredentials(ctx, nil, ts.URL, "123456789012345678", "limited")
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || apiErr.RetryAfter == 0 {
+		t.Fatalf("rate limited = %v", err)
+	}
+}

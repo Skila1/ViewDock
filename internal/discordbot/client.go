@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -234,4 +235,104 @@ func (c *Client) OverwriteCommands(ctx context.Context, appID, guildID string, c
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListCommands returns the application's registered commands, globally when
+// guildID is empty or for one guild otherwise.
+func (c *Client) ListCommands(ctx context.Context, appID, guildID string) ([]Command, error) {
+	if !ValidSnowflake(appID) {
+		return nil, errors.New("application id must be a Discord ID")
+	}
+	path := "/applications/" + appID + "/commands"
+	if guildID != "" {
+		if !ValidSnowflake(guildID) {
+			return nil, errors.New("guild id must be a Discord server ID")
+		}
+		path = "/applications/" + appID + "/guilds/" + guildID + "/commands"
+	}
+	var out []Command
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Guild permission bits ViewDock checks.
+const (
+	PermAdministrator uint64 = 1 << 3
+	PermViewChannel   uint64 = 1 << 10
+	PermSendMessages  uint64 = 1 << 11
+)
+
+// Guild is a server the bot belongs to. Permissions is the bot's server-wide
+// permission bitfield, before channel overwrites.
+type Guild struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Permissions string `json:"permissions"`
+}
+
+// Has reports whether the bot holds every bit in perm, or Administrator.
+func (g Guild) Has(perm uint64) bool {
+	bits, err := strconv.ParseUint(strings.TrimSpace(g.Permissions), 10, 64)
+	if err != nil {
+		return false
+	}
+	return bits&PermAdministrator != 0 || bits&perm == perm
+}
+
+// CurrentGuilds returns up to the first 200 servers the bot belongs to.
+func (c *Client) CurrentGuilds(ctx context.Context) ([]Guild, error) {
+	var out []Guild
+	if err := c.do(ctx, http.MethodGet, "/users/@me/guilds?limit=200", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ErrInvalidClient means Discord rejected an OAuth client ID and secret.
+var ErrInvalidClient = errors.New("discord rejected the OAuth client ID or secret")
+
+// VerifyClientCredentials checks an OAuth client ID and secret with a client
+// credentials grant against baseURL (for example https://discord.com/api/v10).
+// The issued token is discarded. Errors never contain the secret.
+func VerifyClientCredentials(ctx context.Context, hc *http.Client, baseURL, clientID, secret string) error {
+	form := url.Values{"grant_type": {"client_credentials"}, "scope": {"identify"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(clientID, secret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "DiscordBot (https://github.com/viewdock/viewdock, 2)")
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	var payload struct {
+		Error       string  `json:"error"`
+		Description string  `json:"error_description"`
+		Message     string  `json:"message"`
+		RetryAfter  float64 `json:"retry_after"`
+	}
+	_ = json.Unmarshal(raw, &payload)
+	if resp.StatusCode == http.StatusUnauthorized || payload.Error == "invalid_client" {
+		return ErrInvalidClient
+	}
+	msg := payload.Description
+	if msg == "" {
+		msg = payload.Message
+	}
+	if msg == "" {
+		msg = payload.Error
+	}
+	return &APIError{Status: resp.StatusCode, Message: truncate(msg, 200), RetryAfter: time.Duration(payload.RetryAfter * float64(time.Second))}
 }

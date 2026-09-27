@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Admin → Discord is reorganised into cards with a status and diagnostics panel that checks credentials, sign-in, the bot's servers and permissions, slash commands and the interactions endpoint, with a fix for each problem.
+- Optional "Use separate Discord bot configuration" for running the bot from a different Discord application. Off by default; existing settings keep working unchanged.
+
 ## 0.1.1
 
 - Updates page only reports an update when GitHub `VERSION` is newer than the installed version. Same version is up to date, even if the `:latest` digest changed.

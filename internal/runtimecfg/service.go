@@ -169,6 +169,14 @@ func (s *Service) Int(key string) int {
 
 func (s *Service) Bool(key string) bool { return s.String(key) == "1" }
 
+// Source reports where the current value of key came from: "database",
+// "environment" or "default".
+func (s *Service) Source(key string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sources[key]
+}
+
 func (s *Service) Version() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

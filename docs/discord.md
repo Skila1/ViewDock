@@ -7,6 +7,18 @@ ViewDock has two independent Discord features, both configured under **Admin →
 
 Both need a Discord application, created in the [Discord Developer Portal](https://discord.com/developers/applications). Set the public URL under **Admin → Settings** (or `VD_PUBLIC_URL`) first, so the addresses ViewDock gives Discord stay stable behind your reverse proxy or tunnel.
 
+## One application or two
+
+By default sign-in, registration, the bot and slash commands all use one Discord application: the client ID and secret belong to it, and so do the bot token and public key.
+
+To run the bot from a different application, tick **Use separate Discord bot configuration** in the **Bot configuration** card and enter that application's bot token and public key. Sign-in and registration keep using the client ID and secret. The two sets of bot credentials are stored separately: turning the option off switches back to the sign-in application's bot credentials and keeps the separate ones saved for when you turn it on again. Each credential field is labelled with the application it belongs to.
+
+## Status and diagnostics
+
+The **Status and diagnostics** panel (on the right on wide screens, at the top on smaller ones) reports the configuration mode, missing or incomplete credentials, sign-in readiness, the bot's connection to Discord, its server membership and permissions, slash command registration and the interactions endpoint. Each problem includes a short explanation and, where possible, a button that fixes it or takes you to the right setting, such as adding the bot to a server or registering commands.
+
+The checks against Discord use a short timeout and a handful of requests. They run when you press **Run diagnostics**, and automatically when you open the page if there is no earlier result or the settings changed since the last one; otherwise the page shows the saved result and when it ran. Secrets are never shown in the results.
+
 ## Discord sign-in
 
 !!! warning
@@ -33,7 +45,7 @@ The bot receives slash commands through an HTTPS interactions endpoint on your V
 4. Press **Register commands**. Enter a server ID to make the commands available in that server immediately, or leave it blank to register them for every server (global commands can take up to an hour to appear).
 5. Press **Set endpoint in Discord** so Discord sends interactions to ViewDock.
 
-The bot token can also be provided with `VD_DISCORD_BOT_TOKEN`; a value saved in the admin page takes precedence. Tokens and secrets are stored encrypted with the [master key](environment.md).
+The bot token of the sign-in application can also be provided with `VD_DISCORD_BOT_TOKEN`; a value saved in the admin page takes precedence. The separate bot configuration is set on the admin page only. Tokens and secrets are stored encrypted with the [master key](environment.md).
 
 ### Commands
 

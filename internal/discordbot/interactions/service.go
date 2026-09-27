@@ -109,8 +109,25 @@ type Deps struct {
 	// SaveConfig stores runtime settings (used to save the application public
 	// key fetched from Discord when none is configured). Optional.
 	SaveConfig func(ctx context.Context, actorID, ip string, values map[string]string) error
-	// PublicKeyConfigKey is the runtime config key SaveConfig writes.
-	PublicKeyConfigKey string
+	// PublicKeyConfigKey returns the runtime config key SaveConfig writes the
+	// active bot application's public key to.
+	PublicKeyConfigKey func() string
+	// OAuth returns the Discord sign-in configuration, including the client
+	// secret. Optional; diagnostics skip sign-in checks without it.
+	OAuth func(ctx context.Context) auth.DiscordOAuthConfig
+	// Setup reports which bot credentials are in use. Optional.
+	Setup func() BotSetup
+}
+
+// BotSetup describes the bot credentials in use, never their values.
+type BotSetup struct {
+	// Separate is true when the bot uses its own application instead of the
+	// sign-in application.
+	Separate bool
+	// TokenSource and PublicKeySource are "database" or "environment", or
+	// empty when the active value is unset.
+	TokenSource     string
+	PublicKeySource string
 }
 
 type Service struct {
@@ -120,23 +137,41 @@ type Service struct {
 	users    *limiter
 	failures *limiter
 	now      func() time.Time
+	diag     diagnosticsCache
+	// oauthBase is the Discord API root used for the client credentials check.
+	oauthBase string
 }
 
 func New(d Deps) *Service {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
-	if d.PublicKeyConfigKey == "" {
-		d.PublicKeyConfigKey = "discord.public_key"
+	if d.PublicKeyConfigKey == nil {
+		d.PublicKeyConfigKey = func() string { return "discord.public_key" }
 	}
 	return &Service{
-		Deps:     d,
-		Links:    NewLinkStore(d.DB),
-		verifier: discordbot.NewVerifier(d.PublicKey),
-		users:    newLimiter(),
-		failures: newLimiter(),
-		now:      time.Now,
+		Deps:      d,
+		Links:     NewLinkStore(d.DB),
+		verifier:  discordbot.NewVerifier(d.PublicKey),
+		users:     newLimiter(),
+		failures:  newLimiter(),
+		now:       time.Now,
+		oauthBase: "https://discord.com/api/v10",
 	}
+}
+
+func (s *Service) setup() BotSetup {
+	if s.Setup == nil {
+		return BotSetup{}
+	}
+	return s.Setup()
+}
+
+func (s *Service) mode() string {
+	if s.setup().Separate {
+		return "separate"
+	}
+	return "shared"
 }
 
 func (s *Service) partiesEnabled() bool {

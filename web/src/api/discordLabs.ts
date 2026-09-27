@@ -22,7 +22,13 @@ export type DiscordCommandRegistration = {
   registered_by: string;
 };
 
+export type DiscordBotMode = "shared" | "separate";
+
 export type DiscordInteractionsStatus = {
+  mode: DiscordBotMode;
+  /** Where the active bot token comes from; empty when unset. */
+  bot_token_source: "" | "database" | "environment";
+  public_key_source: "" | "database" | "environment";
   endpoint_url: string;
   endpoint_https: boolean;
   public_key_set: boolean;
@@ -38,6 +44,43 @@ export type DiscordRegisterResult = {
   registration: DiscordCommandRegistration;
   public_key_status: "ok" | "saved" | "unset" | "mismatch" | "unknown";
   endpoint_url: string;
+};
+
+export type DiscordCheckStatus = "ok" | "warn" | "error" | "info" | "skipped";
+
+export type DiscordCheckGroup = "configuration" | "oauth" | "bot" | "servers" | "commands" | "interactions";
+
+export type DiscordCheckActionId =
+  | "edit_auth"
+  | "edit_bot"
+  | "edit_registration"
+  | "open_settings"
+  | "register_commands"
+  | "set_endpoint"
+  | "invite_bot";
+
+export type DiscordCheck = {
+  id: string;
+  group: DiscordCheckGroup;
+  label: string;
+  status: DiscordCheckStatus;
+  detail: string;
+  /** True when the result came from contacting Discord. */
+  remote: boolean;
+  action?: { id: DiscordCheckActionId; label: string; url?: string };
+};
+
+export type DiscordDiagnostics = {
+  mode: DiscordBotMode;
+  status: "ok" | "warn" | "error";
+  sign_in_client_id: string;
+  /** When Discord was last contacted; null when never. */
+  checked_at: string | null;
+  /** True when the configuration changed after checked_at. */
+  stale: boolean;
+  application?: { id: string; name: string };
+  invite_url?: string;
+  checks: DiscordCheck[];
 };
 
 export type LabsMode = "v4l2" | "rtmp" | "srt";
@@ -137,6 +180,9 @@ export const discordLabsApi = {
     request<{ ok: boolean; endpoint_url: string }>("/api/v1/admin/integrations/discord/endpoint", { method: "POST", body: {} }),
   deleteDiscordLink: (channelId: string) =>
     request(`/api/v1/admin/integrations/discord/links/${encodeURIComponent(channelId)}`, { method: "DELETE" }),
+  getDiscordDiagnostics: () => request<DiscordDiagnostics>("/api/v1/admin/integrations/discord/diagnostics"),
+  runDiscordDiagnostics: () =>
+    request<DiscordDiagnostics>("/api/v1/admin/integrations/discord/diagnostics", { method: "POST", body: {} }),
 
   getLabs: (refresh = false) => request<LabsStatus>(`/api/v1/admin/labs/vcam${refresh ? "?refresh=1" : ""}`),
   getLabsHealth: () => request<LabsHealth>("/api/v1/admin/labs/vcam/health"),
