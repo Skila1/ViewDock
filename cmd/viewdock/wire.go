@@ -262,6 +262,33 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		srv.APIMounts = append(srv.APIMounts, sources.Routes)
 	}
 
+	if controlPlane && parties != nil {
+		partyAdmin := &watchtogether.AdminAPI{
+			Parties: parties, Audit: aud, Cfg: cfg,
+			Title: func(ctx context.Context, kind, id string) string {
+				name, _ := titleOf(ctx, libs, kind, id)
+				return name
+			},
+		}
+		if ix != nil {
+			partyAdmin.DiscordLinks = func(ctx context.Context) map[string]watchtogether.DiscordLink {
+				links, err := ix.Links.List(ctx)
+				if err != nil {
+					logger.Warn("list discord channel links", "category", "discord", "err", err)
+					return nil
+				}
+				out := make(map[string]watchtogether.DiscordLink, len(links))
+				for _, l := range links {
+					if _, seen := out[l.RoomID]; !seen {
+						out[l.RoomID] = watchtogether.DiscordLink{ChannelID: l.ChannelID, GuildID: l.GuildID, Title: l.Title}
+					}
+				}
+				return out
+			}
+		}
+		srv.APIMounts = append(srv.APIMounts, partyAdmin.Routes)
+	}
+
 	var backups *backup.Service
 	if controlPlane {
 		backups = backup.New(sqlDB, cfg, aud, logger)

@@ -18,6 +18,19 @@ export type PartySyncInfo = {
   stats: { reports: number; rate_corrections: number; seeks: number; realigns: number };
 };
 
+/** Who sees the party panel: everyone, only the host, or nobody. */
+export type PartyPanel = "everyone" | "host" | "hidden";
+
+/**
+ * Whether this viewer sees the panel. The room setting picks the default;
+ * the host can always open it, and anyone it is shown to can close it.
+ */
+export function panelVisible(panel: PartyPanel, isHost: boolean, local: "open" | "closed" | null): boolean {
+  const shown = panel === "everyone" || (panel === "host" && isHost);
+  if (!shown && !isHost) return false;
+  return local ? local === "open" : shown;
+}
+
 export type PartyState = {
   type: "state";
   room_id: string;
@@ -30,6 +43,7 @@ export type PartyState = {
   item_kind: string;
   item_id: string;
   shared_control: boolean;
+  panel?: PartyPanel;
   sync: PartySyncInfo;
   reason?: string;
   by?: string;

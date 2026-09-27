@@ -4,6 +4,9 @@
 
 - Admins can connect Jellyfin servers under Admin, Media sources. Their movies and shows (with posters and metadata) appear for every user and resync every 6 hours. A title that is also in a local library is listed once, plays locally by default, and the player can switch to the Jellyfin copy. Jellyfin playback supports seeking and works in watch parties. Credentials stay on the server.
 - Jellyfin sources can use an API key instead of an account. Each source has usage restrictions (posters, streaming, transcoding, activity log, maximum streams) that ViewDock enforces on itself, and a usage log of what ViewDock did with the source, plus optional Jellyfin activity for the ViewDock user.
+- The Watch Together panel can be closed, and the host chooses whether it is shown to everyone, only the host, or nobody. A party button in the player controls reopens it.
+- Admin, Watch parties lists web and Discord Activity parties. Admins can remove a member, block them from rejoining, end a party, and read each member's playback session and client logs.
+- When a browser or Discord refuses to play a stream, the player now explains how to turn on hardware acceleration instead of showing a browser error.
 
 ## 0.1.8
 

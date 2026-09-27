@@ -342,11 +342,21 @@ export const api = {
     }),
   reportClientLogs: (body: { events: { name: string; t?: number; details?: Record<string, unknown> }[] }) =>
     request<{ ok: boolean; accepted?: number }>("/api/v1/client-logs", { method: "POST", body }),
-  listLogs: (q: { level?: string; category?: string; q?: string; limit?: number; after?: string } = {}) => {
+  adminWatchParties: async () =>
+    asArray<WatchPartyRoom>((await request<{ items: WatchPartyRoom[] }>("/api/v1/admin/watch-parties")).items),
+  kickWatchPartyMember: (roomId: string, memberId: string, ban: boolean) =>
+    request(`/api/v1/admin/watch-parties/${encodeURIComponent(roomId)}/members/${encodeURIComponent(memberId)}/kick`, {
+      method: "POST",
+      body: { ban },
+    }),
+  endWatchParty: (roomId: string) =>
+    request(`/api/v1/admin/watch-parties/${encodeURIComponent(roomId)}`, { method: "DELETE" }),
+  listLogs: (q: { level?: string; category?: string; q?: string; actor?: string; limit?: number; after?: string } = {}) => {
     const p = new URLSearchParams();
     if (q.level) p.set("level", q.level);
     if (q.category) p.set("category", q.category);
     if (q.q) p.set("q", q.q);
+    if (q.actor) p.set("actor", q.actor);
     if (q.limit) p.set("limit", String(q.limit));
     if (q.after) p.set("after", q.after);
     return request<{ items: LogRow[]; next?: string }>(`/api/v1/admin/logs?${p.toString()}`);
@@ -453,6 +463,35 @@ export type BackendNode = BackendNodeInput & {
   failures: number;
   last_failure_at: string;
   last_error: string;
+};
+
+export type WatchPartyMember = {
+  id: string;
+  kind: string;
+  display_name: string;
+  host: boolean;
+  owner: boolean;
+  connected: boolean;
+  ready: boolean;
+  buffering: boolean;
+  drift_ms: number;
+  last_seen: string;
+};
+
+export type WatchPartyRoom = {
+  id: string;
+  invite_code: string;
+  item_kind: string;
+  item_id: string;
+  title: string;
+  playing: boolean;
+  position_ms: number;
+  shared_control: boolean;
+  panel: "everyone" | "host" | "hidden";
+  banned: number;
+  members: WatchPartyMember[];
+  discord_channel_id?: string;
+  discord_guild_id?: string;
 };
 
 export type LogRow = {

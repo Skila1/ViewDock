@@ -5,6 +5,7 @@ import {
   Minimize,
   Pause,
   Play,
+  Radio,
   SkipBack,
   SkipForward,
   Volume2,
@@ -29,7 +30,9 @@ import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { shouldExitFullscreen } from "./fullscreenToggle";
 import { canSeekInWindow, generatedMediaEndSec, seekableBounds, vodMovieSeekable } from "./seekWindow";
+import { hardwareAccelerationHelp } from "./hardwareAcceleration";
 import { WatchTogetherOverlay } from "./watchTogether/WatchTogetherOverlay";
+import { panelVisible } from "./watchTogether/partySync";
 import { useWatchTogether } from "./watchTogether/useWatchTogether";
 
 type Props = {
@@ -297,8 +300,8 @@ export function Player({
               return;
             } catch (retryErr) {
               const detail = retryErr instanceof Error ? retryErr.message : "not supported";
-              telemetry.record("startup_failed", { code: "NOT_SUPPORTED" });
-              setErr(`This stream could not start (${detail}). Exit and try again.`);
+              telemetry.record("startup_failed", { code: "NOT_SUPPORTED", detail });
+              setErr(hardwareAccelerationHelp());
               bump("ERROR");
               return;
             }
@@ -795,6 +798,12 @@ export function Player({
     },
   });
   partyControlRef.current = togetherCode && wt.status === "synced" ? wt.control : null;
+  const [panelLocal, setPanelLocal] = useState<"open" | "closed" | null>(null);
+  useEffect(() => setPanelLocal(null), [wt.panel]);
+  const inParty = Boolean(togetherCode || wt.room);
+  const partyNotice = wt.status === "ended" && Boolean(wt.error);
+  const panelOpen = inParty && (partyNotice || panelVisible(wt.panel, wt.isHost, panelLocal));
+  const canTogglePanel = inParty && (wt.isHost || wt.panel === "everyone");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -858,7 +867,7 @@ export function Player({
         <PlaybackDiagnostics video={videoRef.current} session={session} engine={engine} originMs={originRef.current} />
       ) : null}
 
-      {togetherCode || wt.room ? (
+      {panelOpen ? (
         <WatchTogetherOverlay
           code={togetherCode || wt.room?.code}
           title={wt.invite?.title || title}
@@ -870,6 +879,9 @@ export function Player({
           isHost={wt.isHost}
           sharedControl={wt.sharedControl}
           onSharedControl={wt.setSharedControl}
+          panel={wt.panel}
+          onPanel={wt.setPanel}
+          onClose={canTogglePanel ? () => setPanelLocal("closed") : undefined}
           error={wt.error}
           guest={Boolean(shareToken)}
           invitePath={wt.sharePath}
@@ -893,6 +905,21 @@ export function Player({
               }}
             >
               <X size={20} />
+            </button>
+          ) : null}
+          {canTogglePanel ? (
+            <button
+              type="button"
+              className={cn("pointer-events-auto tap absolute z-10 rounded-full bg-black/50 p-2", panelOpen ? "text-accent" : "text-white")}
+              style={{ top: "max(0.5rem, calc(var(--sat) + 0.15rem))", right: onClose ? "3.75rem" : "0.75rem" }}
+              aria-label={panelOpen ? "Hide Watch Together panel" : "Show Watch Together panel"}
+              aria-pressed={panelOpen}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPanelLocal(panelOpen ? "closed" : "open");
+              }}
+            >
+              <Radio size={20} />
             </button>
           ) : null}
           <div
@@ -1027,6 +1054,17 @@ export function Player({
             />
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {canTogglePanel ? (
+              <button
+                type="button"
+                className={cn("tap", panelOpen ? "text-accent" : "text-white")}
+                aria-label={panelOpen ? "Hide Watch Together panel" : "Show Watch Together panel"}
+                aria-pressed={panelOpen}
+                onClick={() => setPanelLocal(panelOpen ? "closed" : "open")}
+              >
+                <Radio size={18} />
+              </button>
+            ) : null}
             {session?.next_episode ? (
               <button
                 type="button"

@@ -563,6 +563,11 @@ export interface StreamRow {
   quality?: string;
   started_at?: string;
   client_ip?: string;
+  user_id?: string;
+  guest?: boolean;
+  mode?: string;
+  playback?: string;
+  reasons?: string[];
 }
 
 export interface InspectorSource {

@@ -23,6 +23,9 @@ Cookie CSRF is not required when a `vd_` key is used.
 | GET | `/healthz` | none |
 | GET | `/api/v1/admin/logs?level=error&category=playback&limit=100` | `admin` or `logs.read` |
 | GET | `/api/v1/admin/api-keys` | `admin` |
+| GET | `/api/v1/admin/watch-parties` | `admin` or `users.manage` |
+| POST | `/api/v1/admin/watch-parties/{id}/members/{member}/kick` | `admin` or `users.manage` |
+| DELETE | `/api/v1/admin/watch-parties/{id}` | `admin` or `users.manage` |
 | GET | `/api/v1/admin/streams` | `admin` or `streams.inspect` |
 | GET | `/api/v1/admin/stats` | `admin` or `streams.inspect` |
 | GET | `/readyz` | none |
@@ -123,6 +126,10 @@ The coordinator keeps an authoritative timeline anchored to the server clock. Ev
 - beyond the hard threshold: `seek` to `target_ms`, at most once every 3 seconds per member.
 
 Buffering, paused, disconnected, unready and silent (no report for 3 s) members are neither corrected nor counted. When at least three counted members are present and two thirds of them agree with each other but are more than 250 ms off the timeline in the same direction for 3 seconds, the timeline moves to their median and a `state` with `reason: "majority"` is broadcast; the rest are then corrected individually. Host `play`, `pause` and `seek` messages (also allowed for everyone when the host sends `{"type":"settings","shared_control":true}`) take effect immediately and suspend majority alignment for 5 seconds. Other members' control messages are answered with the unchanged state. `presence` messages every 2 seconds list members with `drift_ms`, `buffering`, `eligible` and `connected`, plus `sync` counters (`reports`, `rate_corrections`, `seeks`, `realigns`). Chat messages are trimmed to 500 characters and the last 100 are kept. Rooms, queues, members and the last timeline are stored in the database and restored after a restart; rooms empty for two hours are deleted.
+
+The host picks who sees the party panel with `{"type":"settings","panel":"everyone"|"host"|"hidden"}`; `state` messages carry `panel`. Anyone the panel is shown to can close it for themselves, and the host can always reopen it from the player controls.
+
+`GET /api/v1/admin/watch-parties` (`admin` or `users.manage`) lists every room, including Discord Activity rooms (`discord_channel_id`), with `title`, `panel`, `shared_control`, the number of `banned` members and each member's `id`, `kind`, `display_name`, `host`, `owner`, `connected`, `ready`, `buffering`, `drift_ms` and `last_seen`. `POST .../{id}/members/{member}/kick` with `{"ban":false}` removes a member (they may rejoin); with `{"ban":true}` they cannot rejoin that room. `DELETE .../{id}` ends the room for everyone. Removed clients receive `{"type":"kicked","code":"removed_by_admin"}` or `"party_ended"` and stop reconnecting. All three actions are audited. `GET /api/v1/admin/logs?actor={user id}` narrows the operational log to one user's client logs.
 
 ### Discord Activity
 

@@ -30,6 +30,7 @@ type Filter struct {
 	Level    string
 	Category string
 	Q        string
+	Actor    string
 	Limit    int
 	After    string
 }
@@ -118,6 +119,10 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Entry, error) {
 		q += ` AND (message LIKE ? OR category LIKE ?)`
 		like := "%" + f.Q + "%"
 		args = append(args, like, like)
+	}
+	if f.Actor != "" {
+		q += ` AND actor_id = ?`
+		args = append(args, f.Actor)
 	}
 	if f.After != "" {
 		q += ` AND created_at < ?`

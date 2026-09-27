@@ -8,6 +8,7 @@ import {
   reconnectDelay,
   type PartyCorrection,
   type PartyMember,
+  type PartyPanel,
   type PartyState,
   type PartySyncInfo,
 } from "./partySync";
@@ -40,6 +41,12 @@ type Options = {
   onCorrection?: (c: PartyCorrection) => void;
 };
 
+const KICK_MESSAGES: Record<string, string> = {
+  share_revoked: "The share link for this party was revoked.",
+  removed_by_admin: "An administrator removed you from this party.",
+  party_ended: "An administrator ended this party.",
+};
+
 const REPORT_MS = 1000;
 const PING_MS = 15_000;
 const FAST_PINGS = 5;
@@ -57,6 +64,7 @@ export function useWatchTogether(opts: Options) {
   const [hostId, setHostId] = useState("");
   const [memberId, setMemberId] = useState("");
   const [sharedControl, setSharedControl] = useState(false);
+  const [panel, setPanelState] = useState<PartyPanel>("everyone");
   const [syncInfo, setSyncInfo] = useState<PartySyncInfo | null>(null);
   const [sync, setSync] = useState<WTSync>({ playing: false, positionMs: 0 });
   const [status, setStatus] = useState<PartyStatus>("idle");
@@ -117,6 +125,7 @@ export function useWatchTogether(opts: Options) {
       setMembers(msg.members ?? []);
       setHostId(msg.host ?? "");
       setSharedControl(Boolean(msg.shared_control));
+      setPanelState(msg.panel ?? "everyone");
       if (msg.sync) setSyncInfo(msg.sync);
       const positionMs = projectTimeline(msg.position_ms ?? 0, msg.server_ms ?? 0, Boolean(msg.playing), clock.serverNow());
       const next = { playing: Boolean(msg.playing), positionMs };
@@ -201,7 +210,7 @@ export function useWatchTogether(opts: Options) {
             case "kicked":
               disposed = true;
               setStatus("ended");
-              setError(msg.code === "share_revoked" ? "The share link for this party was revoked." : "You are no longer in this party.");
+              setError(KICK_MESSAGES[String(msg.code)] ?? "You are no longer in this party.");
               break;
           }
         };
@@ -244,6 +253,7 @@ export function useWatchTogether(opts: Options) {
   );
 
   const setShared = useCallback((on: boolean) => send({ type: "settings", shared_control: on }), [send]);
+  const setPanel = useCallback((next: PartyPanel) => send({ type: "settings", panel: next }), [send]);
 
   const isHost = Boolean(memberId) && memberId === hostId;
   const peers: WTPeer[] = members.map((m) => ({ id: m.id, name: m.display_name, host: m.host }));
@@ -267,6 +277,8 @@ export function useWatchTogether(opts: Options) {
     send,
     control,
     setSharedControl: setShared,
+    panel,
+    setPanel,
     sharePath: opts.shareToken
       ? `/s/${opts.shareToken}/together/${opts.code ?? room?.code ?? ""}`
       : `/together/${opts.code ?? room?.code ?? ""}`,

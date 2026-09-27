@@ -72,11 +72,15 @@ type Room struct {
 	IntermissionUntil time.Time
 	Votes             map[string]map[string]bool
 	SharedControl     bool
-	EmptySince        time.Time
-	Stats             SyncStats
-	hostActionAt      time.Time
-	majDir            int
-	majSince          time.Time
+	// Panel is who sees the party panel: PanelEveryone, PanelHost or PanelHidden.
+	Panel string
+	// Banned lists principals an administrator removed; they cannot rejoin.
+	Banned       map[string]bool
+	EmptySince   time.Time
+	Stats        SyncStats
+	hostActionAt time.Time
+	majDir       int
+	majSince     time.Time
 }
 
 type ChatMsg struct {
@@ -296,7 +300,7 @@ func (h *Hub) ReclaimOwner(ctx context.Context, p *auth.Principal, roomID string
 	}
 	h.mu.Lock()
 	room := h.rooms[roomID]
-	owner := room != nil && room.OwnerID != "" && room.OwnerID == p.ID()
+	owner := room != nil && room.OwnerID != "" && room.OwnerID == p.ID() && !room.Banned[p.ID()]
 	var kind, id string
 	if owner {
 		kind, id = room.ItemKind, room.ItemID
@@ -320,8 +324,9 @@ func (h *Hub) Join(ctx context.Context, p *auth.Principal, code string) (*Room, 
 	h.mu.Lock()
 	id := h.invites[code]
 	room := h.rooms[id]
+	banned := room != nil && p != nil && room.Banned[p.ID()]
 	h.mu.Unlock()
-	if room == nil {
+	if room == nil || banned {
 		return nil, errDenied
 	}
 	// For party-only accounts the invite code is the capability.
@@ -352,8 +357,9 @@ func (h *Hub) Room(id string) *Room {
 func (h *Hub) MintTicket(p *auth.Principal, roomID string) (string, error) {
 	h.mu.Lock()
 	room := h.rooms[roomID]
+	banned := room != nil && p != nil && room.Banned[p.ID()]
 	h.mu.Unlock()
-	if room == nil {
+	if room == nil || banned {
 		return "", errDenied
 	}
 	if err := h.authorize(context.Background(), p, room.ItemKind, room.ItemID); err != nil {
@@ -391,7 +397,7 @@ func (h *Hub) stateLocked(room *Room, now time.Time) map[string]any {
 		"members": h.membersLocked(room, now), "item_kind": room.ItemKind, "item_id": room.ItemID,
 		"queue": room.Queue, "intermission_until": room.IntermissionUntil,
 		"votes": voteCounts(room.Votes), "shared_control": room.SharedControl,
-		"sync": h.syncInfoLocked(room, now),
+		"panel": normalPanel(room.Panel), "sync": h.syncInfoLocked(room, now),
 	}
 }
 

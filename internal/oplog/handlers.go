@@ -24,6 +24,7 @@ func (s *Store) handleList(w http.ResponseWriter, r *http.Request) {
 		Level:    q.Get("level"),
 		Category: q.Get("category"),
 		Q:        q.Get("q"),
+		Actor:    q.Get("actor"),
 		Limit:    limit,
 		After:    q.Get("after"),
 	})

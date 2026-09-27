@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/viewdock/viewdock/internal/db"
@@ -16,7 +17,7 @@ func (h *Hub) restore(ctx context.Context) {
 	if h.DB == nil {
 		return
 	}
-	rows, err := h.queryContext(ctx, `SELECT id, invite_code, item_kind, item_id, share_path, host_id, owner_id, playing, position_ms, clock, sequence, queue_json, intermission_until, shared_control FROM watch_rooms`)
+	rows, err := h.queryContext(ctx, `SELECT id, invite_code, item_kind, item_id, share_path, host_id, owner_id, playing, position_ms, clock, sequence, queue_json, intermission_until, shared_control, panel, banned_json FROM watch_rooms`)
 	if err != nil {
 		slog.Warn("watch party restore", "err", err)
 		return
@@ -26,8 +27,8 @@ func (h *Hub) restore(ctx context.Context) {
 		room := &Room{}
 		var playing, shared int
 		var clock string
-		var queueJSON, intermission string
-		if err := rows.Scan(&room.ID, &room.InviteCode, &room.ItemKind, &room.ItemID, &room.SharePath, &room.HostID, &room.OwnerID, &playing, &room.PositionMS, &clock, &room.Seq, &queueJSON, &intermission, &shared); err != nil {
+		var queueJSON, intermission, bannedJSON string
+		if err := rows.Scan(&room.ID, &room.InviteCode, &room.ItemKind, &room.ItemID, &room.SharePath, &room.HostID, &room.OwnerID, &playing, &room.PositionMS, &clock, &room.Seq, &queueJSON, &intermission, &shared, &room.Panel, &bannedJSON); err != nil {
 			slog.Warn("watch party restore row", "err", err)
 			continue
 		}
@@ -42,6 +43,15 @@ func (h *Hub) restore(ctx context.Context) {
 		}
 		room.Members = map[string]*Member{}
 		room.Votes = map[string]map[string]bool{}
+		room.Panel = normalPanel(room.Panel)
+		var banned []string
+		_ = json.Unmarshal([]byte(bannedJSON), &banned)
+		for _, id := range banned {
+			if room.Banned == nil {
+				room.Banned = map[string]bool{}
+			}
+			room.Banned[id] = true
+		}
 		_ = json.Unmarshal([]byte(queueJSON), &room.Queue)
 		room.IntermissionUntil, _ = time.Parse(time.RFC3339Nano, intermission)
 		rooms = append(rooms, room)
@@ -79,21 +89,28 @@ type memberRow struct {
 // roomSnapshot is a copy of the durable room fields so the database write can
 // happen without holding the hub lock.
 type roomSnapshot struct {
-	ID, InviteCode, ItemKind, ItemID, SharePath, HostID, OwnerID string
-	Playing, SharedControl                                       bool
-	PositionMS, Seq                                              int64
-	Clock, IntermissionUntil                                     time.Time
-	Queue                                                        []QueueItem
-	Members                                                      []memberRow
+	ID, InviteCode, ItemKind, ItemID, SharePath, HostID, OwnerID, Panel string
+	Playing, SharedControl                                              bool
+	PositionMS, Seq                                                     int64
+	Clock, IntermissionUntil                                            time.Time
+	Queue                                                               []QueueItem
+	Banned                                                              []string
+	Members                                                             []memberRow
 }
 
 func snapshotLocked(room *Room) *roomSnapshot {
 	s := &roomSnapshot{
 		ID: room.ID, InviteCode: room.InviteCode, ItemKind: room.ItemKind, ItemID: room.ItemID,
 		SharePath: room.SharePath, HostID: room.HostID, OwnerID: room.OwnerID, Playing: room.Playing, SharedControl: room.SharedControl,
+		Panel:      normalPanel(room.Panel),
 		PositionMS: room.PositionMS, Seq: room.Seq, Clock: room.Clock, IntermissionUntil: room.IntermissionUntil,
-		Queue: append([]QueueItem(nil), room.Queue...),
+		Queue:  append([]QueueItem(nil), room.Queue...),
+		Banned: []string{},
 	}
+	for id := range room.Banned {
+		s.Banned = append(s.Banned, id)
+	}
+	sort.Strings(s.Banned)
 	for _, m := range room.Members {
 		s.Members = append(s.Members, memberRow{m.ID, m.Kind, m.DisplayName, m.GuestSessionID, m.Ready, m.LastSeen})
 	}
@@ -130,17 +147,18 @@ func (h *Hub) saveTx(ctx context.Context, s *roomSnapshot) error {
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	queueJSON, _ := json.Marshal(s.Queue)
+	bannedJSON, _ := json.Marshal(s.Banned)
 	if _, err := tx.ExecContext(ctx, h.query(`
-		INSERT INTO watch_rooms(id, invite_code, item_kind, item_id, share_path, host_id, owner_id, playing, position_ms, clock, sequence, created_at, updated_at, queue_json, intermission_until, shared_control)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO watch_rooms(id, invite_code, item_kind, item_id, share_path, host_id, owner_id, playing, position_ms, clock, sequence, created_at, updated_at, queue_json, intermission_until, shared_control, panel, banned_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET invite_code = excluded.invite_code, share_path = excluded.share_path,
 			host_id = excluded.host_id, owner_id = excluded.owner_id, playing = excluded.playing, position_ms = excluded.position_ms,
 			clock = excluded.clock, sequence = excluded.sequence, updated_at = excluded.updated_at,
 			queue_json = excluded.queue_json, intermission_until = excluded.intermission_until,
-			shared_control = excluded.shared_control
+			shared_control = excluded.shared_control, panel = excluded.panel, banned_json = excluded.banned_json
 	`), s.ID, s.InviteCode, s.ItemKind, s.ItemID, s.SharePath, s.HostID, s.OwnerID, boolInt(s.Playing), s.PositionMS,
 		s.Clock.UTC().Format(time.RFC3339Nano), s.Seq, now, now, string(queueJSON),
-		s.IntermissionUntil.UTC().Format(time.RFC3339Nano), boolInt(s.SharedControl)); err != nil {
+		s.IntermissionUntil.UTC().Format(time.RFC3339Nano), boolInt(s.SharedControl), s.Panel, string(bannedJSON)); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, h.query(`DELETE FROM watch_room_members WHERE room_id = ?`), s.ID); err != nil {

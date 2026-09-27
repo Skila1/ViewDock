@@ -32,6 +32,10 @@ type Coordinator interface {
 	State(roomID string) map[string]any
 	Rooms() []RoomSummary
 	SyncSnapshot() map[string]any
+	// AdminRooms returns nil when the rooms cannot be listed.
+	AdminRooms() []AdminRoom
+	Kick(roomID, memberID string, ban bool) error
+	EndRoom(roomID string) error
 }
 
 var _ Coordinator = (*Hub)(nil)
@@ -53,6 +57,7 @@ type coordRequest struct {
 	ItemKind    string          `json:"item_kind,omitempty"`
 	ItemID      string          `json:"item_id,omitempty"`
 	Action      string          `json:"action,omitempty"`
+	Ban         bool            `json:"ban,omitempty"`
 }
 
 type roomRef struct {
@@ -108,6 +113,9 @@ func (h *Hub) InternalRoutes(r chi.Router) {
 	r.Post("/rooms/{id}/control", h.handleInternalControl)
 	r.Get("/invites/{code}", h.handleInternalInvite)
 	r.Get("/snapshot", h.handleInternalSnapshot)
+	r.Get("/admin-rooms", h.handleInternalAdminRooms)
+	r.Post("/rooms/{id}/kick", h.handleInternalKick)
+	r.Delete("/rooms/{id}", h.handleInternalEnd)
 }
 
 func decodeCoord(w http.ResponseWriter, r *http.Request) (coordRequest, bool) {

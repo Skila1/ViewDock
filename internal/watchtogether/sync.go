@@ -50,15 +50,16 @@ type SyncStats struct {
 }
 
 type clientMsg struct {
-	Type          string `json:"type"`
-	PositionMS    int64  `json:"position_ms"`
-	Text          string `json:"text"`
-	Emoji         string `json:"emoji"`
-	T0            int64  `json:"t0"`
-	AtServerMS    int64  `json:"at_server_ms"`
-	Playing       *bool  `json:"playing"`
-	Buffering     bool   `json:"buffering"`
-	SharedControl *bool  `json:"shared_control"`
+	Type          string  `json:"type"`
+	PositionMS    int64   `json:"position_ms"`
+	Text          string  `json:"text"`
+	Emoji         string  `json:"emoji"`
+	T0            int64   `json:"t0"`
+	AtServerMS    int64   `json:"at_server_ms"`
+	Playing       *bool   `json:"playing"`
+	Buffering     bool    `json:"buffering"`
+	SharedControl *bool   `json:"shared_control"`
+	Panel         *string `json:"panel"`
 }
 
 type outbound struct {
@@ -154,11 +155,17 @@ func (h *Hub) handle(roomID, principalID string, msg clientMsg, now time.Time) (
 		st["by"] = m.DisplayName
 		out.all = st
 	case "settings":
-		if principalID != room.HostID || msg.SharedControl == nil {
+		validPanel := msg.Panel != nil && validPanels[*msg.Panel]
+		if principalID != room.HostID || (msg.SharedControl == nil && !validPanel) {
 			out.reply = h.stateLocked(room, now)
 			break
 		}
-		room.SharedControl = *msg.SharedControl
+		if msg.SharedControl != nil {
+			room.SharedControl = *msg.SharedControl
+		}
+		if validPanel {
+			room.Panel = *msg.Panel
+		}
 		room.Seq++
 		snap = snapshotLocked(room)
 		out.all = h.stateLocked(room, now)

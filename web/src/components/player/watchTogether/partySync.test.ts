@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { ClockSync, clampRate, parseCorrection, projectTimeline, reconnectDelay } from "./partySync";
+import { ClockSync, clampRate, panelVisible, parseCorrection, projectTimeline, reconnectDelay } from "./partySync";
+
+describe("panelVisible", () => {
+  it("follows the host's setting by default", () => {
+    expect(panelVisible("everyone", false, null)).toBe(true);
+    expect(panelVisible("host", false, null)).toBe(false);
+    expect(panelVisible("host", true, null)).toBe(true);
+    expect(panelVisible("hidden", true, null)).toBe(false);
+  });
+  it("lets viewers close it and only the host reopen a hidden panel", () => {
+    expect(panelVisible("everyone", false, "closed")).toBe(false);
+    expect(panelVisible("hidden", true, "open")).toBe(true);
+    expect(panelVisible("hidden", false, "open")).toBe(false);
+    expect(panelVisible("host", false, "open")).toBe(false);
+  });
+});
 
 describe("ClockSync", () => {
   it("uses the lowest round trip sample", () => {
