@@ -26,6 +26,21 @@ type client struct {
 	device string
 	token  string
 	http   *http.Client
+	// apiKey marks a token that is a Jellyfin API key; it is never logged out.
+	apiKey  bool
+	policy  Policy
+	blocked func(op)
+}
+
+// allow enforces the source policy before any request is sent.
+func (c *client) allow(o op) error {
+	if c.policy.allows(o) {
+		return nil
+	}
+	if c.blocked != nil {
+		c.blocked(o)
+	}
+	return fmt.Errorf("%w: %s", errBlocked, o)
 }
 
 // ParseServerURL validates an admin-supplied Jellyfin base URL. A path is
@@ -74,7 +89,10 @@ func (c *client) request(ctx context.Context, method, path string, q url.Values,
 	return req, nil
 }
 
-func (c *client) call(ctx context.Context, method, path string, q url.Values, body, out any) error {
+func (c *client) call(ctx context.Context, o op, method, path string, q url.Values, body, out any) error {
+	if err := c.allow(o); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	req, err := c.request(ctx, method, path, q, body)
@@ -111,32 +129,90 @@ type serverInfo struct {
 
 func (c *client) publicInfo(ctx context.Context) (serverInfo, error) {
 	var info serverInfo
-	err := c.call(ctx, http.MethodGet, "/System/Info/Public", nil, nil, &info)
+	err := c.call(ctx, opInfo, http.MethodGet, "/System/Info/Public", nil, nil, &info)
 	return info, err
 }
 
 // authenticate exchanges the account credentials for an access token.
-func (c *client) authenticate(ctx context.Context, username, password string) (token, userID string, err error) {
+func (c *client) authenticate(ctx context.Context, username, password string) (string, RemoteUser, error) {
 	var out struct {
 		AccessToken string `json:"AccessToken"`
 		User        struct {
-			ID string `json:"Id"`
+			ID     string `json:"Id"`
+			Name   string `json:"Name"`
+			Policy struct {
+				IsAdministrator bool `json:"IsAdministrator"`
+			} `json:"Policy"`
 		} `json:"User"`
 	}
 	c.token = ""
-	if err := c.call(ctx, http.MethodPost, "/Users/AuthenticateByName", nil,
+	if err := c.call(ctx, opAuth, http.MethodPost, "/Users/AuthenticateByName", nil,
 		map[string]string{"Username": username, "Pw": password}, &out); err != nil {
-		return "", "", err
+		return "", RemoteUser{}, err
 	}
 	if out.AccessToken == "" || out.User.ID == "" {
-		return "", "", errUnauthorized
+		return "", RemoteUser{}, errUnauthorized
 	}
 	c.token = out.AccessToken
-	return out.AccessToken, out.User.ID, nil
+	return out.AccessToken, RemoteUser{ID: out.User.ID, Name: out.User.Name, Admin: out.User.Policy.IsAdministrator}, nil
 }
 
+// logout ends a session token created by authenticate. API keys are never
+// logged out because that would revoke them.
 func (c *client) logout(ctx context.Context) {
-	_ = c.call(ctx, http.MethodPost, "/Sessions/Logout", nil, nil, nil)
+	if c.apiKey || c.token == "" {
+		return
+	}
+	_ = c.call(ctx, opAuth, http.MethodPost, "/Sessions/Logout", nil, nil, nil)
+}
+
+// RemoteUser is a Jellyfin user; API keys browse as one of them.
+type RemoteUser struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Admin bool   `json:"is_admin"`
+}
+
+func (c *client) users(ctx context.Context) ([]RemoteUser, error) {
+	var out []struct {
+		ID     string `json:"Id"`
+		Name   string `json:"Name"`
+		Policy struct {
+			IsAdministrator bool `json:"IsAdministrator"`
+		} `json:"Policy"`
+	}
+	if err := c.call(ctx, opUsers, http.MethodGet, "/Users", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	users := make([]RemoteUser, 0, len(out))
+	for _, u := range out {
+		users = append(users, RemoteUser{ID: u.ID, Name: u.Name, Admin: u.Policy.IsAdministrator})
+	}
+	return users, nil
+}
+
+// activity reads recent activity log entries for one Jellyfin user.
+func (c *client) activity(ctx context.Context, userID string, since time.Time) ([]ActivityEntry, error) {
+	var out struct {
+		Items []struct {
+			Date     string `json:"Date"`
+			Type     string `json:"Type"`
+			Name     string `json:"Name"`
+			Severity string `json:"Severity"`
+			UserID   string `json:"UserId"`
+		} `json:"Items"`
+	}
+	q := url.Values{"startIndex": {"0"}, "limit": {"500"}, "minDate": {since.UTC().Format(time.RFC3339)}}
+	if err := c.call(ctx, opActivity, http.MethodGet, "/System/ActivityLog/Entries", q, nil, &out); err != nil {
+		return nil, err
+	}
+	entries := []ActivityEntry{}
+	for _, it := range out.Items {
+		if sameID(it.UserID, userID) {
+			entries = append(entries, ActivityEntry{Date: it.Date, Type: it.Type, Name: it.Name, Severity: it.Severity})
+		}
+	}
+	return entries, nil
 }
 
 // View is a top-level Jellyfin library visible to the account.
@@ -154,7 +230,7 @@ func (c *client) views(ctx context.Context, userID string) ([]View, error) {
 			CollectionType string `json:"CollectionType"`
 		} `json:"Items"`
 	}
-	if err := c.call(ctx, http.MethodGet, "/Users/"+url.PathEscape(userID)+"/Views", nil, nil, &out); err != nil {
+	if err := c.call(ctx, opCatalog, http.MethodGet, "/Users/"+url.PathEscape(userID)+"/Views", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	views := []View{}
@@ -211,7 +287,7 @@ func (c *client) items(ctx context.Context, userID, parentID, types string) ([]i
 			Items []item `json:"Items"`
 			Total int    `json:"TotalRecordCount"`
 		}
-		if err := c.call(ctx, http.MethodGet, "/Items", q, nil, &out); err != nil {
+		if err := c.call(ctx, opCatalog, http.MethodGet, "/Items", q, nil, &out); err != nil {
 			return nil, err
 		}
 		all = append(all, out.Items...)
@@ -228,7 +304,7 @@ func (c *client) playable(ctx context.Context, userID, remoteID string) (item, e
 		Items []item `json:"Items"`
 	}
 	q := url.Values{"userId": {userID}, "Ids": {remoteID}, "Fields": {"MediaSources"}}
-	if err := c.call(ctx, http.MethodGet, "/Items", q, nil, &out); err != nil {
+	if err := c.call(ctx, opCatalog, http.MethodGet, "/Items", q, nil, &out); err != nil {
 		return item{}, err
 	}
 	if len(out.Items) == 0 || out.Items[0].ID == "" {
@@ -239,6 +315,9 @@ func (c *client) playable(ctx context.Context, userID, remoteID string) (item, e
 
 // image downloads an item's primary image.
 func (c *client) image(ctx context.Context, remoteID, tag string) ([]byte, string, error) {
+	if err := c.allow(opImages); err != nil {
+		return nil, "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	q := url.Values{"maxHeight": {"900"}, "quality": {"90"}}
@@ -266,5 +345,5 @@ func (c *client) image(ctx context.Context, remoteID, tag string) ([]byte, strin
 // that share one.
 func (c *client) stopEncoding(ctx context.Context, deviceID, playSessionID string) {
 	q := url.Values{"deviceId": {deviceID}, "playSessionId": {playSessionID}}
-	_ = c.call(ctx, http.MethodDelete, "/Videos/ActiveEncodings", q, nil, nil)
+	_ = c.call(ctx, opTranscode, http.MethodDelete, "/Videos/ActiveEncodings", q, nil, nil)
 }

@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,17 +17,49 @@ import (
 	"github.com/viewdock/viewdock/internal/secrets"
 )
 
+type fakeCalls struct {
+	images, logouts, transcodes int
+}
+
 func fakeJellyfin(t *testing.T) *httptest.Server {
+	srv, _ := fakeJellyfinCalls(t)
+	return srv
+}
+
+func fakeJellyfinCalls(t *testing.T) (*httptest.Server, *fakeCalls) {
 	t.Helper()
-	authed := func(r *http.Request) bool { return strings.Contains(r.Header.Get("Authorization"), `Token="tok"`) }
+	calls := &fakeCalls{}
+	authed := func(r *http.Request) bool {
+		h := r.Header.Get("Authorization")
+		return strings.Contains(h, `Token="tok"`) || strings.Contains(h, `Token="key1"`)
+	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/Users", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) {
+			w.WriteHeader(401)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"Id":"u1","Name":"viewdock","Policy":{"IsAdministrator":false}},{"Id":"u2","Name":"owner","Policy":{"IsAdministrator":true}}]`))
+	})
+	mux.HandleFunc("/System/ActivityLog/Entries", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) {
+			w.WriteHeader(401)
+			return
+		}
+		_, _ = w.Write([]byte(`{"Items":[
+			{"Date":"2026-09-27T10:00:00Z","Type":"VideoPlayback","Name":"viewdock is playing Dune","Severity":"Information","UserId":"u1","ShortOverview":"IP address: 10.0.0.9"},
+			{"Date":"2026-09-27T10:01:00Z","Type":"SessionStarted","Name":"owner signed in","Severity":"Information","UserId":"u2"}]}`))
+	})
 	mux.HandleFunc("/System/Info/Public", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ServerName":"Home","Version":"10.10.0"}`))
 	})
 	mux.HandleFunc("/Users/AuthenticateByName", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"AccessToken":"tok","User":{"Id":"u1"}}`))
 	})
-	mux.HandleFunc("/Sessions/Logout", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	mux.HandleFunc("/Sessions/Logout", func(w http.ResponseWriter, r *http.Request) {
+		calls.logouts++
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("/Users/u1/Views", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(r) {
 			w.WriteHeader(401)
@@ -51,6 +84,7 @@ func fakeJellyfin(t *testing.T) *httptest.Server {
 			{"Id":"e1","Name":"Pilot","Type":"Episode","SeriesId":"s1","ParentIndexNumber":1,"IndexNumber":1}]}`))
 	})
 	mux.HandleFunc("/Items/m2/Images/Primary", func(w http.ResponseWriter, r *http.Request) {
+		calls.images++
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("png"))
 	})
@@ -59,12 +93,96 @@ func fakeJellyfin(t *testing.T) *httptest.Server {
 			w.WriteHeader(401)
 			return
 		}
+		calls.transcodes++
 		_, _ = w.Write([]byte("#EXTM3U\nmain.m3u8\n"))
 	})
 	mux.HandleFunc("/Videos/ActiveEncodings", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, calls
+}
+
+func testDB(t *testing.T) *sql.DB {
+	t.Helper()
+	path := t.TempDir() + "/viewdock.db"
+	if err := db.Migrate(path); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.Open(path, 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	return sqlDB
+}
+
+func waitSynced(t *testing.T, svc *Service) Source {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		list, _ := svc.list(context.Background())
+		if len(list) == 1 && list[0].Status != "pending" && list[0].Status != "syncing" && !list[0].Syncing {
+			return list[0]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sync did not finish: %+v", list)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestAPIKeySourceHonoursUsageRestrictions(t *testing.T) {
+	sqlDB := testDB(t)
+	ctx := context.Background()
+	cipher, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jf, calls := fakeJellyfinCalls(t)
+	svc := New(sqlDB, func() *secrets.Cipher { return cipher }, t.TempDir(), nil)
+
+	rec := httptest.NewRecorder()
+	svc.handleTest(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"url":"`+jf.URL+`","auth_mode":"api_key","api_key":"key1"}`)))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"viewdock"`) || strings.Contains(rec.Body.String(), "key1") {
+		t.Fatalf("api key test: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	body := `{"url":"` + jf.URL + `","auth_mode":"api_key","api_key":"key1","remote_user_id":"u1",
+		"policy":{"images":false,"stream":true,"transcode":false,"activity_log":true,"max_streams":1}}`
+	svc.handleCreate(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), "key1") {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	src := waitSynced(t, svc)
+	if src.Status != "ok" || src.AuthMode != AuthAPIKey || src.RemoteName != "viewdock" || src.Policy.Images {
+		t.Fatalf("source: %+v", src)
+	}
+	if calls.images != 0 || calls.logouts != 0 {
+		t.Fatalf("restricted or revoking calls were sent: %+v", calls)
+	}
+
+	var remoteDune string
+	_ = sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune)
+	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", false); err == nil || calls.transcodes != 0 {
+		t.Fatalf("a file needing transcoding streamed with transcoding off: %v %+v", err, calls)
+	}
+
+	r := chi.NewRouter()
+	r.Get("/activity/{id}", svc.handleActivity)
+	r.Get("/events/{id}", svc.handleEvents)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/activity/"+src.ID, nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "viewdock is playing") ||
+		strings.Contains(rec.Body.String(), "owner signed in") || strings.Contains(rec.Body.String(), "10.0.0.9") {
+		t.Fatalf("activity: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/events/"+src.ID, nil))
+	log := rec.Body.String()
+	if !strings.Contains(log, "transcoding, which is not allowed") || !strings.Contains(log, `"kind":"sync"`) || strings.Contains(log, "key1") {
+		t.Fatalf("usage log: %s", log)
+	}
 }
 
 func TestSourceSyncMergeAndStream(t *testing.T) {

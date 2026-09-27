@@ -31,6 +31,10 @@ type Source struct {
 	Name       string   `json:"name"`
 	URL        string   `json:"url"`
 	Username   string   `json:"username"`
+	AuthMode   string   `json:"auth_mode"`
+	RemoteUser string   `json:"remote_user_id"`
+	RemoteName string   `json:"remote_user_name"`
+	Policy     Policy   `json:"policy"`
 	Views      []string `json:"libraries"`
 	Enabled    bool     `json:"enabled"`
 	Status     string   `json:"status"`
@@ -40,9 +44,13 @@ type Source struct {
 	Syncing    bool     `json:"syncing"`
 	CreatedAt  string   `json:"created_at"`
 	UpdatedAt  string   `json:"updated_at"`
-
-	remoteUser string
 }
+
+// Auth modes for a source's credential.
+const (
+	AuthPassword = "password"
+	AuthAPIKey   = "api_key"
+)
 
 // Service owns media sources, their sync and stream grants.
 type Service struct {
@@ -72,14 +80,16 @@ func New(db *sql.DB, cipher func() *secrets.Cipher, cacheDir string, log *slog.L
 	}
 }
 
-const sourceCols = `id, library_id, name, url, username, remote_user, views, enabled, status, last_error, last_sync_at, item_count, created_at, updated_at`
+const sourceCols = `id, library_id, name, url, username, auth_mode, remote_user, remote_user_name, policy, views, enabled,
+	status, last_error, last_sync_at, item_count, created_at, updated_at`
 
 func (s *Service) scan(row interface{ Scan(...any) error }) (Source, error) {
 	var src Source
-	var views string
+	var views, policy string
 	var enabled int
-	err := row.Scan(&src.ID, &src.LibraryID, &src.Name, &src.URL, &src.Username, &src.remoteUser, &views, &enabled,
-		&src.Status, &src.LastError, &src.LastSyncAt, &src.ItemCount, &src.CreatedAt, &src.UpdatedAt)
+	err := row.Scan(&src.ID, &src.LibraryID, &src.Name, &src.URL, &src.Username, &src.AuthMode, &src.RemoteUser, &src.RemoteName,
+		&policy, &views, &enabled, &src.Status, &src.LastError, &src.LastSyncAt, &src.ItemCount, &src.CreatedAt, &src.UpdatedAt)
+	src.Policy = parsePolicy(policy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Source{}, errNotExist
 	}
@@ -153,66 +163,81 @@ func (s *Service) open(ctx context.Context, kind, id string) (string, error) {
 	return c.Decrypt(secretName(kind, id), enc)
 }
 
-func (s *Service) newClient(base, sourceID string) *client {
-	return &client{base: base, device: "viewdock-" + sourceID, http: s.HTTP}
+// newClient builds an unauthenticated client limited by policy.
+func (s *Service) newClient(base, sourceID string, policy Policy) *client {
+	return &client{base: base, device: "viewdock-" + sourceID, http: s.HTTP, policy: policy}
 }
 
-// connect returns an authenticated client, signing in again with the stored
-// password when there is no token or the token was revoked.
-func (s *Service) connect(ctx context.Context, src Source, forceLogin bool) (*client, error) {
-	c := s.newClient(src.URL, src.ID)
+// clientFor builds a client for a stored source. Requests its policy refuses
+// are recorded in the source's usage log.
+func (s *Service) clientFor(src Source) *client {
+	c := s.newClient(src.URL, src.ID, src.Policy)
+	c.blocked = func(o op) { s.event(context.Background(), src.ID, "blocked", false, blockedDetail(o)) }
+	return c
+}
+
+// connect returns an authenticated client. API key sources use the stored
+// key; account sources sign in again with the stored password when there is
+// no token or it was revoked.
+func (s *Service) connect(ctx context.Context, src Source, forceLogin bool) (*client, string, error) {
+	c := s.clientFor(src)
+	if src.AuthMode == AuthAPIKey {
+		key, err := s.open(ctx, "api_key", src.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		if key == "" || src.RemoteUser == "" {
+			return nil, "", errUnauthorized
+		}
+		c.token, c.apiKey = key, true
+		return c, src.RemoteUser, nil
+	}
 	if !forceLogin {
 		tok, err := s.open(ctx, "token", src.ID)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		if tok != "" && src.remoteUser != "" {
+		if tok != "" && src.RemoteUser != "" {
 			c.token = tok
-			return c, nil
+			return c, src.RemoteUser, nil
 		}
 	}
 	pw, err := s.open(ctx, "password", src.ID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	tok, userID, err := c.authenticate(ctx, src.Username, pw)
+	tok, user, err := c.authenticate(ctx, src.Username, pw)
 	if err != nil {
-		return nil, err
+		s.event(ctx, src.ID, "sign_in", false, "Jellyfin rejected the account or could not be reached")
+		return nil, "", err
 	}
 	enc, err := s.seal("token", src.ID, tok)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE media_sources SET token_enc = ?, remote_user = ? WHERE id = ?`, enc, userID, src.ID); err != nil {
-		return nil, err
+	if _, err := s.DB.ExecContext(ctx, `UPDATE media_sources SET token_enc = ?, remote_user = ?, remote_user_name = ? WHERE id = ?`,
+		enc, user.ID, user.Name, src.ID); err != nil {
+		return nil, "", err
 	}
-	return c, nil
+	s.event(ctx, src.ID, "sign_in", true, "signed in as "+user.Name)
+	return c, user.ID, nil
 }
 
-// withClient runs fn with an authenticated client and retries once with a
-// fresh login when the stored token is rejected.
+// withClient runs fn with an authenticated client. An account source whose
+// token was rejected signs in once more; a rejected API key is not retried.
 func (s *Service) withClient(ctx context.Context, src Source, fn func(c *client, userID string) error) error {
-	c, err := s.connect(ctx, src, false)
+	c, userID, err := s.connect(ctx, src, false)
 	if err != nil {
 		return err
-	}
-	userID := src.remoteUser
-	if userID == "" {
-		fresh, _ := s.get(ctx, src.ID)
-		userID = fresh.remoteUser
 	}
 	err = fn(c, userID)
-	if !errors.Is(err, errUnauthorized) {
+	if !errors.Is(err, errUnauthorized) || src.AuthMode == AuthAPIKey {
 		return err
 	}
-	if c, err = s.connect(ctx, src, true); err != nil {
+	if c, userID, err = s.connect(ctx, src, true); err != nil {
 		return err
 	}
-	fresh, err := s.get(ctx, src.ID)
-	if err != nil {
-		return err
-	}
-	return fn(c, fresh.remoteUser)
+	return fn(c, userID)
 }
 
 func (s *Service) setStatus(ctx context.Context, id, status, lastErr string, count int, synced bool) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -28,8 +29,10 @@ const grantTTL = 12 * time.Hour
 type grant struct {
 	sourceID, remoteID string
 	base, token        string
-	deviceID, playID   string
-	expires            time.Time
+	// direct grants reach only the static file; HLS grants the item's playlists.
+	direct           bool
+	deviceID, playID string
+	expires          time.Time
 }
 
 type candidate struct {
@@ -182,6 +185,14 @@ func (s *Service) openStream(ctx context.Context, c candidate) (*playback.Remote
 	if err != nil {
 		return nil, playback.ErrSourceUnavailable
 	}
+	if !src.Policy.allows(opStream) {
+		s.event(ctx, src.ID, "blocked", false, blockedDetail(opStream))
+		return nil, playback.ErrSourceUnavailable
+	}
+	if max := src.Policy.MaxStreams; max > 0 && s.activeStreams(src.ID) >= max {
+		s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
+		return nil, playback.ErrSourceUnavailable
+	}
 	var it item
 	var cl *client
 	err = s.withClient(ctx, src, func(client *client, userID string) error {
@@ -199,19 +210,6 @@ func (s *Service) openStream(ctx context.Context, c candidate) (*playback.Remote
 		}
 		return nil, playback.ErrSourceUnavailable
 	}
-	tok, err := auth.RandomToken(24)
-	if err != nil {
-		return nil, err
-	}
-	g := &grant{
-		sourceID: src.ID, remoteID: c.remoteID, base: src.URL, token: cl.token,
-		deviceID: "viewdock-" + uuid.NewString(), playID: strings.ReplaceAll(uuid.NewString(), "-", ""),
-		expires: time.Now().Add(grantTTL),
-	}
-	s.mu.Lock()
-	s.grants[tok] = g
-	s.mu.Unlock()
-
 	mediaSourceID := c.remoteID
 	direct := false
 	if len(it.MediaSources) > 0 {
@@ -221,6 +219,28 @@ func (s *Service) openStream(ctx context.Context, c candidate) (*playback.Remote
 		}
 		direct = browserPlayable(ms)
 	}
+	if !direct && !src.Policy.allows(opTranscode) {
+		s.event(ctx, src.ID, "blocked", false, "refused stream: the file needs Jellyfin transcoding, which is not allowed")
+		return nil, playback.ErrSourceUnavailable
+	}
+	tok, err := auth.RandomToken(24)
+	if err != nil {
+		return nil, err
+	}
+	g := &grant{
+		sourceID: src.ID, remoteID: c.remoteID, base: src.URL, token: cl.token, direct: direct,
+		deviceID: "viewdock-" + uuid.NewString(), playID: strings.ReplaceAll(uuid.NewString(), "-", ""),
+		expires: time.Now().Add(grantTTL),
+	}
+	s.mu.Lock()
+	s.grants[tok] = g
+	s.mu.Unlock()
+	mode := "hls"
+	if direct {
+		mode = "direct play"
+	}
+	s.event(ctx, src.ID, "stream_start", true, fmt.Sprintf("%s of item %s", mode, c.remoteID))
+
 	prefix := "/api/v1/media-sources/stream/" + tok + "/Videos/" + url.PathEscape(c.remoteID) + "/"
 	out := &playback.RemoteStream{
 		Source: c.option.ID, DurationMS: it.durationMS(),
@@ -276,8 +296,39 @@ func (s *Service) revoke(tok string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	c := &client{base: g.base, device: "viewdock-" + g.sourceID, token: g.token, http: s.HTTP}
+	s.event(ctx, g.sourceID, "stream_end", true, "item "+g.remoteID)
+	if g.direct {
+		return
+	}
+	c := &client{base: g.base, device: "viewdock-" + g.sourceID, token: g.token, http: s.HTTP, policy: Policy{Stream: true, Transcode: true}}
 	c.stopEncoding(ctx, g.deviceID, g.playID)
+}
+
+func (s *Service) activeStreams(sourceID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, g := range s.grants {
+		if g.sourceID == sourceID {
+			n++
+		}
+	}
+	return n
+}
+
+// revokeSource ends every active stream of a source.
+func (s *Service) revokeSource(sourceID string) {
+	s.mu.Lock()
+	var toks []string
+	for tok, g := range s.grants {
+		if g.sourceID == sourceID {
+			toks = append(toks, tok)
+		}
+	}
+	s.mu.Unlock()
+	for _, tok := range toks {
+		s.revoke(tok)
+	}
 }
 
 func (s *Service) sweepGrants() {
@@ -319,7 +370,11 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 	rest := chi.URLParam(r, "*")
 	clean := path.Clean("/" + rest)
 	// Jellyfin decodes escaped dot segments, so escapes could leave the item.
-	if strings.ContainsAny(rest, "%\\") || clean != "/"+rest || !strings.HasPrefix(clean, "/Videos/"+g.remoteID+"/") {
+	allowed := strings.HasPrefix(clean, "/Videos/"+g.remoteID+"/")
+	if g.direct {
+		allowed = clean == "/Videos/"+g.remoteID+"/stream"
+	}
+	if strings.ContainsAny(rest, "%\\") || clean != "/"+rest || !allowed {
 		httpapi.WriteErr(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}

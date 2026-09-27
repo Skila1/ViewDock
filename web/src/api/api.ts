@@ -316,11 +316,15 @@ export const api = {
   listMediaSources: async () => asArray<MediaSource>(await request("/api/v1/admin/media-sources")),
   createMediaSource: (body: MediaSourceInput) =>
     request<MediaSource>("/api/v1/admin/media-sources", { method: "POST", body }),
-  updateMediaSource: (id: string, body: Partial<MediaSourceInput> & { enabled?: boolean }) =>
+  mediaSourceEvents: async (id: string) =>
+    asArray<MediaSourceEvent>(await request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/events`)),
+  mediaSourceActivity: async (id: string) =>
+    asArray<MediaSourceActivity>(await request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/activity`)),
+  updateMediaSource: (id: string, body: Partial<MediaSourceInput>) =>
     request<MediaSource>(`/api/v1/admin/media-sources/${encodeURIComponent(id)}`, { method: "PATCH", body }),
   deleteMediaSource: (id: string) =>
     request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  testMediaSource: (body: { id?: string; url?: string; username?: string; password?: string }) =>
+  testMediaSource: (body: Partial<MediaSourceInput> & { id?: string }) =>
     request<MediaSourceTest>("/api/v1/admin/media-sources/test", { method: "POST", body }),
   syncMediaSource: (id: string) =>
     request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/sync`, { method: "POST", body: {} }),
@@ -380,13 +384,28 @@ export type BackendNodeInput = {
   draining: boolean;
 };
 
+export type MediaSourceAuthMode = "password" | "api_key";
+
+/** What ViewDock may do with a source's credentials; enforced by ViewDock before any request is sent. */
+export type MediaSourcePolicy = {
+  images: boolean;
+  stream: boolean;
+  transcode: boolean;
+  activity_log: boolean;
+  max_streams: number;
+};
+
 export type MediaSourceInput = {
   name?: string;
   url: string;
-  username: string;
+  auth_mode?: MediaSourceAuthMode;
+  username?: string;
   password?: string;
+  api_key?: string;
+  remote_user_id?: string;
   libraries?: string[];
   enabled?: boolean;
+  policy?: MediaSourcePolicy;
 };
 
 /** A connected Jellyfin server. Credentials are never returned. */
@@ -396,6 +415,10 @@ export type MediaSource = {
   name: string;
   url: string;
   username: string;
+  auth_mode: MediaSourceAuthMode;
+  remote_user_id: string;
+  remote_user_name: string;
+  policy: MediaSourcePolicy;
   libraries: string[];
   enabled: boolean;
   status: "pending" | "syncing" | "ok" | "error" | string;
@@ -406,7 +429,18 @@ export type MediaSource = {
 };
 
 export type MediaSourceLibrary = { id: string; name: string; collection_type: string };
-export type MediaSourceTest = { server_name: string; version: string; libraries: MediaSourceLibrary[] };
+export type MediaSourceUser = { id: string; name: string; is_admin: boolean };
+export type MediaSourceTest = {
+  server_name: string;
+  version: string;
+  libraries: MediaSourceLibrary[];
+  /** Users an API key can browse as. */
+  users?: MediaSourceUser[];
+  /** The Jellyfin user ViewDock would browse as. */
+  account?: MediaSourceUser;
+};
+export type MediaSourceEvent = { kind: string; ok: boolean; detail: string; created_at: string };
+export type MediaSourceActivity = { date: string; type: string; name: string; severity: string };
 
 export type BackendNode = BackendNodeInput & {
   id: string;

@@ -57,19 +57,25 @@ func (s *Service) run(ctx context.Context, id string) {
 		return
 	}
 	s.setStatus(ctx, id, "syncing", "", 0, false)
+	s.pruneEvents(ctx)
 	count, err := s.syncSource(ctx, src)
 	if err != nil {
 		msg := err.Error()
 		if errors.Is(err, errUnauthorized) {
-			msg = "authentication failed: check the username and password"
+			msg = "authentication failed: check the credentials"
+			if src.AuthMode == AuthAPIKey {
+				msg = "Jellyfin rejected the API key or the selected user no longer exists"
+			}
 		}
 		s.setStatus(ctx, id, "error", msg, 0, false)
+		s.event(ctx, id, "sync", false, msg)
 		if s.Log != nil {
 			s.Log.Warn("media source sync", "category", "media_sources", "id", id, "err", msg)
 		}
 		return
 	}
 	s.setStatus(ctx, id, "ok", "", count, true)
+	s.event(ctx, id, "sync", true, fmt.Sprintf("imported %d titles", count))
 	if s.Log != nil {
 		s.Log.Info("media source synced", "category", "media_sources", "id", id, "items", count)
 	}
@@ -174,7 +180,7 @@ func (s *Service) syncSource(ctx context.Context, src Source) (int, error) {
 			return "", err
 		}
 		keep[it.ID] = true
-		if tag != "" && (tag != m.imageTag || !s.hasArtwork(ctx, kind, id)) {
+		if src.Policy.Images && tag != "" && (tag != m.imageTag || !s.hasArtwork(ctx, kind, id)) {
 			artKind := "poster"
 			if kind == "episode" {
 				artKind = "thumb"
