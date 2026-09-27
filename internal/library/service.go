@@ -91,14 +91,18 @@ func (s *Service) Create(ctx context.Context, name, rootPath, contentType string
 func (s *Service) Get(ctx context.Context, id string) (Library, error) {
 	return scanLibrary(s.DB.QueryRowContext(ctx, `
 		SELECT id, name, root_path, content_type, uploads_enabled, created_at, updated_at
-		FROM libraries WHERE id = ?
+		FROM libraries WHERE id = ? AND id NOT IN (`+remoteLibraries+`)
 	`, id))
 }
+
+// remoteLibraries selects the read-only libraries owned by external media
+// sources. They are managed by their source, never scanned or edited here.
+const remoteLibraries = `SELECT library_id FROM media_sources`
 
 func (s *Service) List(ctx context.Context) ([]Library, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, name, root_path, content_type, uploads_enabled, created_at, updated_at
-		FROM libraries ORDER BY name
+		FROM libraries WHERE id NOT IN (`+remoteLibraries+`) ORDER BY name
 	`)
 	if err != nil {
 		return nil, err

@@ -169,6 +169,7 @@ export const api = {
     subtitle_index?: number | null;
     client?: ClientProfile;
     replace_session_id?: string;
+    source?: string;
   }) =>
     rememberSession(
       await request<PlaybackSession>("/api/v1/playback/sessions", {
@@ -312,6 +313,17 @@ export const api = {
   createAPIKey: (body: { name: string; scopes: string[] }) =>
     request<APIKeyRow>("/api/v1/admin/api-keys", { method: "POST", body }),
   revokeAPIKey: (id: string) => request(`/api/v1/admin/api-keys/${id}`, { method: "DELETE" }),
+  listMediaSources: async () => asArray<MediaSource>(await request("/api/v1/admin/media-sources")),
+  createMediaSource: (body: MediaSourceInput) =>
+    request<MediaSource>("/api/v1/admin/media-sources", { method: "POST", body }),
+  updateMediaSource: (id: string, body: Partial<MediaSourceInput> & { enabled?: boolean }) =>
+    request<MediaSource>(`/api/v1/admin/media-sources/${encodeURIComponent(id)}`, { method: "PATCH", body }),
+  deleteMediaSource: (id: string) =>
+    request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  testMediaSource: (body: { id?: string; url?: string; username?: string; password?: string }) =>
+    request<MediaSourceTest>("/api/v1/admin/media-sources/test", { method: "POST", body }),
+  syncMediaSource: (id: string) =>
+    request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/sync`, { method: "POST", body: {} }),
   listNodes: async () => asArray<BackendNode>(await request("/api/v1/admin/nodes")),
   saveNode: (body: BackendNodeInput) => request<BackendNode>("/api/v1/admin/nodes", { method: "POST", body }),
   deleteNode: (id: string) => request(`/api/v1/admin/nodes/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -367,6 +379,34 @@ export type BackendNodeInput = {
   enabled: boolean;
   draining: boolean;
 };
+
+export type MediaSourceInput = {
+  name?: string;
+  url: string;
+  username: string;
+  password?: string;
+  libraries?: string[];
+  enabled?: boolean;
+};
+
+/** A connected Jellyfin server. Credentials are never returned. */
+export type MediaSource = {
+  id: string;
+  library_id: string;
+  name: string;
+  url: string;
+  username: string;
+  libraries: string[];
+  enabled: boolean;
+  status: "pending" | "syncing" | "ok" | "error" | string;
+  last_error: string;
+  last_sync_at: string;
+  item_count: number;
+  syncing: boolean;
+};
+
+export type MediaSourceLibrary = { id: string; name: string; collection_type: string };
+export type MediaSourceTest = { server_name: string; version: string; libraries: MediaSourceLibrary[] };
 
 export type BackendNode = BackendNodeInput & {
   id: string;

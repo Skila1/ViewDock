@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -100,7 +101,11 @@ func (s *Service) ListMovies(ctx context.Context, grantedIDs []string) ([]Movie,
 		m.PosterURL = s.artworkURL(ctx, "poster", "movie", m.ID)
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return mergeRemote(ctx, s.DB, out, func(m Movie) string { return m.LibraryID },
+		func(m Movie) []string { return TitleKeys(m.Title, m.Year, m.TMDBID) }), nil
 }
 
 func (s *Service) GetMovie(ctx context.Context, id string) (Movie, error) {
@@ -153,7 +158,11 @@ func (s *Service) ListSeries(ctx context.Context, grantedIDs []string) ([]Series
 		ser.PosterURL = s.artworkURL(ctx, "poster", "series", ser.ID)
 		out = append(out, ser)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return mergeRemote(ctx, s.DB, out, func(s Series) string { return s.LibraryID },
+		func(s Series) []string { return TitleKeys(s.Title, s.Year, s.TMDBID) }), nil
 }
 
 func (s *Service) GetSeries(ctx context.Context, id string) (Series, error) {
@@ -358,7 +367,7 @@ func scanSeries(row rowScanner) (Series, error) {
 // listFilter builds the WHERE clause for movie and series listings from the
 // granted libraries and the caller's content restriction.
 func (s *Service) listFilter(ctx context.Context, ids []string) (string, []any, error) {
-	var clauses []string
+	clauses := []string{`library_id NOT IN (SELECT library_id FROM media_sources WHERE enabled = 0)`}
 	var args []any
 	if ids != nil {
 		clauses = append(clauses, `library_id IN (`+inClause(len(ids))+`)`)
@@ -372,10 +381,73 @@ func (s *Service) listFilter(ctx context.Context, ids []string) (string, []any, 
 		clauses = append(clauses, clause)
 		args = append(args, extra...)
 	}
-	if len(clauses) == 0 {
-		return "", args, nil
-	}
 	return ` WHERE ` + strings.Join(clauses, " AND "), args, nil
+}
+
+// TitleKeys identify the same title across libraries: two titles match when
+// they share the TMDB id or the normalised title and year.
+func TitleKeys(title string, year, tmdbID *int) []string {
+	y := 0
+	if year != nil {
+		y = *year
+	}
+	keys := []string{fmt.Sprintf("title:%s:%d", NormalTitle(title), y)}
+	if tmdbID != nil && *tmdbID > 0 {
+		keys = append(keys, fmt.Sprintf("tmdb:%d", *tmdbID))
+	}
+	return keys
+}
+
+// NormalTitle lowercases a title and collapses its whitespace.
+func NormalTitle(title string) string {
+	return strings.Join(strings.Fields(strings.ToLower(title)), " ")
+}
+
+// mergeRemote drops external source titles that duplicate another listed
+// title, so each title appears once. Local titles always win; the external
+// copy stays reachable as an alternative playback source.
+func mergeRemote[T any](ctx context.Context, db *sql.DB, list []T, lib func(T) string, keys func(T) []string) []T {
+	remote := map[string]bool{}
+	rows, err := db.QueryContext(ctx, `SELECT library_id FROM media_sources`)
+	if err != nil {
+		return list
+	}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			remote[id] = true
+		}
+	}
+	rows.Close()
+	if len(remote) == 0 {
+		return list
+	}
+	seen := map[string]bool{}
+	for _, item := range list {
+		if !remote[lib(item)] {
+			for _, k := range keys(item) {
+				seen[k] = true
+			}
+		}
+	}
+	out := list[:0]
+	for _, item := range list {
+		if remote[lib(item)] {
+			ks := keys(item)
+			dup := false
+			for _, k := range ks {
+				dup = dup || seen[k]
+			}
+			if dup {
+				continue
+			}
+			for _, k := range ks {
+				seen[k] = true
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func scanEpisode(row rowScanner) (Episode, error) {

@@ -37,6 +37,12 @@ Cookie CSRF is not required when a `vd_` key is used.
 | PATCH | `/api/v1/admin/nodes/{id}/drain` | `admin` |
 | POST | `/api/v1/admin/nodes/{id}/probe` | `admin` |
 | POST | `/api/v1/admin/nodes/{id}/credential` | `admin` |
+| GET, POST | `/api/v1/admin/media-sources` | `admin` |
+| PATCH, DELETE | `/api/v1/admin/media-sources/{id}` | `admin` |
+| POST | `/api/v1/admin/media-sources/test` | `admin` |
+| GET | `/api/v1/admin/media-sources/{id}/libraries` | `admin` |
+| POST | `/api/v1/admin/media-sources/{id}/sync` | `admin` |
+| GET | `/api/v1/media-sources/stream/{grant}/Videos/{item}/...` | stream grant from a playback session |
 | GET | `/api/v1/admin/resilience` | `admin` |
 | GET | `/api/v1/admin/resilience/sessions` | `admin` |
 | GET | `/api/v1/admin/resilience/reliability` | `admin` |
@@ -77,6 +83,12 @@ Reliability overrides take `{"source","mode":"prefer|avoid|exclude","note"}`; no
 `POST /api/v1/admin/nodes` creates a node, or updates it when `id` is given. Fields: `name`, `scheme` (`http` or `https`), `host`, `port`, `role` (`media-worker`, `transcode-worker`, `storage-worker`), `region`, `capabilities`, `priority`, `weight`, `capacity`, `enabled`, `draining`. `status`, `latency_ms` and `health` are set only by the health monitor and ignored on input. Invalid or disallowed addresses return `400 invalid_endpoint`.
 
 `POST /api/v1/admin/nodes/{id}/credential` issues a new worker secret, replacing any previous one, and returns `{"id", "secret", "env": "VD_NODE_SECRET"}` once. The secret is stored encrypted and never listed. Node list entries report `has_credential`, `failures`, `last_failure_at` and `last_error`. Every node change is written to the audit log.
+
+### Media sources (Jellyfin)
+
+`POST /api/v1/admin/media-sources` takes `{"name","url","username","password","libraries":[],"enabled"}`, signs in to test the account, and starts the first sync. `libraries` lists Jellyfin library ids to import; empty imports every movie and TV library the account can see. `PATCH` accepts the same fields; changing the URL, username or password signs in again first. `POST .../test` takes `{"url","username","password"}` or `{"id"}` and returns `{"server_name","version","libraries":[{"id","name","collection_type"}]}`. Sources report `status` (`pending`, `syncing`, `ok`, `error`), `last_error`, `last_sync_at`, `item_count` and `syncing`. Passwords and access tokens are stored encrypted, need a server master key (`503 no_master_key` otherwise), and are never returned. Enabled sources resync every 6 hours; a source in error retries every 15 minutes.
+
+Each source owns a read-only library that every signed-in user can read and nobody can download from; it is not listed under `/api/v1/libraries`. Movie and series lists show a title once when a local library and a source both have it (same TMDB id, or same title and year), preferring the local copy. `POST /api/v1/playback/sessions` accepts `source` (`local` or a `sources[].id` from a previous session); when the item has other copies the session returns `sources` and the chosen `source`. Remote sessions stream through `/api/v1/media-sources/stream/{grant}/...`, a proxy limited to GET requests for the granted item. It adds the Jellyfin token on the server, and the grant ends with the session. Files browsers can play directly (MP4 with H.264 and AAC or MP3) are streamed as they are with range requests; anything else is played through Jellyfin's HLS, which copies compatible streams and transcodes the rest. `503 source_unavailable` means the source could not be reached.
 
 When a session is placed on a worker, its `urls` point at `/mesh/{node}/...` on the same origin, the session carries `stoken` and `node` (`id`, `name`, `region`), and `urls.session` is the session's control path. Relayed requests are authorized only by `stoken`; cookies and authorization headers are not forwarded. A relayed request for a node that is down returns `410 NODE_UNAVAILABLE`. `POST /api/v1/playback/sessions` returns `503 no_worker_available` when no worker can take the session.
 

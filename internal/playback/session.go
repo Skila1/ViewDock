@@ -72,6 +72,13 @@ type Session struct {
 	genStartSeg  int
 	GenerationID int
 
+	// Source is the chosen playback source; SourceOptions lists the others.
+	// RemoteURL is set when an external media source serves the stream.
+	Source        string
+	SourceOptions []SourceOption
+	RemoteURL     string
+	remoteStop    func()
+
 	checkpoint checkpointState
 
 	mu          sync.Mutex

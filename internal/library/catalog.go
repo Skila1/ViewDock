@@ -53,14 +53,36 @@ func (s *Service) LocateFile(ctx context.Context, mediaFileID string) (*LocatedF
 }
 
 func (s *Service) LocateItem(ctx context.Context, itemKind, itemID string) (*LocatedFile, error) {
+	var loc *LocatedFile
+	var err error
 	switch itemKind {
 	case "movie":
-		return s.locateMovieFile(ctx, itemID)
+		loc, err = s.locateMovieFile(ctx, itemID)
 	case "episode":
-		return s.locateEpisodeFile(ctx, itemID)
+		loc, err = s.locateEpisodeFile(ctx, itemID)
 	default:
 		return nil, ErrNotFound
 	}
+	if errors.Is(err, ErrNotFound) {
+		return s.locateRemote(ctx, itemKind, itemID)
+	}
+	return loc, err
+}
+
+// locateRemote places an item that only exists on an enabled external media
+// source. The result has no file path; playback streams it from the source.
+func (s *Service) locateRemote(ctx context.Context, itemKind, itemID string) (*LocatedFile, error) {
+	var libID string
+	var dur int64
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT ms.library_id, ri.duration_ms FROM remote_items ri
+		JOIN media_sources ms ON ms.id = ri.source_id
+		WHERE ri.item_kind = ? AND ri.item_id = ? AND ms.enabled = 1 LIMIT 1
+	`, itemKind, itemID).Scan(&libID, &dur)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	return &LocatedFile{LibraryID: libID, ItemKind: itemKind, ItemID: itemID, DurationMS: dur, Availability: "remote"}, nil
 }
 
 func (s *Service) LocateAlternatives(ctx context.Context, itemKind, itemID, excludeID string) ([]*LocatedFile, error) {

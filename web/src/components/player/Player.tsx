@@ -61,6 +61,7 @@ export function Player({
   const phaseRef = useRef<PlayerPhase>("idle");
   const resumeRef = useRef(startMs);
   const qualityRef = useRef<string | undefined>(undefined);
+  const sourceRef = useRef<string | undefined>(undefined);
 
   const { phase, session, setPhase, setSession, setResumeMs, reset } = usePlayerStore();
   const [showUi, setShowUi] = useState(true);
@@ -181,6 +182,7 @@ export function Player({
           start_ms: startAt,
           quality: qualityRef.current,
           replace_session_id: replaceId,
+          source: sourceRef.current,
         });
         if (genRef.current !== gen) {
           try {
@@ -258,7 +260,7 @@ export function Player({
         bump("ATTACHED");
         attachedAtRef.current = Date.now();
         lastStablePosRef.current = originRef.current;
-        if (attachRef.current.engine === "native-hls" && vod && startAt > 2500) {
+        if (vod && startAt > 2500) {
           noteCurrentTimeWrite(video, startAt / 1000, "createAndAttach.vodResume", sess.id);
           video.currentTime = startAt / 1000;
         }
@@ -733,6 +735,15 @@ export function Player({
     void createAndAttach("QUALITY");
   };
 
+  const changeSource = (id: string) => {
+    if (id === (sourceRef.current ?? session?.source)) return;
+    sourceRef.current = id;
+    qualityRef.current = undefined;
+    const video = videoRef.current;
+    resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
+    void createAndAttach("QUALITY");
+  };
+
   const partyApply = (playing: boolean, positionMs: number | null) => {
     const video = videoRef.current;
     if (!video) return;
@@ -815,6 +826,7 @@ export function Player({
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (seekValue / seekMax) * 100)) : 0;
   const volumePct = (muted ? 0 : volume) * 100;
   const qualities = session?.qualities ?? [];
+  const sources = session?.sources ?? [];
   const attaching =
     phase === "creatingSession" ||
     phase === "attaching" ||
@@ -1023,6 +1035,20 @@ export function Player({
               >
                 <SkipForward size={14} /> Next
               </button>
+            ) : null}
+            {sources.length > 1 ? (
+              <select
+                className="tap max-w-[10rem] rounded border border-white/20 bg-black/40 px-2 text-xs"
+                aria-label="Playback source"
+                value={session?.source ?? sources[0].id}
+                onChange={(e) => changeSource(e.target.value)}
+              >
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
             ) : null}
             {qualities.length > 0 ? (
               <select

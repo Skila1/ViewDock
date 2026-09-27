@@ -12,6 +12,7 @@ import {
   Network,
   RadioTower,
   ScrollText,
+  Server,
   SlidersHorizontal,
   Users,
   UsersRound,
@@ -26,6 +27,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   {
     label: "Media",
     links: [
+      { to: "/admin/media-sources", label: "Media sources", icon: Server },
       { to: "/admin/uploads", label: "Uploads", icon: HardDriveUpload },
       { to: "/admin/streams", label: "Streams", icon: RadioTower },
     ],

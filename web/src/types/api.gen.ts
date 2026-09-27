@@ -374,6 +374,8 @@ export interface CreateSession {
   subtitle_index?: number | null;
   client: ClientProfile;
   replace_session_id?: string;
+  /** "local", a source option id, or omitted to prefer local files. */
+  source?: string;
 }
 
 export interface SessionTrack {
@@ -423,6 +425,9 @@ export interface PlaybackSession {
   stoken?: string;
   node?: { id: string; name: string; region?: string } | null;
   source_selection?: { media_file_id: string; score: number; reasons: string[]; standby_media_file_id?: string } | null;
+  /** Playback sources for the item, present when an external media source also has it. */
+  sources?: { id: string; label: string }[];
+  source?: string;
 }
 
 export interface ProgressPut {

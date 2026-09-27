@@ -25,6 +25,7 @@ import (
 	"github.com/viewdock/viewdock/internal/download"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/httpapi"
+	"github.com/viewdock/viewdock/internal/jellyfin"
 	"github.com/viewdock/viewdock/internal/library"
 	"github.com/viewdock/viewdock/internal/mesh"
 	"github.com/viewdock/viewdock/internal/metadata"
@@ -251,6 +252,14 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		})
 		srv.APIMounts = append(srv.APIMounts, ix.AdminRoutes, ix.ActivityRoutes)
 		srv.FrameAncestors = authSvc.FrameAncestors
+	}
+
+	if controlPlane {
+		sources := jellyfin.New(sqlDB, kv.Cipher, cfg.CacheDir, logger)
+		sources.Audit, sources.Cfg = aud, cfg
+		play.Sources = sources
+		sources.Start(context.Background())
+		srv.APIMounts = append(srv.APIMounts, sources.Routes)
 	}
 
 	var backups *backup.Service

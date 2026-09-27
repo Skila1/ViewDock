@@ -21,8 +21,10 @@ func (g *GrantStore) CanRead(ctx context.Context, userID, libraryID string) bool
 			SELECT 1 FROM library_role_grants rg
 			JOIN user_roles ur ON ur.role_id = rg.role_id
 			WHERE ur.user_id = ? AND rg.library_id = ?
+		) OR EXISTS (
+			SELECT 1 FROM media_sources WHERE library_id = ? AND enabled = 1
 		)
-	`, userID, libraryID, userID, libraryID).Scan(&n)
+	`, userID, libraryID, userID, libraryID, libraryID).Scan(&n)
 	return n == 1
 }
 
@@ -69,6 +71,8 @@ func (g *GrantStore) GrantedLibraryIDs(ctx context.Context, userID string) ([]st
 		SELECT rg.library_id FROM library_role_grants rg
 		JOIN user_roles ur ON ur.role_id = rg.role_id
 		WHERE ur.user_id = ?
+		UNION
+		SELECT library_id FROM media_sources WHERE enabled = 1
 	`, userID, userID)
 	if err != nil {
 		return nil, err

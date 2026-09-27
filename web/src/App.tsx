@@ -8,6 +8,7 @@ import { DiagnosticsPage } from "@/features/admin/DiagnosticsPage";
 import { StreamsPage } from "@/features/admin/StreamsPage";
 import { DiscordPage } from "@/features/admin/DiscordPage";
 import { NodesPage } from "@/features/admin/NodesPage";
+import { MediaSourcesPage } from "@/features/admin/MediaSourcesPage";
 import { BackupsPage } from "@/features/admin/BackupsPage";
 import { SettingsPage } from "@/features/admin/SettingsPage";
 import { GrantsPage } from "@/features/admin/GrantsPage";
@@ -155,6 +156,7 @@ export function App() {
                   <Route path="streams/:sessionId" element={<InspectorPage />} />
                   <Route path="diagnostics" element={<DiagnosticsPage />} />
                   <Route path="nodes" element={<NodesPage />} />
+                  <Route path="media-sources" element={<MediaSourcesPage />} />
                   <Route path="backups" element={<BackupsPage />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="households" element={<HouseholdsPage />} />

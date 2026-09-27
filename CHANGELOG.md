@@ -2,6 +2,7 @@
 
 ## 0.1.8
 
+- Admins can connect Jellyfin servers under Admin, Media sources. Their movies and shows (with posters and metadata) appear for every user and resync every 6 hours. A title that is also in a local library is listed once, plays locally by default, and the player can switch to the Jellyfin copy. Jellyfin playback supports seeking and works in watch parties. Credentials stay on the server.
 - The close button in a watch party works inside the Discord Activity, and in a party opened from a link. In the Activity it returns to the title picker, with a Rejoin button while others are still watching.
 - The Discord Activity no longer reopens the last movie when nobody is watching it; the channel picks a new title instead.
 

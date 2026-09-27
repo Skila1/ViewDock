@@ -95,6 +95,8 @@ type API struct {
 	DownloadsEnabled func() bool
 	// Remote, when active, places new sessions on media workers.
 	Remote Remote
+	// Sources, when set, streams items from external media sources.
+	Sources Sources
 	// RemoteDiag, when set, adds worker-recorded events to session timelines.
 	RemoteDiag  RemoteTimelines
 	testInstall func(*Session) error
@@ -295,5 +297,10 @@ func (a *API) kill(s *Session) {
 	}
 	if s.Dir != "" {
 		a.HLS.Remove(s.ID)
+	}
+	if s.remoteStop != nil {
+		stop := s.remoteStop
+		s.remoteStop = nil
+		go stop()
 	}
 }

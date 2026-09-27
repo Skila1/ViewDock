@@ -36,6 +36,7 @@ type createBody struct {
 	Client           capability.Profile `json:"client"`
 	ShareToken       string             `json:"share_token"` // ignored; not auth
 	ReplaceSessionID string             `json:"replace_session_id"`
+	Source           string             `json:"source"`
 }
 
 // Remote places new sessions on media workers instead of this process.
@@ -82,6 +83,9 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeHidden(w, errHidden)
 		return
 	}
+	if handled, _ := a.createRemote(w, r, p, body); handled {
+		return
+	}
 	a.Remote.CreateSession(w, r, p, raw, party)
 }
 
@@ -104,9 +108,17 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 	// Quality change is a new session: the client recreates at current position.
 	body.Client = body.Client.WithUA(r.UserAgent())
 
+	handled, sourceOptions := a.createRemote(w, r, p, body)
+	if handled {
+		return
+	}
 	loc, err := a.locate(r.Context(), p, body.ItemKind, body.ItemID, body.MediaFileID)
 	if err != nil {
 		writeHidden(w, err)
+		return
+	}
+	if loc.AbsPath == "" {
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, "source_unavailable", "the media source is unavailable right now")
 		return
 	}
 	var standby *library.LocatedFile
@@ -186,7 +198,10 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 		SlotHeld: needSlot, Created: time.Now(), LastPing: time.Now(),
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
-		HW:          a.HW,
+		HW:          a.HW, SourceOptions: sourceOptions,
+	}
+	if len(sourceOptions) > 0 {
+		sess.Source = SourceLocal
 	}
 	if sess.DurationMS == 0 {
 		sess.DurationMS = loc.DurationMS
@@ -521,6 +536,21 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		out["vod_plan_kind"] = s.VODPlanKind
 		out["gen_start_seg"] = s.genStartSeg
 		out["generation_id"] = s.GenerationID
+	}
+	if s.RemoteURL != "" {
+		// Remote streams always start at 0 and seek natively.
+		out["qualities"] = []string{"auto"}
+		out["vod_ondemand"] = true
+		out["seekable_from_ms"] = 0
+		if s.Delivery == decision.DeliveryDirect {
+			urls["file"] = s.RemoteURL
+		} else {
+			urls["playlist"] = s.RemoteURL
+		}
+	}
+	if len(s.SourceOptions) > 0 {
+		out["sources"] = s.SourceOptions
+		out["source"] = s.Source
 	}
 	return out
 }
