@@ -19,8 +19,8 @@ import (
 const (
 	appID        = "400000000000000001"
 	otherAppID   = "400000000000000002"
-	botToken     = "bot-token-value-never-returned"
-	clientSecret = "client-secret-value-never-returned"
+	botToken     = "fake-bot-token-x9"
+	clientSecret = "fake-client-sec-x9"
 )
 
 // fakeDiscord answers the Discord API calls diagnostics make.
