@@ -81,6 +81,24 @@ type SearchResult struct {
 	// certification data was not requested, not that the title is unrated.
 	ReleaseDates   *ReleaseDates   `json:"release_dates,omitempty"`
 	ContentRatings *ContentRatings `json:"content_ratings,omitempty"`
+	// Details responses only; nil means genres were not part of the response.
+	Genres *[]Genre `json:"genres,omitempty"`
+}
+
+type Genre struct {
+	Name string `json:"name"`
+}
+
+// GenreNames lists the title's genres; nil when they were not looked up.
+func (r SearchResult) GenreNames() []string {
+	if r.Genres == nil {
+		return nil
+	}
+	out := make([]string, 0, len(*r.Genres))
+	for _, g := range *r.Genres {
+		out = append(out, g.Name)
+	}
+	return out
 }
 
 type ReleaseDates struct {

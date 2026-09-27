@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/httpapi"
+	"github.com/viewdock/viewdock/internal/library"
 )
 
 // Routes mounts the admin API and the stream proxy.
@@ -490,6 +491,9 @@ func (s *Service) handleDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	_, _ = s.DB.ExecContext(ctx, `DELETE FROM artwork WHERE EXISTS (
 		SELECT 1 FROM remote_items ri WHERE ri.source_id = ? AND ri.item_kind = artwork.item_kind AND ri.item_id = artwork.item_id)`, id)
+	if err := library.DeleteLibraryFTS(ctx, s.DB, src.LibraryID); err != nil && s.Log != nil {
+		s.Log.Warn("media source search index", "category", "media_sources", "id", id, "err", err.Error())
+	}
 	if _, err := s.DB.ExecContext(ctx, `DELETE FROM media_sources WHERE id = ?`, id); err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, "db", "could not delete the media source")
 		return

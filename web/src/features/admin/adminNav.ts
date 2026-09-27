@@ -22,6 +22,7 @@ import {
   Server,
   ShieldCheck,
   SlidersHorizontal,
+  Stethoscope,
   UserPlus,
   Users,
   UsersRound,
@@ -70,10 +71,7 @@ export function isAdminPath(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
-/**
- * Admin pages with enough content to get their own sidebar. Links are either sub-routes
- * or `#id` anchors of cards on the page.
- */
+/** Admin pages with enough content to get their own sidebar; each link is a separate page. */
 export type AdminSubnav = { base: string; title: string; sections: AdminSection[] };
 
 export const MEDIA_SUBNAV: AdminSubnav = {
@@ -102,36 +100,37 @@ export const DISCORD_SUBNAV: AdminSubnav = {
   base: "/admin/discord",
   title: "Discord",
   sections: [
+    { label: "Status", links: [{ to: "/admin/discord", label: "Diagnostics", icon: Stethoscope, end: true }] },
     {
       label: "Sign-in",
       links: [
-        { to: "/admin/discord#discord-auth", label: "Authentication", icon: KeyRound },
-        { to: "/admin/discord#discord-registration", label: "Registration", icon: UserPlus },
+        { to: "/admin/discord/auth", label: "Authentication", icon: KeyRound },
+        { to: "/admin/discord/registration", label: "Registration", icon: UserPlus },
       ],
     },
     {
       label: "Bot",
       links: [
-        { to: "/admin/discord#discord-bot", label: "Bot configuration", icon: Bot },
-        { to: "/admin/discord#discord-commands", label: "Slash commands", icon: Command },
-        { to: "/admin/discord#discord-invites", label: "Party invitations", icon: Mail },
+        { to: "/admin/discord/bot", label: "Bot configuration", icon: Bot },
+        { to: "/admin/discord/commands", label: "Slash commands", icon: Command },
+        { to: "/admin/discord/invites", label: "Party invitations", icon: Mail },
       ],
     },
-    { label: "Activity", links: [{ to: "/admin/discord#discord-activity", label: "Discord Activity", icon: MonitorPlay }] },
+    { label: "Activity", links: [{ to: "/admin/discord/activity", label: "Discord Activity", icon: MonitorPlay }] },
   ],
 };
 
 /** Settings categories come from the server, so its sidebar is built from them. */
-export function settingsSubnav(categories: { id: string; label: string }[]): AdminSubnav {
+export function settingsSubnav(categories: { slug: string; label: string }[]): AdminSubnav {
   return {
     base: "/admin/settings",
     title: "Settings",
     sections: [
       {
         label: "Categories",
-        links: categories.map((c) => ({ to: `/admin/settings#${c.id}`, label: c.label, icon: SlidersHorizontal })),
+        links: categories.map((c) => ({ to: `/admin/settings/${c.slug}`, label: c.label, icon: SlidersHorizontal })),
       },
-      { label: "Versions", links: [{ to: "/admin/settings#settings-history", label: "History", icon: History }] },
+      { label: "Versions", links: [{ to: "/admin/settings/history", label: "History", icon: History }] },
     ],
   };
 }

@@ -174,7 +174,7 @@ export function BackupsPage() {
             <p className="text-danger">The last scheduled backup failed at {when(status.last_failure_at)}. See Logs for details.</p>
           ) : null}
           <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-            <Link className="text-accent" to="/admin/settings#settings-backups">
+            <Link className="text-accent" to="/admin/settings/backups">
               Change backup settings
             </Link>
             <button type="button" onClick={() => void testDestination()}>

@@ -265,6 +265,9 @@ export interface Movie {
   /** Minimum viewer age; null when unrated. */
   rating_age?: number | null;
   rating_source?: string;
+  genres?: string[];
+  anime?: boolean;
+  added_at?: string;
 }
 
 export interface Series {
@@ -282,6 +285,16 @@ export interface Series {
   /** Minimum viewer age; null when unrated. */
   rating_age?: number | null;
   rating_source?: string;
+  genres?: string[];
+  anime?: boolean;
+  added_at?: string;
+}
+
+/** Per-viewer browse facts; keys are "movie:<id>" or "series:<id>". */
+export interface BrowseSignals {
+  views: Record<string, number>;
+  watched: string[];
+  recommended: string[];
 }
 
 export interface Episode {

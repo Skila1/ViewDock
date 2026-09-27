@@ -111,6 +111,7 @@ func (s *Service) fetch(ctx context.Context, src Source) (fetched, error) {
 					continue
 				}
 				seen[it.ID] = true
+				it.view = v.Name
 				switch it.Type {
 				case "Movie":
 					out.movies = append(out.movies, it)
@@ -190,25 +191,34 @@ func (s *Service) syncSource(ctx context.Context, src Source) (int, error) {
 		return id, nil
 	}
 
-	titleRow := func(table string) func(it item) func(id string, isNew bool) error {
+	titleRow := func(table, kind string) func(it item) func(id string, isNew bool) error {
 		return func(it item) func(id string, isNew bool) error {
 			return func(id string, isNew bool) error {
 				tmdb := providerTMDB(it)
 				rating, age := ratingOf(it.OfficialRating)
 				sort := library.NormalTitle(it.Name)
+				genres := library.EncodeGenres(it.Genres)
 				_, err := tx.ExecContext(ctx, `
 					INSERT INTO `+table+`(id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review,
-						hint_mismatch, tmdb_id, content_rating, rating_age, rating_source, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, 'jellyfin', 0, 0, 0, ?, ?, ?, 'jellyfin', ?, ?)
+						hint_mismatch, tmdb_id, content_rating, rating_age, rating_source, genres_json, collection, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, 'jellyfin', 0, 0, 0, ?, ?, ?, 'jellyfin', ?, ?, ?, ?)
 					ON CONFLICT(id) DO UPDATE SET title = excluded.title, year = excluded.year, sort_title = excluded.sort_title,
 						overview = excluded.overview, tmdb_id = excluded.tmdb_id, content_rating = excluded.content_rating,
-						rating_age = excluded.rating_age, updated_at = excluded.updated_at
-				`, id, src.LibraryID, it.Name, it.ProductionYear, sort, it.Overview, tmdb, rating, age, now, now)
-				return err
+						rating_age = excluded.rating_age, genres_json = excluded.genres_json, collection = excluded.collection,
+						updated_at = excluded.updated_at
+				`, id, src.LibraryID, it.Name, it.ProductionYear, sort, it.Overview, tmdb, rating, age, genres, it.view, now, now)
+				if err != nil {
+					return err
+				}
+				year := 0
+				if it.ProductionYear != nil {
+					year = *it.ProductionYear
+				}
+				return library.UpsertFTS(ctx, tx, kind, id, it.Name, year, strings.Join(it.Genres, " "))
 			}
 		}
 	}
-	movieRow, seriesRow := titleRow("movies"), titleRow("series")
+	movieRow, seriesRow := titleRow("movies", "movie"), titleRow("series", "series")
 
 	for _, it := range data.movies {
 		if _, err := upsert("movie", it, movieRow(it)); err != nil {
@@ -317,6 +327,9 @@ func removeItem(ctx context.Context, tx *sql.Tx, kind, id string) error {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if err := library.DeleteFTS(ctx, tx, kind, id); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `DELETE FROM artwork WHERE item_kind = ? AND item_id = ?`, kind, id)

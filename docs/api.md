@@ -111,6 +111,8 @@ When a session is placed on a worker, its `urls` point at `/mesh/{node}/...` on 
 
 Secrets are encrypted at rest with AES-256-GCM (see `VD_MASTER_KEY` in [environment.md](environment.md)). Saving a secret without a master key returns `503 no_master_key`.
 
+Movie and series listings include `genres` (from TMDB or Jellyfin), `anime` (an Anime genre, or a library or Jellyfin library named anime) and `added_at`. `GET /api/v1/browse/signals` returns `{"views","watched","recommended"}` for the signed-in user, keyed `movie:<id>` or `series:<id>` and limited to titles the user can see: `views` counts distinct viewers per title, `watched` lists titles the user has started, and `recommended` ranks up to 30 unwatched titles by how often their genres appear in what the user watched, then by views. Jellyfin titles are included in `GET /api/v1/search`.
+
 `GET /api/v1/playback/continue` returns up to 20 in-progress items with their `title` and `poster_url`. Items whose title no longer exists, or that the user cannot see (library access or household rating limits), are left out.
 
 `PUT /api/v1/progress/{kind}/{id}` takes `position_ms`, `duration_ms` and optional `force`. It returns `409 progress_conflict` when the server holds newer progress that differs by more than 30 seconds, unless `force` is true.

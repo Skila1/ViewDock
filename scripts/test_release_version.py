@@ -16,7 +16,9 @@ import release_version as r  # noqa: E402
 class VersionTests(unittest.TestCase):
     def test_next_patch(self) -> None:
         self.assertEqual(r.next_patch("0.1.1\n"), "0.1.2")
-        self.assertEqual(r.next_patch("1.9.9"), "1.9.10")
+        self.assertEqual(r.next_patch("0.1.9"), "0.2.0")
+        self.assertEqual(r.next_patch("1.9.9"), "1.10.0")
+        self.assertEqual(r.next_patch("0.2.0"), "0.2.1")
 
     def test_rejects_non_semver(self) -> None:
         for bad in ("", "0.1", "v0.1.1", "0.1.1-beta", "latest"):

@@ -9,22 +9,25 @@ import (
 )
 
 type Movie struct {
-	ID             string  `json:"id"`
-	LibraryID      string  `json:"library_id"`
-	Title          string  `json:"title"`
-	Year           *int    `json:"year"`
-	SortTitle      string  `json:"sort_title,omitempty"`
-	Overview       string  `json:"overview,omitempty"`
-	MetadataSource string  `json:"metadata_source"`
-	Unmatched      bool    `json:"unmatched"`
-	NeedsReview    bool    `json:"needs_review,omitempty"`
-	TMDBID         *int    `json:"tmdb_id,omitempty"`
-	ContentRating  string  `json:"content_rating"`
-	RatingAge      *int    `json:"rating_age"`
-	RatingSource   string  `json:"rating_source,omitempty"`
-	PosterURL      *string `json:"poster_url"`
-	Files          []File  `json:"files,omitempty"`
-	Extras         []File  `json:"extras,omitempty"`
+	ID             string   `json:"id"`
+	LibraryID      string   `json:"library_id"`
+	Title          string   `json:"title"`
+	Year           *int     `json:"year"`
+	SortTitle      string   `json:"sort_title,omitempty"`
+	Overview       string   `json:"overview,omitempty"`
+	MetadataSource string   `json:"metadata_source"`
+	Unmatched      bool     `json:"unmatched"`
+	NeedsReview    bool     `json:"needs_review,omitempty"`
+	TMDBID         *int     `json:"tmdb_id,omitempty"`
+	ContentRating  string   `json:"content_rating"`
+	RatingAge      *int     `json:"rating_age"`
+	RatingSource   string   `json:"rating_source,omitempty"`
+	PosterURL      *string  `json:"poster_url"`
+	Genres         []string `json:"genres"`
+	Anime          bool     `json:"anime"`
+	AddedAt        string   `json:"added_at,omitempty"`
+	Files          []File   `json:"files,omitempty"`
+	Extras         []File   `json:"extras,omitempty"`
 }
 
 type Series struct {
@@ -42,6 +45,9 @@ type Series struct {
 	RatingAge      *int     `json:"rating_age"`
 	RatingSource   string   `json:"rating_source,omitempty"`
 	PosterURL      *string  `json:"poster_url"`
+	Genres         []string `json:"genres"`
+	Anime          bool     `json:"anime"`
+	AddedAt        string   `json:"added_at,omitempty"`
 	Seasons        []Season `json:"seasons,omitempty"`
 }
 
@@ -80,7 +86,8 @@ func (s *Service) ListMovies(ctx context.Context, grantedIDs []string) ([]Movie,
 	}
 	q := `
 		SELECT id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, tmdb_id,
-		       content_rating, rating_age, rating_source
+		       content_rating, rating_age, rating_source, genres_json, collection, created_at,
+		       COALESCE((SELECT l.name FROM libraries l WHERE l.id = movies.library_id), '')
 		FROM movies`
 	where, args, err := s.listFilter(ctx, ids)
 	if err != nil {
@@ -114,7 +121,8 @@ func (s *Service) GetMovie(ctx context.Context, id string) (Movie, error) {
 	}
 	m, err := scanMovie(s.DB.QueryRowContext(ctx, `
 		SELECT id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, tmdb_id,
-		       content_rating, rating_age, rating_source
+		       content_rating, rating_age, rating_source, genres_json, collection, created_at,
+		       COALESCE((SELECT l.name FROM libraries l WHERE l.id = movies.library_id), '')
 		FROM movies WHERE id = ?
 	`, id))
 	if err != nil {
@@ -137,7 +145,8 @@ func (s *Service) ListSeries(ctx context.Context, grantedIDs []string) ([]Series
 	}
 	q := `
 		SELECT id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, tmdb_id,
-		       content_rating, rating_age, rating_source
+		       content_rating, rating_age, rating_source, genres_json, collection, created_at,
+		       COALESCE((SELECT l.name FROM libraries l WHERE l.id = series.library_id), '')
 		FROM series`
 	where, args, err := s.listFilter(ctx, ids)
 	if err != nil {
@@ -171,7 +180,8 @@ func (s *Service) GetSeries(ctx context.Context, id string) (Series, error) {
 	}
 	ser, err := scanSeries(s.DB.QueryRowContext(ctx, `
 		SELECT id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, tmdb_id,
-		       content_rating, rating_age, rating_source
+		       content_rating, rating_age, rating_source, genres_json, collection, created_at,
+		       COALESCE((SELECT l.name FROM libraries l WHERE l.id = series.library_id), '')
 		FROM series WHERE id = ?
 	`, id))
 	if err != nil {
@@ -334,11 +344,14 @@ func scanMovie(row rowScanner) (Movie, error) {
 	var m Movie
 	var year, tmdb, ratingAge sql.NullInt64
 	var unmatched, review int
+	var genres, collection, libName string
 	err := row.Scan(&m.ID, &m.LibraryID, &m.Title, &year, &m.SortTitle, &m.Overview, &m.MetadataSource, &unmatched, &review, &tmdb,
-		&m.ContentRating, &ratingAge, &m.RatingSource)
+		&m.ContentRating, &ratingAge, &m.RatingSource, &genres, &collection, &m.AddedAt, &libName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Movie{}, ErrNotFound
 	}
+	m.Genres = ParseGenres(genres)
+	m.Anime = IsAnime(m.Genres, collection, libName)
 	m.Year = nullInt(year)
 	m.TMDBID = nullInt(tmdb)
 	m.RatingAge = nullInt(ratingAge)
@@ -351,11 +364,14 @@ func scanSeries(row rowScanner) (Series, error) {
 	var ser Series
 	var year, tmdb, ratingAge sql.NullInt64
 	var unmatched, review int
+	var genres, collection, libName string
 	err := row.Scan(&ser.ID, &ser.LibraryID, &ser.Title, &year, &ser.SortTitle, &ser.Overview, &ser.MetadataSource, &unmatched, &review, &tmdb,
-		&ser.ContentRating, &ratingAge, &ser.RatingSource)
+		&ser.ContentRating, &ratingAge, &ser.RatingSource, &genres, &collection, &ser.AddedAt, &libName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Series{}, ErrNotFound
 	}
+	ser.Genres = ParseGenres(genres)
+	ser.Anime = IsAnime(ser.Genres, collection, libName)
 	ser.Year = nullInt(year)
 	ser.TMDBID = nullInt(tmdb)
 	ser.RatingAge = nullInt(ratingAge)

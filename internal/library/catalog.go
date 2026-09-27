@@ -270,6 +270,16 @@ func DeleteFTS(ctx context.Context, db execer, itemKind, itemID string) error {
 	return err
 }
 
+// DeleteLibraryFTS removes the search rows of every title in a library, for
+// use before the library itself is deleted.
+func DeleteLibraryFTS(ctx context.Context, db execer, libraryID string) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = 'movie' AND item_id IN (SELECT id FROM movies WHERE library_id = ?)`, libraryID); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = 'series' AND item_id IN (SELECT id FROM series WHERE library_id = ?)`, libraryID)
+	return err
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return ""

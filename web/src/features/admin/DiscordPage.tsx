@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState, type JSX } from "react";
+import { Navigate, useNavigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
 import { discordLabsApi, type DiscordChannelLink, type DiscordCheck, type DiscordInteractionsStatus } from "@/api/discordLabs";
@@ -654,15 +655,22 @@ function ActivityCard({ discord, onSaved }: { discord: DiscordSettings | undefin
   );
 }
 
-const FOCUS_TARGETS: Record<string, string> = {
-  edit_auth: "discord-auth",
-  edit_bot: "discord-bot",
-  edit_registration: "discord-registration",
-  edit_activity: "discord-activity",
+/** Diagnostics actions that open the section where the fix is made. */
+const FOCUS_TARGETS: Record<string, DiscordSection> = {
+  edit_auth: "auth",
+  edit_bot: "bot",
+  edit_registration: "registration",
+  edit_activity: "activity",
 };
+
+export const DISCORD_SECTIONS = ["auth", "registration", "bot", "commands", "invites", "activity"] as const;
+export type DiscordSection = (typeof DISCORD_SECTIONS)[number];
 
 export function DiscordPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const param = useParams().section;
+  const section = DISCORD_SECTIONS.find((s) => s === param);
   const boot = useAuth((s) => s.boot);
   const settings = useQuery({ queryKey: ["discord-admin"], queryFn: api.getDiscordSettings });
   const interactions = useQuery({ queryKey: ["discord-interactions"], queryFn: discordLabsApi.getDiscordInteractions });
@@ -740,21 +748,39 @@ export function DiscordPage() {
       return;
     }
     const target = FOCUS_TARGETS[a.id];
-    if (target) {
-      const el = document.getElementById(target);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
-      el?.querySelector<HTMLElement>("input:not([readonly])")?.focus({ preventScroll: true });
-    }
+    if (target) navigate(`/admin/discord/${target}`);
+  };
+
+  if (param && !section) return <Navigate to="/admin/discord" replace />;
+
+  const cards: Record<DiscordSection, JSX.Element> = {
+    auth: <AuthCard data={settings.data} onSaved={onAuthSaved} />,
+    registration: <RegistrationCard data={settings.data} onSaved={onAuthSaved} />,
+    bot: <BotCard discord={settings.data} onSaved={refreshDiscord} />,
+    commands: <SlashCommandsCard q={interactions} actions={commandActions} />,
+    invites: (
+      <PartyInvitesCard
+        links={interactions.data?.links}
+        botConfigured={Boolean(interactions.data?.bot_configured)}
+        onChanged={() => void refreshDiscord()}
+      />
+    ),
+    activity: <ActivityCard discord={settings.data} onSaved={refreshDiscord} />,
   };
 
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-base font-medium">Discord</h1>
-        <p className="text-sm text-dim">Discord sign-in, registration, the official bot, slash commands and the Activity.</p>
+        <p className="text-sm text-dim">
+          {section ? "Discord sign-in, registration, the official bot, slash commands and the Activity." : "Checks of every Discord feature, with a fix for each problem found."}
+        </p>
       </div>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
-        <aside className="min-w-0 xl:sticky xl:top-4 xl:order-last xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+      {settings.isError ? <p className="text-xs text-danger">{errText(settings.error, "Discord settings could not be loaded")}</p> : null}
+      <div className="max-w-3xl">
+        {section ? (
+          cards[section]
+        ) : (
           <DiagnosticsPanel
             data={diag.data}
             loadError={diag.isError ? errText(diag.error, "diagnostics could not be loaded") : ""}
@@ -764,22 +790,7 @@ export function DiscordPage() {
             onRun={() => void runDiagnostics()}
             onAction={onCheckAction}
           />
-        </aside>
-        <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
-          {settings.isError ? (
-            <p className="text-xs text-danger lg:col-span-2">{errText(settings.error, "Discord settings could not be loaded")}</p>
-          ) : null}
-          <AuthCard data={settings.data} onSaved={onAuthSaved} />
-          <BotCard discord={settings.data} onSaved={refreshDiscord} />
-          <RegistrationCard data={settings.data} onSaved={onAuthSaved} />
-          <SlashCommandsCard q={interactions} actions={commandActions} />
-          <PartyInvitesCard
-            links={interactions.data?.links}
-            botConfigured={Boolean(interactions.data?.bot_configured)}
-            onChanged={() => void refreshDiscord()}
-          />
-          <ActivityCard discord={settings.data} onSaved={refreshDiscord} />
-        </div>
+        )}
       </div>
     </div>
   );

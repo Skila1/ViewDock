@@ -3,13 +3,12 @@ import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import { useUploads } from "@/store/uploads";
 import { ADMIN_LINKS } from "./adminNav";
-import { SubnavPills, useAdminSubnav, useHashScroll } from "./AdminSubnav";
+import { SubnavPills, useAdminSubnav } from "./AdminSubnav";
 
 export function AdminLayout() {
   const jobs = useUploads((s) => s.jobs);
   const active = jobs.filter((j) => j.status === "uploading" || j.status === "processing" || j.status === "queued");
   const subnav = useAdminSubnav(true);
-  useHashScroll();
 
   return (
     <div>

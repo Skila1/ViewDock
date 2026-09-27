@@ -27,6 +27,7 @@ func (s *Service) Routes(r chi.Router) {
 
 	r.Get("/movies", s.handleListMovies)
 	r.Get("/movies/{id}", s.handleGetMovie)
+	r.Get("/browse/signals", s.handleBrowseSignals)
 	r.Get("/series", s.handleListSeries)
 	r.Get("/series/{id}", s.handleGetSeries)
 	r.Get("/series/{id}/next", s.handleNextEpisode)

@@ -14,6 +14,7 @@ import (
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/search"
 	"github.com/viewdock/viewdock/internal/secrets"
 )
 
@@ -79,8 +80,8 @@ func fakeJellyfinCalls(t *testing.T) (*httptest.Server, *fakeCalls) {
 		}
 		_, _ = w.Write([]byte(`{"TotalRecordCount":4,"Items":[
 			{"Id":"m1","Name":"Dune","Type":"Movie","ProductionYear":2021,"ProviderIds":{"Tmdb":"438631"},"OfficialRating":"PG-13"},
-			{"Id":"m2","Name":"Only Remote","Type":"Movie","ProductionYear":2020,"ImageTags":{"Primary":"t1"}},
-			{"Id":"s1","Name":"Show","Type":"Series","ProductionYear":2019},
+			{"Id":"m2","Name":"Only Remote","Type":"Movie","ProductionYear":2020,"ImageTags":{"Primary":"t1"},"Genres":["Comedy","comedy"]},
+			{"Id":"s1","Name":"Show","Type":"Series","ProductionYear":2019,"Genres":["Anime"]},
 			{"Id":"e1","Name":"Pilot","Type":"Episode","SeriesId":"s1","ParentIndexNumber":1,"IndexNumber":1}]}`))
 	})
 	mux.HandleFunc("/Items/m2/Images/Primary", func(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +251,17 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 	}
 	if list, _ := libs.List(ctx); len(list) != 1 {
 		t.Fatalf("remote library listed with local libraries: %+v", list)
+	}
+	if g := movies[1].Genres; len(g) != 1 || g[0] != "Comedy" || movies[1].Anime {
+		t.Fatalf("remote genres: %+v", movies[1])
+	}
+	shows, err := libs.ListSeries(ctx, granted)
+	if err != nil || len(shows) != 1 || !shows[0].Anime {
+		t.Fatalf("remote anime series: %+v %v", shows, err)
+	}
+	hits, err := search.New(sqlDB).Query(ctx, "remote", nil)
+	if err != nil || len(hits) != 1 || hits[0].Title != "Only Remote" {
+		t.Fatalf("remote titles are searchable: %+v %v", hits, err)
 	}
 
 	stream, options, err := svc.Resolve(ctx, "movie", "dune", "", true)

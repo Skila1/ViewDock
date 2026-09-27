@@ -142,6 +142,10 @@ func (s *Service) ApplyMatch(ctx context.Context, itemKind, itemID string, tmdbI
 	}
 	sets := `metadata_source = 'tmdb', unmatched = 0, tmdb_id = ?, updated_at = ?`
 	args := []any{tmdbID, now}
+	if names := det.GenreNames(); names != nil {
+		sets += `, genres_json = ?`
+		args = append(args, library.EncodeGenres(names))
+	}
 	if title != "" {
 		sets += `, title = ?, sort_title = ?`
 		args = append(args, title, sortTitle(title))
@@ -160,7 +164,7 @@ func (s *Service) ApplyMatch(ctx context.Context, itemKind, itemID string, tmdbI
 		return err
 	}
 	if title != "" {
-		_ = library.UpsertFTS(ctx, s.DB, itemKind, itemID, title, year, "")
+		_ = library.UpsertFTS(ctx, s.DB, itemKind, itemID, title, year, strings.Join(det.GenreNames(), " "))
 	}
 	if det.HasCertifications(itemKind) {
 		if err := s.applyRating(ctx, itemKind, itemID, det); err != nil {
@@ -304,8 +308,8 @@ func (s *Service) detailsCached(ctx context.Context, kind string, id int) (Searc
 	key := "details:" + kind + ":" + strconv.Itoa(id)
 	if body, ok := s.cacheGet(ctx, key); ok {
 		var r SearchResult
-		// Entries cached before certifications were requested are refreshed.
-		if json.Unmarshal([]byte(body), &r) == nil && r.HasCertifications(kind) {
+		// Entries cached before certifications or genres were stored are refreshed.
+		if json.Unmarshal([]byte(body), &r) == nil && r.HasCertifications(kind) && r.Genres != nil {
 			return r, nil
 		}
 	}

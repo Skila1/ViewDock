@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The home page lists every title, local and Jellyfin, with a grid or details layout, sorting, media type (Movies, TV shows, Anime), genre, and Recommended, Most viewed and Unwatched filters. Recommendations follow each account's watch history.
+- The header search covers Jellyfin titles, suggests matches as you type, and has the same filters. The separate Search, Movies and TV pages are gone; old links open the matching home page view.
+- The sidebar can collapse to icons, and the account button at its foot opens a menu with your Discord picture, Settings and Sign out.
+- Every Settings category and Discord section is now its own page in their sidebars, instead of one long page.
+- Titles store their genres from TMDB and Jellyfin; titles matched earlier get theirs in the background.
+
 ## 0.2.0
 
 - Admin, Media brings together Libraries (add, edit, scan and delete local libraries), Titles (search every movie and series, match it on TMDB, upload a poster, set its rating), Uploads, Library access and Jellyfin servers.

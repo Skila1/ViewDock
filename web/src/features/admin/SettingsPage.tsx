@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, Navigate, useParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import type { ConfigSetting } from "@/types/api.gen";
-import { Card, CardGrid, NoteLine, PageHeader, primaryBtn, type Note } from "./ui";
+import { Card, NoteLine, PageHeader, primaryBtn, type Note } from "./ui";
 
 const SOURCE_LABEL: Record<ConfigSetting["source"], string> = {
   database: "",
@@ -25,8 +25,12 @@ export function settingsGroups(settings: ConfigSetting[]): [string, ConfigSettin
   return [...out.entries()];
 }
 
-export function cardId(category: string) {
-  return `settings-${category.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+/** URL segment of a settings category: /admin/settings/<slug>. */
+export function settingsSlug(category: string) {
+  return category
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function Field({
@@ -95,6 +99,7 @@ function Field({
 
 export function SettingsPage() {
   const qc = useQueryClient();
+  const section = useParams().section ?? "";
   const q = useQuery({ queryKey: ["admin-config"], queryFn: api.getConfig });
   const history = useQuery({ queryKey: ["admin-config-history"], queryFn: api.getConfigHistory });
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -124,6 +129,9 @@ export function SettingsPage() {
     return values;
   }, [groups, draft, resets]);
   const dirty = Object.keys(changes).length > 0;
+  const pendingElsewhere = groups
+    .filter(([category, items]) => settingsSlug(category) !== section && items.some((s) => s.key in changes))
+    .map(([category]) => category);
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["admin-config"] });
@@ -178,6 +186,11 @@ export function SettingsPage() {
 
   if (q.isLoading) return <p className="text-sm text-dim">Loading settings…</p>;
   if (q.error) return <p className="text-sm text-danger">Settings could not be loaded.</p>;
+  const known = section === "history" || groups.some(([c]) => settingsSlug(c) === section);
+  if (!known) {
+    const first = groups[0]?.[0];
+    return <Navigate to={first ? `/admin/settings/${settingsSlug(first)}` : "/admin/settings/history"} replace />;
+  }
 
   const managed = Object.values(MANAGED_ELSEWHERE);
 
@@ -207,9 +220,14 @@ export function SettingsPage() {
         }
       />
       <NoteLine note={msg} />
-      <CardGrid>
-        {groups.map(([category, items]) => (
-          <Card key={category} id={cardId(category)} title={category}>
+      {dirty && pendingElsewhere.length ? (
+        <p className="text-xs text-warn">Unsaved changes in {pendingElsewhere.join(", ")} are saved together with this page.</p>
+      ) : null}
+      <div className="max-w-3xl">
+        {groups
+          .filter(([category]) => settingsSlug(category) === section)
+          .map(([category, items]) => (
+          <Card key={category} id={`settings-${settingsSlug(category)}`} title={category}>
             <div className="space-y-3">
               {items.map((s) => (
                 <Field
@@ -231,6 +249,7 @@ export function SettingsPage() {
             </div>
           </Card>
         ))}
+        {section === "history" ? (
         <Card id="settings-history" title="History" description="Every saved version. Restore puts an earlier version back as a new one.">
           {versions.length === 0 ? <p className="text-xs text-dim">No changes recorded yet.</p> : null}
           <ul className="max-h-96 space-y-2 overflow-y-auto">
@@ -254,7 +273,8 @@ export function SettingsPage() {
             ))}
           </ul>
         </Card>
-      </CardGrid>
+        ) : null}
+      </div>
     </form>
   );
 }

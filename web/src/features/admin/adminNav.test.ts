@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN_LINKS, MEDIA_SUBNAV, settingsSubnav, underPath } from "./adminNav";
+import { ADMIN_LINKS, DISCORD_SUBNAV, MEDIA_SUBNAV, settingsSubnav, underPath } from "./adminNav";
 import { libraryType } from "./MediaSourcesPage";
+import { settingsSlug } from "./SettingsPage";
 
 describe("admin navigation", () => {
   it("groups media pages under one Media entry", () => {
@@ -20,9 +21,15 @@ describe("admin navigation", () => {
   });
 
   it("builds the settings sidebar from its categories", () => {
-    const nav = settingsSubnav([{ id: "settings-playback", label: "Playback" }]);
-    expect(nav.sections[0].links.map((l) => l.to)).toEqual(["/admin/settings#settings-playback"]);
-    expect(nav.sections[1].links[0].to).toBe("/admin/settings#settings-history");
+    const nav = settingsSubnav([{ slug: settingsSlug("Offline Vault"), label: "Offline Vault" }]);
+    expect(nav.sections[0].links.map((l) => l.to)).toEqual(["/admin/settings/offline-vault"]);
+    expect(nav.sections[1].links[0].to).toBe("/admin/settings/history");
+  });
+
+  it("gives every Discord section its own page", () => {
+    const links = DISCORD_SUBNAV.sections.flatMap((s) => s.links.map((l) => l.to));
+    expect(links.every((to) => !to.includes("#"))).toBe(true);
+    expect(links).toContain("/admin/discord/bot");
   });
 });
 

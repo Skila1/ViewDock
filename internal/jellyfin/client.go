@@ -257,6 +257,9 @@ type item struct {
 	IndexNumber       *int              `json:"IndexNumber"`
 	RunTimeTicks      int64             `json:"RunTimeTicks"`
 	MediaSources      []mediaSource     `json:"MediaSources"`
+	Genres            []string          `json:"Genres"`
+	// view is the name of the Jellyfin library the item was listed under.
+	view string
 }
 
 type mediaSource struct {
@@ -279,7 +282,7 @@ func (c *client) items(ctx context.Context, userID, parentID, types string) ([]i
 		q := url.Values{
 			"userId": {userID}, "ParentId": {parentID}, "Recursive": {"true"},
 			"IncludeItemTypes": {types}, "IsMissing": {"false"},
-			"Fields":     {"Overview,ProviderIds,OfficialRating,ProductionYear"},
+			"Fields":     {"Overview,ProviderIds,OfficialRating,ProductionYear,Genres"},
 			"StartIndex": {fmt.Sprint(start)}, "Limit": {fmt.Sprint(page)},
 			"EnableImageTypes": {"Primary"}, "ImageTypeLimit": {"1"},
 		}

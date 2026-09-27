@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/viewdock/viewdock/internal/library"
 )
 
 const workerInterval = 20 * time.Second
@@ -38,7 +40,46 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		return err
 	}
 	s.backfillRatings(ctx)
+	s.backfillGenres(ctx)
 	return s.backfillArtwork(ctx)
+}
+
+// backfillGenres stores TMDB genres for titles matched before genres were
+// kept. Titles TMDB has no genres for are stored as an empty list.
+func (s *Service) backfillGenres(ctx context.Context) {
+	if !s.HasKey(ctx) {
+		return
+	}
+	for _, q := range []struct{ kind, table string }{{"movie", "movies"}, {"series", "series"}} {
+		rows, err := s.DB.QueryContext(ctx, `SELECT id, tmdb_id FROM `+q.table+` WHERE genres_json = '' AND metadata_source = 'tmdb' AND tmdb_id IS NOT NULL AND tmdb_id > 0 LIMIT 40`)
+		if err != nil {
+			continue
+		}
+		type row struct {
+			id     string
+			tmdbID int
+		}
+		var list []row
+		for rows.Next() {
+			var r row
+			if rows.Scan(&r.id, &r.tmdbID) == nil {
+				list = append(list, r)
+			}
+		}
+		_ = rows.Close()
+		for _, r := range list {
+			det, err := s.detailsCached(ctx, q.kind, r.tmdbID)
+			if errors.Is(err, ErrTMDBNotFound) {
+				det, err = SearchResult{Genres: &[]Genre{}}, nil
+			}
+			if err != nil || det.Genres == nil {
+				continue
+			}
+			if _, err := s.DB.ExecContext(ctx, `UPDATE `+q.table+` SET genres_json = ? WHERE id = ?`, library.EncodeGenres(det.GenreNames()), r.id); err != nil {
+				slog.Warn("store genres", "category", "metadata", "item", q.kind+"/"+r.id, "err", err)
+			}
+		}
+	}
 }
 
 // backfillRatings looks up certifications for matched titles that have never

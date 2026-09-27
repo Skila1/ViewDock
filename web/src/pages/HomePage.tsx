@@ -1,61 +1,70 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { LayoutGrid, List } from "lucide-react";
 import { api } from "@/api/api";
+import { BrowseFilters } from "@/components/browse/BrowseFilters";
+import { BrowseResults } from "@/components/browse/BrowseResults";
+import { useBrowseData, useBrowseLayout, useBrowseQuery } from "@/components/browse/useBrowse";
 import { ContinueStrip } from "@/components/layout/ContinueStrip";
-import { PosterCard } from "@/components/layout/PosterCard";
-import { PosterGrid } from "@/components/layout/PosterGrid";
+import { applyBrowse, isFiltered, KIND_OPTIONS, TAG_OPTIONS } from "@/lib/browse";
+import { cn } from "@/lib/cn";
 
-export function HomePage({ filter }: { filter?: "movies" | "tv" }) {
-  const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies });
-  const series = useQuery({ queryKey: ["series"], queryFn: api.listSeries });
+export function HomePage() {
+  const { items, genres, signals, loading, error } = useBrowseData();
+  const [query, setQuery] = useBrowseQuery();
+  const [layout, setLayout] = useBrowseLayout();
   const cont = useQuery({ queryKey: ["continue"], queryFn: api.continueWatching });
-  const showMovies = filter !== "tv";
-  const showTv = filter !== "movies";
+  const results = useMemo(() => applyBrowse(items, query, signals), [items, query, signals]);
+  const filtered = isFiltered(query);
+
+  const heading = useMemo(() => {
+    const kind = KIND_OPTIONS.find((o) => o.value === query.kind && o.value)?.label;
+    const tag = TAG_OPTIONS.find((o) => o.value === query.tag)?.label;
+    const parts = [tag, query.genre, kind ?? (filtered ? "Titles" : "Everything")].filter(Boolean);
+    return query.q.trim() ? `Results for "${query.q.trim()}"` : parts.join(" ");
+  }, [filtered, query]);
+
+  const layoutBtn = (value: typeof layout, label: string, Icon: typeof List) => (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={layout === value}
+      onClick={() => setLayout(value)}
+      className={cn("tap flex w-9 items-center justify-center rounded-md", layout === value ? "bg-overlay text-ink" : "text-dim hover:text-ink")}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  );
 
   return (
     <div>
-      {!filter ? <ContinueStrip items={cont.data ?? []} /> : null}
+      {!filtered ? <ContinueStrip items={cont.data ?? []} /> : null}
 
-      {showMovies ? (
-      <section className="mb-6">
-        <h2 className="mb-2 text-[13px] font-medium text-dim">Movies</h2>
-        {movies.isLoading ? <p className="text-xs text-dim">Loading…</p> : null}
-        <PosterGrid>
-          {(movies.data ?? []).map((m) => (
-            <PosterCard
-              key={m.id}
-              to={`/movies/${m.id}`}
-              title={m.title}
-              posterUrl={m.poster_url}
-              unmatched={m.unmatched}
-            />
-          ))}
-        </PosterGrid>
-        {movies.data && movies.data.length === 0 ? (
-          <p className="text-xs text-dim">No movies yet.</p>
-        ) : null}
-      </section>
-      ) : null}
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <BrowseFilters query={query} genres={genres} onChange={setQuery} showSort />
+        <div role="group" aria-label="Layout" className="flex shrink-0 gap-1 rounded-lg border border-line p-0.5">
+          {layoutBtn("grid", "Grid", LayoutGrid)}
+          {layoutBtn("list", "Details", List)}
+        </div>
+      </div>
 
-      {showTv ? (
-      <section>
-        <h2 className="mb-2 text-[13px] font-medium text-dim">TV</h2>
-        {series.isLoading ? <p className="text-xs text-dim">Loading…</p> : null}
-        <PosterGrid>
-          {(series.data ?? []).map((s) => (
-            <PosterCard
-              key={s.id}
-              to={`/tv/${s.id}`}
-              title={s.title}
-              posterUrl={s.poster_url}
-              unmatched={s.unmatched}
-            />
-          ))}
-        </PosterGrid>
-        {series.data && series.data.length === 0 ? (
-          <p className="text-xs text-dim">No series yet.</p>
+      <div className="mb-2 flex flex-wrap items-baseline gap-2">
+        <h2 className="text-[13px] font-medium text-dim">{heading}</h2>
+        {!loading ? <span className="text-xs text-dim">{results.length}</span> : null}
+        {filtered ? (
+          <button type="button" className="text-xs text-accent" onClick={() => setQuery({ q: "", kind: "", genre: "", tag: "", sort: "" })}>
+            Clear filters
+          </button>
         ) : null}
-      </section>
+      </div>
+
+      {loading ? <p className="text-xs text-dim">Loading…</p> : null}
+      {error ? <p className="text-xs text-danger">The catalogue could not be loaded.</p> : null}
+      {!loading && !error && results.length === 0 ? (
+        <p className="text-xs text-dim">{items.length ? "Nothing matches these filters." : "No titles yet."}</p>
       ) : null}
+      <BrowseResults items={results} layout={layout} signals={signals} />
     </div>
   );
 }

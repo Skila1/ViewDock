@@ -30,7 +30,6 @@ import { HomePage } from "@/pages/HomePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { MovieDetailPage } from "@/pages/MovieDetailPage";
-import { SearchPage } from "@/pages/SearchPage";
 import { SeriesDetailPage } from "@/pages/SeriesDetailPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { SharePage } from "@/pages/SharePage";
@@ -101,6 +100,12 @@ function RequireAuth() {
   return <Outlet />;
 }
 
+/** Old /search?q= links open the same search on the home page. */
+function SearchRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/${search}`} replace />;
+}
+
 function RequireAdmin() {
   const { me } = useAuth();
   if (!me?.is_admin) return <Navigate to="/" replace />;
@@ -143,11 +148,11 @@ export function App() {
           <Route element={<RequireAuth />}>
             <Route element={<AppShell />}>
               <Route path="/" element={<HomePage />} />
-              <Route path="/movies" element={<HomePage filter="movies" />} />
-              <Route path="/tv" element={<HomePage filter="tv" />} />
+              <Route path="/movies" element={<Navigate to="/?type=movie" replace />} />
+              <Route path="/tv" element={<Navigate to="/?type=series" replace />} />
               <Route path="/movies/:id" element={<MovieDetailPage />} />
               <Route path="/tv/:id" element={<SeriesDetailPage />} />
-              <Route path="/search" element={<SearchPage />} />
+              <Route path="/search" element={<SearchRedirect />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/offline" element={<OfflineVaultPage />} />
               <Route path="/device-test" element={<DeviceTestPage />} />
@@ -172,10 +177,10 @@ export function App() {
                   <Route path="users" element={<UsersPage />} />
                   <Route path="households" element={<HouseholdsPage />} />
                   <Route path="roles" element={<RolesPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="settings/:section?" element={<SettingsPage />} />
                   <Route path="api-keys" element={<APIKeysPage />} />
                   <Route path="logs" element={<LogsPage />} />
-                  <Route path="discord" element={<DiscordPage />} />
+                  <Route path="discord/:section?" element={<DiscordPage />} />
                   <Route path="updates" element={<UpdatesPage />} />
                 </Route>
               </Route>
