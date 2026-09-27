@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - Admin → Updates no longer shows "Updating" when nothing is running. The host helper's systemd unit could create `update/request` as a directory, which looked like an update that never finished; it is removed, and an update the host does not pick up now fails after 2 minutes with a hint instead of waiting 30.
 - The host helper no longer writes "no request" to `update/last.log` every few seconds; only real update runs are logged.
