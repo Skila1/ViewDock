@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BackendNode, type BackendNodeInput, type BackendNodeRole } from "@/api/api";
 import { cn } from "@/lib/cn";
+import { Card, errText, PageHeader, primaryBtn } from "./ui";
 
 const ROLES: { value: BackendNodeRole; label: string }[] = [
   { value: "media-worker", label: "Media worker (transcode and stream)" },
@@ -60,10 +61,6 @@ function toInput(n: BackendNode): BackendNodeInput {
   };
 }
 
-function errText(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback;
-}
-
 function StatusBadge({ n }: { n: BackendNode }) {
   let label = n.status || "unknown";
   let tone = "text-dim";
@@ -100,7 +97,7 @@ function NodeForm({ initial, onDone }: { initial: BackendNodeInput; onDone: () =
   };
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3 rounded-md border border-line p-4">
+    <form onSubmit={onSubmit} className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs text-dim">
           Name
@@ -271,23 +268,29 @@ export function NodesPage() {
   const list = [...(nodes.data ?? [])].sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name));
 
   return (
-    <div className="max-w-3xl space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-base font-medium">Media nodes</h1>
-          <p className="text-sm text-dim">
-            Workers that transcode and stream. Playback is placed on the healthiest node in the highest priority tier and
-            fails over automatically. Run each worker with <code className="text-ink">VD_ROLE=worker</code> and the credential
-            issued here.
-          </p>
-        </div>
-        {!editing ? (
-          <button type="button" className="btn-green shrink-0 rounded-full px-4 py-1.5 text-sm" onClick={() => setEditing(EMPTY)}>
-            Add node
-          </button>
-        ) : null}
-      </div>
-      {editing ? <NodeForm key={editing.id ?? "new"} initial={editing} onDone={() => setEditing(null)} /> : null}
+    <div className="space-y-4">
+      <PageHeader
+        title="Media nodes"
+        description={
+          <>
+            Workers that transcode and stream. Playback is placed on the healthiest node in the highest priority tier and fails over
+            automatically. Run each worker with <code className="text-ink">VD_ROLE=worker</code> and the credential issued here.
+          </>
+        }
+        actions={
+          !editing ? (
+            <button type="button" className={primaryBtn} onClick={() => setEditing(EMPTY)}>
+              Add node
+            </button>
+          ) : null
+        }
+      />
+      {editing ? (
+        <Card id="nodes-edit" title={editing.id ? "Edit node" : "Add node"}>
+          <NodeForm key={editing.id ?? "new"} initial={editing} onDone={() => setEditing(null)} />
+        </Card>
+      ) : null}
+      <Card id="nodes-list" title="Registered nodes">
       {nodes.isLoading ? <p className="text-sm text-dim">Loading nodes…</p> : null}
       {nodes.isError ? <p className="text-sm text-danger">{errText(nodes.error, "nodes could not be loaded")}</p> : null}
       {nodes.isSuccess && list.length === 0 ? (
@@ -302,6 +305,7 @@ export function NodesPage() {
           ))}
         </ul>
       ) : null}
+      </Card>
     </div>
   );
 }

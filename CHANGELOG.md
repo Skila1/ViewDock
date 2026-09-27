@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Admin → Updates shows "Updated" as soon as the host finishes, instead of about two minutes later, and the log only shows the current run.
+- Opening Admin replaces the main sidebar with the admin sidebar: **Back to app** first, then Overview and the admin pages in groups. Small screens get the same links as a scrollable bar.
+- Every admin page uses the card grid layout from the Discord page. Overview is a dashboard with streams, users, libraries, node health and the version.
+- Duplicate admin settings removed. Discord settings are only on the Discord page, not also under Settings. Resilience no longer repeats the live sessions shown under Streams. Library access (including the new per-person and per-group **Downloads** toggle) is edited only under Grants, and group membership only under Groups; Users shows both read-only with links.
+- New **Discord Activity**: open ViewDock from a voice channel and the channel watches its party together, each person streaming with their own account. It reuses the sign-in application and bot, signs people in with the Discord account running the Activity under the usual sign-in rules, and is off by default. Setup steps are on the Discord page and in the Discord guide.
+- Removed the Labs virtual camera, RTMP and SRT broadcaster and its admin page. Discord bots cannot send video, so watching inside Discord now uses the Activity. An upgrade deletes the saved Labs settings, including any stored output URL.
+
 ## 0.1.4
 
 - The Discord bot now shows as online, watching movies & TV. ViewDock keeps a lightweight Gateway connection with the active bot token (shared or separate) that reconnects and resumes on its own. Slash commands, verification and party invites still use the HTTP interactions endpoint; the Gateway uses no privileged intents and handles no interactions.

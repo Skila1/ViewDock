@@ -1,9 +1,10 @@
 # Discord
 
-ViewDock has two independent Discord features, both configured under **Admin → Discord**:
+ViewDock has these Discord features, all configured under **Admin → Discord**:
 
 - **Discord sign-in** lets people sign in with their Discord account, optionally limited to members of your server or a role.
 - **The Discord bot** adds a `/party` slash command so people can start and control watch parties from a Discord channel.
+- **The Discord Activity** (optional) opens ViewDock inside a voice channel so the channel watches its party together.
 
 Both need a Discord application, created in the [Discord Developer Portal](https://discord.com/developers/applications). Set the public URL under **Admin → Settings** (or `VD_PUBLIC_URL`) first, so the addresses ViewDock gives Discord stay stable behind your reverse proxy or tunnel.
 
@@ -67,3 +68,25 @@ The bot token of the sign-in application can also be provided with `VD_DISCORD_B
 People must link their Discord account to ViewDock (through Discord sign-in or **Settings → Connected**) before they can use the commands. Anyone who has not linked an account gets a private reply explaining how.
 
 Administrators can also post a party invite into any channel with **Send party invite** on the Discord page, and see which channels are linked to which parties.
+
+## Discord Activity
+
+The Activity opens ViewDock inside a Discord voice channel. Everyone who launches it from the same channel lands in that channel's watch party, and each person streams from your ViewDock server with their own account, as in a browser. Discord bots cannot send video into a call, so this is how ViewDock plays inside Discord.
+
+The Activity runs on the sign-in application and needs:
+
+- Discord sign-in credentials (client ID and secret) and the bot token, with the separate bot configuration turned off. ViewDock uses the bot to confirm who is in an Activity before it reveals a party.
+- An HTTPS public URL, and watch parties turned on.
+
+To set it up:
+
+1. In the Developer Portal, open the sign-in application, then **Activities → Settings**, and enable Activities.
+2. Under **Activities → URL Mappings**, map the root prefix `/` to your public host, for example `viewdock.example.com`.
+3. If the public host sits behind a login proxy such as Cloudflare Access, allow requests from Discord's proxy through; the Activity cannot complete an interactive proxy login. ViewDock still requires everyone to sign in.
+4. In **Admin → Discord**, turn on **Discord Activity**. The **Discord Activity** group in the diagnostics panel checks the requirements and whether Activities are enabled for the application.
+
+Discord adds the Activity's launch button (its entry point command) when you enable Activities. Registering slash commands globally from ViewDock keeps it.
+
+When someone opens the Activity, ViewDock signs them in with the Discord account running it, following the same rules as Discord sign-in on the web: registration restrictions apply to new accounts, and with Discord sign-in turned off only accounts already linked to Discord can use it. If the channel has no party yet, anyone who can start parties picks a title; everyone else waits and joins automatically when it starts.
+
+Inside Discord, ViewDock's cookies are issued as partitioned third-party cookies, so the Activity session is separate from your normal browser session. The service worker is not installed inside Discord, so the app always loads the current build. The Activity must point at a control process; the separate `VD_ROLE=frontend` process does not allow framing.

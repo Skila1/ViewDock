@@ -6,8 +6,11 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { App } from "./App";
 import "./index.css";
 import { replayOfflineMutations } from "./api/client";
+import { isDiscordActivity } from "./lib/discordActivity";
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+// Inside Discord's iframe the app is short-lived and served through Discord's
+// proxy, so offline caching would only serve stale builds.
+if (import.meta.env.PROD && "serviceWorker" in navigator && !isDiscordActivity()) {
   window.addEventListener("load", () => {
     void navigator.serviceWorker.register("/sw.js", { scope: "/" });
   });

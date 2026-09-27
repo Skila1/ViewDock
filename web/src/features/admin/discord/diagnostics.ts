@@ -14,9 +14,10 @@ export const GROUP_LABELS: Record<DiscordCheckGroup, string> = {
   servers: "Servers and permissions",
   commands: "Slash commands",
   interactions: "HTTP interactions endpoint",
+  activity: "Discord Activity",
 };
 
-const GROUP_ORDER: DiscordCheckGroup[] = ["configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions"];
+const GROUP_ORDER: DiscordCheckGroup[] = ["configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions", "activity"];
 
 /** Short Gateway summary with the tone of its state. */
 export function gatewaySummary(g: DiscordGatewayStatus): { text: string; status: DiscordCheckStatus } {

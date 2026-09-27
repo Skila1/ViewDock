@@ -1,10 +1,13 @@
 import { FormEvent, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router";
-import { Clapperboard, Download, Home, LogOut, Search, Settings, Shield, Tv } from "lucide-react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { ArrowLeft, Clapperboard, Download, Home, LogOut, Search, Settings, Shield, Tv } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { useAuth } from "@/store/auth";
 import { cn } from "@/lib/cn";
 import { ConnectivityBanner } from "@/components/layout/ConnectivityBanner";
+import { ADMIN_SECTIONS, isAdminPath } from "@/features/admin/adminNav";
+
+const sideLink = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink";
 
 const nav = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -17,6 +20,7 @@ const nav = [
 export function AppShell() {
   const { me, logout, pinLocked, unlockPin } = useAuth();
   const navigate = useNavigate();
+  const inAdmin = isAdminPath(useLocation().pathname);
   const [q, setQ] = useState("");
   const [pin, setPin] = useState("");
   const [pinErr, setPinErr] = useState("");
@@ -67,54 +71,50 @@ export function AppShell() {
           <Logo className="h-12 w-12" />
           <span className="text-sm font-bold tracking-wide">View<span className="text-accent">Dock</span></span>
         </Link>
-        <nav className="flex-1 space-y-0.5 px-2 pt-3">
-          {nav.map((it) => (
-            <NavLink
-              key={it.to}
-              to={it.to}
-              end={it.end}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink",
-                  isActive && "bg-overlay text-ink",
-                )
-              }
-            >
-              <it.icon className="h-4 w-4 shrink-0" />
-              {it.label}
-            </NavLink>
-          ))}
-          {me?.is_admin ? (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink",
-                  isActive && "bg-overlay text-ink",
-                )
-              }
-            >
-              <Shield className="h-4 w-4 shrink-0" />
-              Admin
-            </NavLink>
-          ) : null}
-        </nav>
+        {me?.is_admin && inAdmin ? (
+          <nav aria-label="Admin" className="flex-1 overflow-y-auto px-2 pt-3">
+            <Link to="/" className={sideLink}>
+              <ArrowLeft className="h-4 w-4 shrink-0" />
+              Back to app
+            </Link>
+            {ADMIN_SECTIONS.map((section) => (
+              <div key={section.label || "top"} className="mt-3 space-y-0.5">
+                {section.label ? (
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-dim">{section.label}</p>
+                ) : null}
+                {section.links.map((it) => (
+                  <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => cn(sideLink, isActive && "bg-overlay text-ink")}>
+                    <it.icon className="h-4 w-4 shrink-0" />
+                    {it.label}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
+        ) : (
+          <nav className="flex-1 space-y-0.5 px-2 pt-3">
+            {nav.map((it) => (
+              <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => cn(sideLink, isActive && "bg-overlay text-ink")}>
+                <it.icon className="h-4 w-4 shrink-0" />
+                {it.label}
+              </NavLink>
+            ))}
+            {me?.is_admin ? (
+              <NavLink to="/admin" className={({ isActive }) => cn(sideLink, isActive && "bg-overlay text-ink")}>
+                <Shield className="h-4 w-4 shrink-0" />
+                Admin
+              </NavLink>
+            ) : null}
+          </nav>
+        )}
         <div className="border-t border-line p-2">
-          <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink",
-                isActive && "bg-overlay text-ink",
-              )
-            }
-          >
+          <NavLink to="/profile" className={({ isActive }) => cn(sideLink, isActive && "bg-overlay text-ink")}>
             <Settings className="h-4 w-4 shrink-0" />
             <span className="truncate">{me?.display_name || me?.username || "Profile"}</span>
           </NavLink>
           <button
             type="button"
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink"
+            className={cn(sideLink, "w-full")}
             onClick={async () => {
               await logout();
               navigate("/login");

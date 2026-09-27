@@ -1,6 +1,7 @@
 import type { ErrorBody } from "@/types/api.gen";
 import { enqueueMutation, replayQueuedMutations, type ReplaySummary } from "@/lib/offlineQueue";
 import { isCacheable, loadSnapshot, saveSnapshot } from "@/lib/snapshotCache";
+import { embedHeaders } from "@/lib/discordActivity";
 
 export class ApiError extends Error {
   status: number;
@@ -44,7 +45,7 @@ export async function ensureCsrf(): Promise<string | null> {
   }
   if (csrfToken) return csrfToken;
   if (!csrfInflight) {
-    csrfInflight = fetch("/api/v1/auth/csrf", { credentials: "include" })
+    csrfInflight = fetch("/api/v1/auth/csrf", { credentials: "include", headers: embedHeaders() })
       .then(async (res) => {
         if (!res.ok) return readCsrfCookie();
         const json = (await res.json().catch(() => ({}))) as { token?: string };
@@ -101,7 +102,7 @@ async function parseBody(res: Response): Promise<unknown> {
 
 export async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   const method = (opts.method ?? "GET").toUpperCase();
-  const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
+  const headers: Record<string, string> = { Accept: "application/json", ...embedHeaders(), ...opts.headers };
   const mutating = !["GET", "HEAD", "OPTIONS"].includes(method);
 
   if (mutating) {
@@ -187,7 +188,7 @@ async function fromSnapshot<T>(path: string, method: string, opts: RequestOpts):
 }
 
 export async function head(path: string): Promise<Headers> {
-  const res = await fetch(path, { method: "HEAD", credentials: "include" });
+  const res = await fetch(path, { method: "HEAD", credentials: "include", headers: embedHeaders() });
   if (!res.ok) throw new ApiError(res.status, res.statusText);
   return res.headers;
 }

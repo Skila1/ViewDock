@@ -7,7 +7,6 @@ import { InspectorPage } from "@/features/admin/InspectorPage";
 import { DiagnosticsPage } from "@/features/admin/DiagnosticsPage";
 import { StreamsPage } from "@/features/admin/StreamsPage";
 import { DiscordPage } from "@/features/admin/DiscordPage";
-import { LabsPage } from "@/features/admin/LabsPage";
 import { NodesPage } from "@/features/admin/NodesPage";
 import { BackupsPage } from "@/features/admin/BackupsPage";
 import { SettingsPage } from "@/features/admin/SettingsPage";
@@ -36,6 +35,13 @@ import { WatchPage } from "@/pages/WatchPage";
 import { bindJourneyLifecycle, report, startJourney } from "@/lib/journey";
 import { useAuth } from "@/store/auth";
 import { onConnectivity } from "@/api/client";
+import { ActivityGate } from "@/features/activity/ActivityGate";
+import { ActivityPage } from "@/pages/ActivityPage";
+import { isDiscordActivity } from "@/lib/discordActivity";
+
+function EmbedGate({ children }: { children: ReactNode }) {
+  return isDiscordActivity() ? <ActivityGate>{children}</ActivityGate> : children;
+}
 
 function BootGate({ children }: { children: ReactNode }) {
   const { ready, boot, error, offline } = useAuth();
@@ -120,6 +126,7 @@ export function App() {
   return (
     <>
       <JourneyReporter />
+      <EmbedGate>
       <BootGate>
       <Routes>
         <Route element={<SetupRedirect />}>
@@ -158,7 +165,6 @@ export function App() {
                   <Route path="api-keys" element={<APIKeysPage />} />
                   <Route path="logs" element={<LogsPage />} />
                   <Route path="discord" element={<DiscordPage />} />
-                  <Route path="labs" element={<LabsPage />} />
                   <Route path="updates" element={<UpdatesPage />} />
                 </Route>
               </Route>
@@ -166,10 +172,12 @@ export function App() {
             <Route path="/watch/movie/:id" element={<WatchPage kind="movie" />} />
             <Route path="/watch/episode/:id" element={<WatchPage kind="episode" />} />
             <Route path="/together/:code" element={<TogetherPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
           </Route>
         </Route>
       </Routes>
     </BootGate>
+      </EmbedGate>
     </>
   );
 }

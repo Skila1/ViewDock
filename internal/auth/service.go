@@ -71,11 +71,14 @@ type Service struct {
 	BotToken func() string
 	// ApplyConfig stores runtime settings through the versioned configuration service.
 	ApplyConfig func(ctx context.Context, actorID, ip string, values map[string]string) error
+	// ActivityEnabled reports the Discord Activity switch; nil means off.
+	ActivityEnabled func() bool
 
-	botMu      sync.Mutex
-	bot        *discordbot.Client
-	principals *principalCache
-	setupDone  atomic.Bool
+	activityOrigin activityOriginCache
+	botMu          sync.Mutex
+	bot            *discordbot.Client
+	principals     *principalCache
+	setupDone      atomic.Bool
 }
 
 // Bot returns the official Discord bot client, or nil when no token is configured.

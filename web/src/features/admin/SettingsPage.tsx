@@ -1,13 +1,33 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import type { ConfigSetting } from "@/types/api.gen";
+import { Card, CardGrid, NoteLine, PageHeader, primaryBtn, type Note } from "./ui";
 
 const SOURCE_LABEL: Record<ConfigSetting["source"], string> = {
   database: "",
   environment: "from environment",
   default: "default",
 };
+
+/** Categories edited on their own admin page, so they are not repeated here. */
+export const MANAGED_ELSEWHERE: Record<string, { to: string; label: string }> = {
+  Discord: { to: "/admin/discord", label: "Discord" },
+};
+
+export function settingsGroups(settings: ConfigSetting[]): [string, ConfigSetting[]][] {
+  const out = new Map<string, ConfigSetting[]>();
+  for (const s of settings) {
+    if (MANAGED_ELSEWHERE[s.category]) continue;
+    out.set(s.category, [...(out.get(s.category) ?? []), s]);
+  }
+  return [...out.entries()];
+}
+
+function cardId(category: string) {
+  return `settings-${category.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
 
 function Field({
   s,
@@ -79,7 +99,7 @@ export function SettingsPage() {
   const history = useQuery({ queryKey: ["admin-config-history"], queryFn: api.getConfigHistory });
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [resets, setResets] = useState<Set<string>>(new Set());
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [msg, setMsg] = useState<Note>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -90,22 +110,27 @@ export function SettingsPage() {
     setResets(new Set());
   }, [q.data]);
 
-  const groups = useMemo(() => {
-    const out = new Map<string, ConfigSetting[]>();
-    for (const s of q.data?.settings ?? []) out.set(s.category, [...(out.get(s.category) ?? []), s]);
-    return [...out.entries()];
-  }, [q.data]);
+  const groups = useMemo(() => settingsGroups(q.data?.settings ?? []), [q.data]);
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash || !groups.length) return;
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+  }, [hash, groups.length]);
 
   const changes = useMemo(() => {
     const values: Record<string, string | null> = {};
-    for (const s of q.data?.settings ?? []) {
-      if (resets.has(s.key)) values[s.key] = null;
-      else if (s.kind === "secret") {
-        if (draft[s.key]) values[s.key] = draft[s.key];
-      } else if ((draft[s.key] ?? "") !== (s.value ?? "")) values[s.key] = draft[s.key] ?? "";
+    for (const [, items] of groups) {
+      for (const s of items) {
+        if (resets.has(s.key)) values[s.key] = null;
+        else if (s.kind === "secret") {
+          if (draft[s.key]) values[s.key] = draft[s.key];
+        } else if ((draft[s.key] ?? "") !== (s.value ?? "")) values[s.key] = draft[s.key] ?? "";
+      }
     }
     return values;
-  }, [q.data, draft, resets]);
+  }, [groups, draft, resets]);
+  const dirty = Object.keys(changes).length > 0;
 
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["admin-config"] });
@@ -116,7 +141,7 @@ export function SettingsPage() {
 
   const onSave = async (e: FormEvent) => {
     e.preventDefault();
-    if (!q.data || Object.keys(changes).length === 0) return;
+    if (!q.data || !dirty) return;
     setSaving(true);
     setMsg(null);
     try {
@@ -161,72 +186,82 @@ export function SettingsPage() {
   if (q.isLoading) return <p className="text-sm text-dim">Loading settings…</p>;
   if (q.error) return <p className="text-sm text-danger">Settings could not be loaded.</p>;
 
-  return (
-    <div className="max-w-xl space-y-8">
-      <form onSubmit={onSave} className="space-y-6">
-        <div>
-          <h1 className="text-base font-medium">Settings</h1>
-          <p className="text-sm text-dim">
-            Changes are validated, versioned and applied without restarting. Secrets are encrypted at rest
-            {q.data?.master_key_id ? ` (master key ${q.data.master_key_id})` : ""}.
-          </p>
-        </div>
-        {groups.map(([category, items]) => (
-          <fieldset key={category} className="space-y-3">
-            <legend className="text-sm font-medium">{category}</legend>
-            {items.map((s) => (
-              <Field
-                key={s.key}
-                s={s}
-                value={draft[s.key] ?? ""}
-                reset={resets.has(s.key)}
-                onChange={(v) => {
-                  setDraft((d) => ({ ...d, [s.key]: v }));
-                  setResets((r) => {
-                    const n = new Set(r);
-                    n.delete(s.key);
-                    return n;
-                  });
-                }}
-                onReset={() => setResets((r) => new Set(r).add(s.key))}
-              />
-            ))}
-          </fieldset>
-        ))}
-        {msg ? <p className={msg.ok ? "text-xs text-accent" : "text-xs text-danger"}>{msg.text}</p> : null}
-        <button
-          type="submit"
-          disabled={saving || Object.keys(changes).length === 0}
-          className="btn-green rounded-full px-4 py-1.5 text-sm disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </form>
+  const managed = Object.values(MANAGED_ELSEWHERE);
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">History</h2>
-        {versions.length === 0 ? <p className="text-xs text-dim">No changes recorded yet.</p> : null}
-        <ul className="space-y-2">
-          {versions.map(([version, row], i) => (
-            <li key={version} className="rounded-lg border border-line p-2 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span>
-                  Version {version} · {new Date(row.at).toLocaleString()}
-                  {row.note ? ` · ${row.note}` : ""}
-                </span>
-                {i > 0 ? (
-                  <button type="button" className="underline" onClick={() => void rollback(version)}>
-                    Restore
-                  </button>
-                ) : (
-                  <span className="text-dim">current</span>
-                )}
-              </div>
-              <p className="mt-1 break-all text-dim">{row.keys.join(", ")}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
+  return (
+    <form onSubmit={onSave} className="space-y-4">
+      <PageHeader
+        title="Settings"
+        description={
+          <>
+            Changes are validated, versioned and applied without restarting. Secrets are encrypted at rest
+            {q.data?.master_key_id ? ` (master key ${q.data.master_key_id})` : ""}.{" "}
+            {managed.map((m, i) => (
+              <span key={m.to}>
+                {i === 0 ? "" : ", "}
+                <Link className="text-accent" to={m.to}>
+                  {m.label}
+                </Link>
+              </span>
+            ))}{" "}
+            settings are on {managed.length === 1 ? "its own page" : "their own pages"}.
+          </>
+        }
+        actions={
+          <button type="submit" disabled={saving || !dirty} className={`${primaryBtn} disabled:opacity-50`}>
+            {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
+          </button>
+        }
+      />
+      <NoteLine note={msg} />
+      <CardGrid>
+        {groups.map(([category, items]) => (
+          <Card key={category} id={cardId(category)} title={category}>
+            <div className="space-y-3">
+              {items.map((s) => (
+                <Field
+                  key={s.key}
+                  s={s}
+                  value={draft[s.key] ?? ""}
+                  reset={resets.has(s.key)}
+                  onChange={(v) => {
+                    setDraft((d) => ({ ...d, [s.key]: v }));
+                    setResets((r) => {
+                      const n = new Set(r);
+                      n.delete(s.key);
+                      return n;
+                    });
+                  }}
+                  onReset={() => setResets((r) => new Set(r).add(s.key))}
+                />
+              ))}
+            </div>
+          </Card>
+        ))}
+        <Card id="settings-history" title="History" description="Every saved version. Restore puts an earlier version back as a new one.">
+          {versions.length === 0 ? <p className="text-xs text-dim">No changes recorded yet.</p> : null}
+          <ul className="max-h-96 space-y-2 overflow-y-auto">
+            {versions.map(([version, row], i) => (
+              <li key={version} className="rounded-lg border border-line p-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    Version {version} · {new Date(row.at).toLocaleString()}
+                    {row.note ? ` · ${row.note}` : ""}
+                  </span>
+                  {i > 0 ? (
+                    <button type="button" className="underline" onClick={() => void rollback(version)}>
+                      Restore
+                    </button>
+                  ) : (
+                    <span className="text-dim">current</span>
+                  )}
+                </div>
+                <p className="mt-1 break-all text-dim">{row.keys.join(", ")}</p>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </CardGrid>
+    </form>
   );
 }

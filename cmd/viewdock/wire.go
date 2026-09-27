@@ -25,7 +25,6 @@ import (
 	"github.com/viewdock/viewdock/internal/download"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/httpapi"
-	"github.com/viewdock/viewdock/internal/labs"
 	"github.com/viewdock/viewdock/internal/library"
 	"github.com/viewdock/viewdock/internal/mesh"
 	"github.com/viewdock/viewdock/internal/metadata"
@@ -67,9 +66,8 @@ type app struct {
 	// Mesh is set on control-capable roles, Worker on VD_ROLE=worker.
 	Mesh   *mesh.Dispatcher
 	Worker *mesh.Worker
-	// Interactions and Labs are nil on VD_ROLE=worker.
+	// Interactions is nil on VD_ROLE=worker.
 	Interactions *interactions.Service
-	Labs         *labs.Broadcaster
 	// DiscordGateway keeps the bot online; nil on VD_ROLE=worker.
 	DiscordGateway *gateway.Manager
 }
@@ -188,6 +186,12 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		MaxItemGB:  func() int { return rc.Int(cfgOfflineMaxItemGB) },
 	}
 	authSvc.BotToken = func() string { return discordBotToken(rc, os.Getenv) }
+	authSvc.ActivityEnabled = func() bool { return rc.Bool(cfgDiscordActivity) }
+	rc.OnChange(cfgDiscordActivity, func(string) { authSvc.ResetActivityOrigin() })
+	if play.WT != nil {
+		sameSite := play.WT.AllowOrigin
+		play.WT.AllowOrigin = func(r *http.Request) bool { return sameSite(r) || authSvc.ActivityOriginAllowed(r) }
+	}
 	// discordBotToken applies the environment fallback to the shared token
 	// only; the separate bot must never fall back to it.
 	authSvc.DiscordBot = nil
@@ -204,7 +208,6 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	}
 
 	var ix *interactions.Service
-	var vcam *labs.Broadcaster
 	var gw *gateway.Manager
 	if controlPlane {
 		// The presence connection uses the same active token as the bot API,
@@ -243,11 +246,11 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 			},
 			Gateway:          gw.Status,
 			ReconnectGateway: gw.Reload,
+			ActivityEnabled:  authSvc.ActivityEnabled,
+			DiscordUserID:    authSvc.DiscordUserID,
 		})
-		vcam = labs.New(ff.FFmpeg, newLabsSources(parties, libs), kv, filepath.Join(cfg.CacheDir, "labs-vcam"))
-		vcam.Log = logger
-		labsAPI := &labs.API{B: vcam, Audit: aud, Cfg: cfg, Log: logger}
-		srv.APIMounts = append(srv.APIMounts, ix.AdminRoutes, labsAPI.Routes)
+		srv.APIMounts = append(srv.APIMounts, ix.AdminRoutes, ix.ActivityRoutes)
+		srv.FrameAncestors = authSvc.FrameAncestors
 	}
 
 	var backups *backup.Service
@@ -288,7 +291,6 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 			Flight: flight, Reliability: tracker, Log: logger,
 			RemoteSessions: dispatcher.RemoteSessions,
 			StorageFn:      backups.Store,
-			Checks:         map[string]resilience.Check{"experimental_broadcast": broadcastCheck(vcam)},
 			Coordinator: func(context.Context) (resilience.CoordinatorStatus, error) {
 				if parties == nil {
 					return resilience.CoordinatorStatus{}, nil
@@ -370,5 +372,5 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		update.Routes(kv),
 		logs.Routes,
 	)
-	return &app{Auth: authSvc, Backend: backendMonitor, Playback: play, Uploads: up, Meta: meta, Logs: logs, Users: usersAPI, Mesh: dispatcher, Worker: workerAPI, Interactions: ix, Labs: vcam, DiscordGateway: gw}
+	return &app{Auth: authSvc, Backend: backendMonitor, Playback: play, Uploads: up, Meta: meta, Logs: logs, Users: usersAPI, Mesh: dispatcher, Worker: workerAPI, Interactions: ix, DiscordGateway: gw}
 }

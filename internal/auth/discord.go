@@ -278,8 +278,14 @@ func discordAuthURL(clientID, redirect, state, challenge, scope string) string {
 func exchangeDiscordCode(ctx context.Context, clientID, secret, redirect, code, verifier string) (DiscordProfile, string, error) {
 	var prof DiscordProfile
 	form := url.Values{
-		"client_id": {clientID}, "client_secret": {secret}, "grant_type": {"authorization_code"},
-		"code": {code}, "redirect_uri": {redirect}, "code_verifier": {verifier},
+		"client_id": {clientID}, "client_secret": {secret}, "grant_type": {"authorization_code"}, "code": {code},
+	}
+	// Embedded App SDK codes are issued without a redirect URI or PKCE.
+	if redirect != "" {
+		form.Set("redirect_uri", redirect)
+	}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
 	}
 	cli := &http.Client{Timeout: 20 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))

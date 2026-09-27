@@ -4,13 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/discordbot/interactions"
-	"github.com/viewdock/viewdock/internal/labs"
 	"github.com/viewdock/viewdock/internal/library"
-	"github.com/viewdock/viewdock/internal/resilience"
 	"github.com/viewdock/viewdock/internal/search"
 	"github.com/viewdock/viewdock/internal/watchtogether"
 )
@@ -150,84 +147,4 @@ func titleOf(ctx context.Context, libs *library.Service, kind, id string) (strin
 		return fmt.Sprintf("Season %d, episode %d", ep.Season, ep.Number), nil
 	}
 	return "", errors.New("unsupported title kind")
-}
-
-// broadcastCheck reports the Labs broadcast pipeline on the resilience
-// dashboard.
-func broadcastCheck(b *labs.Broadcaster) resilience.Check {
-	return func(ctx context.Context) (string, any, error) {
-		if b == nil {
-			return resilience.StatusUnconfigured, nil, nil
-		}
-		status, h := b.DashboardStatus(ctx)
-		return status, h, nil
-	}
-}
-
-// labsSources resolves broadcaster selections to local media files.
-type labsSources struct {
-	hub  watchtogether.Coordinator
-	libs *library.Service
-
-	mu     sync.Mutex
-	titles map[string]string
-}
-
-func newLabsSources(hub watchtogether.Coordinator, libs *library.Service) *labsSources {
-	return &labsSources{hub: hub, libs: libs, titles: map[string]string{}}
-}
-
-func (s *labsSources) title(ctx context.Context, kind, id string) string {
-	key := kind + ":" + id
-	s.mu.Lock()
-	name, ok := s.titles[key]
-	s.mu.Unlock()
-	if ok {
-		return name
-	}
-	name, err := titleOf(ctx, s.libs, kind, id)
-	if err != nil {
-		return ""
-	}
-	s.mu.Lock()
-	if len(s.titles) > 256 {
-		s.titles = map[string]string{}
-	}
-	s.titles[key] = name
-	s.mu.Unlock()
-	return name
-}
-
-func (s *labsSources) Resolve(ctx context.Context, sel labs.Selection) (labs.SourceState, error) {
-	kind, id, pos, playing := sel.ItemKind, sel.ItemID, int64(0), true
-	if sel.RoomID != "" {
-		if s.hub == nil {
-			return labs.SourceState{}, labs.ErrSourceGone
-		}
-		st := s.hub.State(sel.RoomID)
-		if st == nil {
-			return labs.SourceState{}, labs.ErrSourceGone
-		}
-		kind, _ = st["item_kind"].(string)
-		id, _ = st["item_id"].(string)
-		pos, _ = st["position_ms"].(int64)
-		playing, _ = st["playing"].(bool)
-	}
-	loc, err := s.libs.LocateItem(ctx, kind, id)
-	if err != nil || loc == nil {
-		return labs.SourceState{}, labs.ErrSourceGone
-	}
-	return labs.SourceState{Path: loc.AbsPath, ItemKind: kind, ItemID: id, Title: s.title(ctx, kind, id), PositionMS: pos, Playing: playing}, nil
-}
-
-func (s *labsSources) ActiveParties(ctx context.Context) ([]labs.Party, error) {
-	if s.hub == nil {
-		return []labs.Party{}, nil
-	}
-	rooms := s.hub.Rooms()
-	out := make([]labs.Party, 0, len(rooms))
-	for _, r := range rooms {
-		out = append(out, labs.Party{RoomID: r.ID, Title: s.title(ctx, r.ItemKind, r.ItemID), ItemKind: r.ItemKind, ItemID: r.ItemID, Members: r.Members, Playing: r.Playing})
-	}
-	return out, nil
 }

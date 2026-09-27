@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { backupsApi, type BackupSummary, type BackupValidation } from "@/api/backups";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { Card, CardGrid, errText, PageHeader, primaryBtn } from "./ui";
 
 const QUERY_KEY = ["admin-backups"];
 
@@ -13,10 +14,6 @@ const TRIGGER_LABEL: Record<string, string> = {
   "pre-restore": "Before restore",
   cli: "Command line",
 };
-
-function errText(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback;
-}
 
 function when(iso?: string) {
   return iso ? new Date(iso).toLocaleString() : "";
@@ -149,27 +146,21 @@ export function BackupsPage() {
   };
 
   return (
-    <div className="max-w-3xl space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-base font-medium">Backups</h1>
-          <p className="text-sm text-dim">
-            Consistent backups of accounts, libraries, history and configuration. Media files are not included; back up
-            your media folders and object storage separately.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-green shrink-0 rounded-full px-4 py-1.5 text-sm"
-          disabled={busy || status?.running}
-          onClick={() => void create()}
-        >
-          {busy || status?.running ? "Backing up…" : "Back up now"}
-        </button>
-      </div>
-
+    <div className="space-y-4">
+      <PageHeader
+        title="Backups"
+        description="Consistent backups of accounts, libraries, history and configuration. Media files are not included; back up your media folders and object storage separately."
+        actions={
+          <button type="button" className={primaryBtn} disabled={busy || status?.running} onClick={() => void create()}>
+            {busy || status?.running ? "Backing up…" : "Back up now"}
+          </button>
+        }
+      />
+      <CardGrid>
+      <div className="min-w-0 space-y-4">
       {status ? (
-        <div className="space-y-1 rounded-md border border-line px-3 py-3 text-sm">
+        <Card id="backups-destination" title="Destination and schedule">
+          <div className="space-y-1 text-sm">
           <p>
             Destination: <span className="text-ink">{status.destination === "s3" ? "S3-compatible storage" : "Local folder"}</span>
             {status.location ? <span className="break-all text-dim"> · {status.location}</span> : null}
@@ -183,17 +174,25 @@ export function BackupsPage() {
             <p className="text-danger">The last scheduled backup failed at {when(status.last_failure_at)}. See Logs for details.</p>
           ) : null}
           <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-            <Link to="/admin/settings">Change backup settings</Link>
+            <Link className="text-accent" to="/admin/settings#settings-backups">
+              Change backup settings
+            </Link>
             <button type="button" onClick={() => void testDestination()}>
               Test destination
             </button>
             {check ? <span className={check.ok ? "text-ok" : "text-danger"}>{check.message}</span> : null}
           </div>
-        </div>
+          </div>
+        </Card>
       ) : null}
 
-      {status?.notice ? (
-        <p className="rounded-md border border-line bg-raised px-3 py-2 text-xs text-dim">
+      <Card id="backups-restore" title="Restoring">
+        <p className="text-xs text-dim">
+          Restoring replaces the database, so it runs from the command line with the server stopped:{" "}
+          <code className="text-ink">viewdock backup restore &lt;id&gt;</code>. Use Verify first to check the files and schema.
+        </p>
+        {status?.notice ? (
+        <p className="text-xs text-dim">
           {status.notice}
           {status.master_key_id ? (
             <>
@@ -202,8 +201,11 @@ export function BackupsPage() {
             </>
           ) : null}
         </p>
-      ) : null}
+        ) : null}
+      </Card>
+      </div>
 
+      <Card id="backups-list" title="Saved backups">
       {err ? <p className="text-sm text-danger">{err}</p> : null}
       {backups.data?.destination_error ? <p className="text-sm text-danger">{backups.data.destination_error}</p> : null}
       {backups.isLoading ? <p className="text-sm text-dim">Loading backups…</p> : null}
@@ -218,11 +220,8 @@ export function BackupsPage() {
           ))}
         </ul>
       ) : null}
-
-      <p className="text-xs text-dim">
-        Restoring replaces the database, so it runs from the command line with the server stopped:{" "}
-        <code className="text-ink">viewdock backup restore &lt;id&gt;</code>. Use Verify first to check the files and schema.
-      </p>
+      </Card>
+      </CardGrid>
     </div>
   );
 }

@@ -1,14 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Activity, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/api";
 import { getConnectivity, onConnectivity, type Connectivity } from "@/api/client";
 import { diagnosticsApi, type ResilienceDashboard, type Section } from "@/api/diagnostics";
 import { cn } from "@/lib/cn";
 import { errText, FlightEventList, FlightTimeline } from "./diagnostics/FlightTimeline";
 import { ReliabilityPanel } from "./diagnostics/ReliabilityPanel";
 import { formatAge, formatDuration, ms, statusLabel, statusTone } from "./diagnostics/format";
+import { PageHeader } from "./ui";
 
 const REFRESH_MS = 15_000;
 
@@ -166,51 +166,16 @@ function NodesSection({ section }: { section: ResilienceDashboard["nodes"] }) {
         </p>
       ) : null}
       {d && d.total > 0 ? (
-        <>
-          <p className="text-xs text-dim">
-            {d.healthy} healthy · {d.unhealthy} unhealthy · {d.draining} draining · {d.disabled} disabled
-          </p>
-          <div className="h-scroll">
-            <table className="w-full min-w-[640px] text-left text-xs">
-              <thead className="text-dim">
-                <tr>
-                  <th className="py-1 font-normal">Node</th>
-                  <th className="font-normal">Role</th>
-                  <th className="font-normal">Routing</th>
-                  <th className="font-normal">State</th>
-                  <th className="font-normal">Last failure</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.items.map((n) => {
-                  const state = !n.enabled ? "disabled" : n.draining ? "draining" : n.status;
-                  const tone = state === "healthy" ? "text-ok" : state === "unhealthy" ? "text-danger" : "text-warn";
-                  const sessions = typeof n.health?.sessions === "number" ? ` · ${n.health.sessions} sessions` : "";
-                  return (
-                    <tr key={n.id} className="border-t border-line align-top">
-                      <td className="py-2">
-                        <p className="font-medium">{n.name}</p>
-                        <p className="break-all text-dim">{n.endpoint}{n.region ? ` · ${n.region}` : ""}</p>
-                      </td>
-                      <td>{n.role}</td>
-                      <td>
-                        priority {n.priority} · weight {n.weight}
-                        {n.capacity ? ` · capacity ${n.capacity}` : ""}
-                      </td>
-                      <td>
-                        <span className={tone}>{state}</span>
-                        {state === "healthy" ? ` · ${n.latency_ms} ms${sessions}` : ""}
-                      </td>
-                      <td className="text-dim">
-                        {n.last_failure_at ? `${formatAge(n.last_failure_at)}${n.last_error ? `: ${n.last_error}` : ""}` : "none"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <p className="rounded-md border border-line px-3 py-3 text-sm">
+          <span className={d.unhealthy > 0 ? "text-danger" : "text-ok"}>{d.healthy} healthy</span>
+          <span className="text-dim">
+            {" "}
+            · {d.unhealthy} unhealthy · {d.draining} draining · {d.disabled} disabled.{" "}
+          </span>
+          <Link className="text-accent" to="/admin/nodes">
+            Manage nodes
+          </Link>
+        </p>
       ) : null}
     </section>
   );
@@ -273,29 +238,25 @@ function SessionsSection() {
 export function DiagnosticsPage() {
   const qc = useQueryClient();
   const dash = useQuery({ queryKey: ["resilience", "dashboard"], queryFn: diagnosticsApi.resilience, refetchInterval: REFRESH_MS });
-  const streams = useQuery({ queryKey: ["diagnostics", "streams"], queryFn: api.adminStreams, refetchInterval: REFRESH_MS });
   const d = dash.data;
   const failovers = d?.failovers.data?.events ?? [];
 
   return (
     <section className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Activity className="h-6 w-6 text-accent" />
-          <div>
-            <h1 className="text-xl font-semibold">Resilience</h1>
-            <p className="text-sm text-dim">Each service is checked separately, so one outage does not hide the others.</p>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs"
-          disabled={dash.isFetching}
-          onClick={() => void qc.invalidateQueries({ queryKey: ["resilience"] })}
-        >
-          <RefreshCw className={cn("h-3 w-3", dash.isFetching && "animate-spin")} /> Refresh
-        </button>
-      </header>
+      <PageHeader
+        title="Resilience"
+        description="Each service is checked separately, so one outage does not hide the others. Live sessions are under Streams."
+        actions={
+          <button
+            type="button"
+            className="flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs"
+            disabled={dash.isFetching}
+            onClick={() => void qc.invalidateQueries({ queryKey: ["resilience"] })}
+          >
+            <RefreshCw className={cn("h-3 w-3", dash.isFetching && "animate-spin")} /> Refresh
+          </button>
+        }
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <FrontendCard />
@@ -340,30 +301,6 @@ export function DiagnosticsPage() {
       ) : null}
 
       <SessionsSection />
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Active playback</h2>
-        {streams.isLoading ? <p className="text-sm text-dim">Loading sessions…</p> : null}
-        {streams.isError ? <p className="text-sm text-danger">{errText(streams.error, "Active sessions could not be loaded.")}</p> : null}
-        {streams.data?.length ? (
-          streams.data.map((stream) => (
-            <Link
-              key={stream.id}
-              to={`/admin/streams/${stream.id}`}
-              className="flex items-center justify-between rounded-lg border border-line bg-raised p-3 text-sm"
-            >
-              <span>
-                {stream.item_kind}/{stream.item_id}
-              </span>
-              <span className="text-dim">
-                {stream.delivery} · {stream.quality}
-              </span>
-            </Link>
-          ))
-        ) : streams.isSuccess ? (
-          <p className="text-sm text-dim">No active sessions.</p>
-        ) : null}
-      </section>
     </section>
   );
 }

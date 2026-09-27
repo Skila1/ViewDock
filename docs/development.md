@@ -51,7 +51,6 @@ Main server packages in `internal/`:
 | Sharing and parties | `share`, `watchtogether`, `discordbot` |
 | Storage and data | `db`, `storage`, `backup`, `upload`, `cache`, `secrets` |
 | Multi-server | `backend` (node registry and placement), `mesh`, `nodeauth`, `reliability`, `resilience` |
-| Experimental | `labs`, opt-in modules isolated from the core playback path |
 | Operations | `runtimecfg`, `config`, `settings`, `audit`, `oplog`, `log`, `diagnostics`, `inspector`, `update`, `installcompose`, `version` |
 
 ## Tests

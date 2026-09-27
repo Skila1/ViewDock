@@ -389,7 +389,13 @@ func reconcile(ctx context.Context, kv *settings.Store) {
 			st.LastStatus = "error"
 			st.LastError = "Update failed on the host: " + prog.Detail
 			_ = save(ctx, kv, st)
-		case prog.Stage == "restarting" || prog.Stage == "done":
+		case prog.Stage == "done":
+			// The host finished but could not record the image digest.
+			st.LastStatus = "ok"
+			st.LastError = ""
+			st.Available = versionUpdateAvailable(version.Version, st.LatestVersion)
+			_ = save(ctx, kv, st)
+		case prog.Stage == "restarting":
 			// The host is replacing this container; the new one finishes the update.
 			if started != nil && time.Since(*started) > 30*time.Minute {
 				st.LastStatus = "error"

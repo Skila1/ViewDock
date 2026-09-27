@@ -184,7 +184,17 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 	case !strings.EqualFold(current, app.VerifyKey):
 		keyStatus = "mismatch"
 	}
-	cmds, err := bot.OverwriteCommands(ctx, app.ID, body.GuildID, Commands())
+	want := Commands()
+	if body.GuildID == "" {
+		// Entry point commands exist only globally.
+		existing, err := bot.ListCommands(ctx, app.ID, "")
+		if err != nil {
+			s.discordFailure(w, "commands", err)
+			return
+		}
+		want = withEntryPoints(want, existing)
+	}
+	cmds, err := bot.OverwriteCommands(ctx, app.ID, body.GuildID, want)
 	if err != nil {
 		s.discordFailure(w, "commands", err)
 		return

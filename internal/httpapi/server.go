@@ -34,6 +34,9 @@ type Server struct {
 	APIMounts []RouteMount
 	// Features reports administrator feature flags to clients.
 	Features func() map[string]bool
+	// FrameAncestors lists origins allowed to embed the app (the Discord
+	// Activity). Empty or nil keeps framing denied.
+	FrameAncestors func(ctx context.Context) []string
 }
 
 func New(cfg config.Config, sqlDB *sql.DB, logger *slog.Logger, web fs.FS) *Server {
@@ -47,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	r.Use(s.accessLog)
 	r.Use(middleware.Recoverer)
 	r.Use(secureHeaders)
+	r.Use(s.frameAncestors)
 	r.Use(noStoreAPI)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.allowedOrigins(),

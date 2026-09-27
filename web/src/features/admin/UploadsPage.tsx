@@ -6,6 +6,7 @@ import { api } from "@/api/api";
 import { formatBytes } from "@/lib/format";
 import { VIDEO_ACCEPT } from "@/lib/videoFile";
 import { useUploads, type UploadJob } from "@/store/uploads";
+import { Card, CardGrid, PageHeader } from "./ui";
 
 function itemHref(job: UploadJob): string | null {
   if (!job.itemId) return null;
@@ -67,16 +68,14 @@ export function UploadsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-base font-medium">Uploads</h1>
-        <p className="text-sm text-dim">
-          Add videos to a library from this browser. Maximum 10 GB per file. Hidden and non-video files are ignored.
-          Duplicate names get a number, existing files are never overwritten.
-        </p>
-      </div>
-
-      <form onSubmit={onSubmit} className="max-w-xl space-y-3">
+    <div className="space-y-4">
+      <PageHeader
+        title="Uploads"
+        description="Add videos to a library from this browser. Maximum 10 GB per file. Hidden and non-video files are ignored. Duplicate names get a number, existing files are never overwritten."
+      />
+      <CardGrid>
+      <Card id="uploads-add" title="Add videos">
+      <form onSubmit={onSubmit} className="space-y-3">
         <label className="block text-xs text-dim">
           Destination library
           <select className="mt-1 w-full" value={libraryId} onChange={(e) => setLibraryId(e.target.value)}>
@@ -117,16 +116,19 @@ export function UploadsPage() {
         </div>
         {note ? <p className="text-xs text-warn">{note}</p> : null}
       </form>
+      </Card>
 
-      <section className="space-y-2">
-        <h2 className="text-[13px] font-medium text-dim">Active and recent</h2>
+      <Card id="uploads-jobs" title="Active and recent">
         {jobs.length === 0 ? <p className="text-xs text-dim">No uploads yet.</p> : null}
-        <ul className="divide-y divide-line rounded-md border border-line">
-          {jobs.map((job) => (
-            <UploadRow key={job.localId} job={job} />
-          ))}
-        </ul>
-      </section>
+        {jobs.length ? (
+          <ul className="divide-y divide-line rounded-md border border-line">
+            {jobs.map((job) => (
+              <UploadRow key={job.localId} job={job} />
+            ))}
+          </ul>
+        ) : null}
+      </Card>
+      </CardGrid>
     </div>
   );
 }

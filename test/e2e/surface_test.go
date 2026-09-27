@@ -37,7 +37,7 @@ func TestAPISurface(t *testing.T) {
 	mounted := []string{
 		"/api/v1/admin/resilience", "/api/v1/admin/resilience/sessions", "/api/v1/admin/resilience/reliability",
 		"/api/v1/admin/backups", "/api/v1/admin/households", "/api/v1/content-restriction", "/api/v1/offline/policy",
-		"/api/v1/admin/integrations/discord/interactions", "/api/v1/admin/labs/vcam",
+		"/api/v1/admin/integrations/discord/interactions", "/api/v1/auth/discord/activity",
 	}
 	for _, path := range mounted {
 		status, raw, err := c.try("GET", path, nil)
@@ -53,11 +53,6 @@ func TestAPISurface(t *testing.T) {
 			t.Errorf("resilience %s section not ok: %v", section, sec)
 		}
 	}
-	extra, _ := dash["extra"].(map[string]any)
-	if b, _ := extra["experimental_broadcast"].(map[string]any); b == nil || b["status"] == "" || b["status"] == nil {
-		t.Errorf("broadcast pipeline status missing from the dashboard: %v", dash["extra"])
-	}
-
 	// Collections are shared across accounts, so only library managers may
 	// change them.
 	var col map[string]any

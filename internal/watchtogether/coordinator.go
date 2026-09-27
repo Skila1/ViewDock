@@ -20,8 +20,8 @@ import (
 )
 
 // Coordinator is the watch party surface used outside the room routes:
-// playback authorization for party-only accounts, Discord commands, Labs
-// sources and diagnostics. *Hub implements it in process and *Remote against
+// playback authorization for party-only accounts, Discord commands and
+// diagnostics. *Hub implements it in process and *Remote against
 // a separately deployed coordinator.
 type Coordinator interface {
 	PartyAccess(principalID, itemKind, itemID string) bool

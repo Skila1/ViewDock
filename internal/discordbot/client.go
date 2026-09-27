@@ -157,6 +157,7 @@ type Application struct {
 	Name                    string `json:"name"`
 	VerifyKey               string `json:"verify_key"`
 	InteractionsEndpointURL string `json:"interactions_endpoint_url"`
+	Flags                   uint64 `json:"flags"`
 }
 
 // CurrentApplication returns the application that owns the bot token.
@@ -169,6 +170,51 @@ func (c *Client) CurrentApplication(ctx context.Context) (Application, error) {
 		return Application{}, errors.New("discord returned an invalid application id")
 	}
 	return app, nil
+}
+
+// ApplicationFlagEmbedded is set on applications with Activities enabled.
+const ApplicationFlagEmbedded = 1 << 17
+
+// ActivityInstance is a running Discord Activity: where it was launched and
+// which Discord users are in it.
+type ActivityInstance struct {
+	InstanceID string `json:"instance_id"`
+	Location   struct {
+		Kind      string `json:"kind"`
+		ChannelID string `json:"channel_id"`
+		GuildID   string `json:"guild_id"`
+	} `json:"location"`
+	Users []string `json:"users"`
+}
+
+var activityInstanceID = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+
+// ValidActivityInstanceID reports whether id looks like an Activity instance ID.
+func ValidActivityInstanceID(id string) bool { return activityInstanceID.MatchString(id) }
+
+// GetActivityInstance looks up a running instance of the application's Activity.
+func (c *Client) GetActivityInstance(ctx context.Context, appID, instanceID string) (ActivityInstance, error) {
+	if !ValidSnowflake(appID) {
+		return ActivityInstance{}, errors.New("application id must be a Discord ID")
+	}
+	if !ValidActivityInstanceID(instanceID) {
+		return ActivityInstance{}, errors.New("invalid activity instance id")
+	}
+	var inst ActivityInstance
+	if err := c.do(ctx, http.MethodGet, "/applications/"+appID+"/activity-instances/"+url.PathEscape(instanceID), nil, &inst); err != nil {
+		return ActivityInstance{}, err
+	}
+	return inst, nil
+}
+
+// Has reports whether the Discord user is in the instance.
+func (a ActivityInstance) Has(userID string) bool {
+	for _, id := range a.Users {
+		if id == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // SetInteractionsEndpoint points the application's interactions endpoint at
@@ -215,7 +261,14 @@ type Command struct {
 	Description string          `json:"description"`
 	Options     []CommandOption `json:"options,omitempty"`
 	Contexts    []int           `json:"contexts,omitempty"`
+	// Handler and IntegrationTypes are set on Activity entry point commands.
+	Handler          int   `json:"handler,omitempty"`
+	IntegrationTypes []int `json:"integration_types,omitempty"`
 }
+
+// CommandEntryPoint is the command type Discord creates for an Activity's
+// launch button. A bulk overwrite must keep it or Discord rejects the request.
+const CommandEntryPoint = 4
 
 // OverwriteCommands replaces the application's commands, globally when
 // guildID is empty or for one guild (applies immediately) otherwise.

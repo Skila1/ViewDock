@@ -26,6 +26,8 @@ type hostProgressFile struct {
 
 var percentRe = regexp.MustCompile(`([0-9]{1,3})%`)
 
+// HelperActive reports an update still running on the host. A finished run
+// ("done") is not active, so the recreated container can complete it at once.
 func HelperActive() bool {
 	path := filepath.Join(RequestDir(), "progress.json")
 	st, err := os.Stat(path)
@@ -41,7 +43,7 @@ func HelperActive() bool {
 		return false
 	}
 	switch f.Stage {
-	case "queued", "pulling", "restarting", "done":
+	case "queued", "pulling", "restarting":
 		return true
 	default:
 		return false
@@ -49,7 +51,7 @@ func HelperActive() bool {
 }
 
 func ReadHostProgress(active bool) Progress {
-	logText := tailFile(filepath.Join(RequestDir(), "last.log"), 24)
+	logText := currentRun(tailFile(filepath.Join(RequestDir(), "last.log"), 24))
 	p := Progress{Log: logText}
 	raw, err := os.ReadFile(filepath.Join(RequestDir(), "progress.json"))
 	if err == nil {
@@ -112,6 +114,18 @@ func inferProgress(logText string, pending bool) Progress {
 		p.Detail = last
 	}
 	return p
+}
+
+// currentRun keeps the log from the last run marker written by host-update.sh,
+// so lines from earlier updates are not shown as progress.
+func currentRun(logText string) string {
+	lines := strings.Split(logText, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "---- ") {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return logText
 }
 
 func lastNonEmptyLine(s string) string {

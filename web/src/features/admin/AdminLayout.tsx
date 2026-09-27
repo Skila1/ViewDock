@@ -2,25 +2,7 @@ import { NavLink, Outlet } from "react-router";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import { useUploads } from "@/store/uploads";
-
-const links = [
-  { to: "/admin", label: "Overview", end: true },
-  { to: "/admin/uploads", label: "Uploads" },
-  { to: "/admin/streams", label: "Streams" },
-  { to: "/admin/diagnostics", label: "Resilience" },
-  { to: "/admin/nodes", label: "Nodes" },
-  { to: "/admin/users", label: "Users" },
-  { to: "/admin/households", label: "Households" },
-  { to: "/admin/roles", label: "Groups" },
-  { to: "/admin/grants", label: "Grants" },
-  { to: "/admin/settings", label: "Settings" },
-  { to: "/admin/backups", label: "Backups" },
-  { to: "/admin/api-keys", label: "API keys" },
-  { to: "/admin/logs", label: "Logs" },
-  { to: "/admin/discord", label: "Discord" },
-  { to: "/admin/labs", label: "Labs" },
-  { to: "/admin/updates", label: "Updates" },
-];
+import { ADMIN_LINKS } from "./adminNav";
 
 export function AdminLayout() {
   const jobs = useUploads((s) => s.jobs);
@@ -28,18 +10,14 @@ export function AdminLayout() {
 
   return (
     <div>
-      <nav className="h-scroll mb-4 flex gap-1 pb-1 text-sm">
-        {links.map((l) => (
+      {/* On wider screens the admin links replace the main sidebar. */}
+      <nav aria-label="Admin" className="h-scroll mb-4 flex gap-1 pb-1 text-sm md:hidden">
+        {ADMIN_LINKS.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
             end={l.end}
-            className={({ isActive }) =>
-              cn(
-                "tap shrink-0 rounded-full px-3 text-dim",
-                isActive && "bg-overlay text-ink",
-              )
-            }
+            className={({ isActive }) => cn("tap shrink-0 rounded-full px-3 text-dim", isActive && "bg-overlay text-ink")}
           >
             {l.label}
           </NavLink>

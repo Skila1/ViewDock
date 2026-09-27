@@ -10,7 +10,6 @@ import (
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/discordbot/interactions"
-	"github.com/viewdock/viewdock/internal/labs"
 	"github.com/viewdock/viewdock/internal/library"
 	"github.com/viewdock/viewdock/internal/search"
 	"github.com/viewdock/viewdock/internal/watchtogether"
@@ -138,34 +137,5 @@ func TestDiscordPartiesControlIsHostOnly(t *testing.T) {
 	}
 	if err := parties.Control(ctx, host, "missing", interactions.ActionPause); !errors.Is(err, interactions.ErrRoomNotFound) {
 		t.Fatalf("missing room err = %v", err)
-	}
-}
-
-func TestLabsSourcesFollowParty(t *testing.T) {
-	_, libs, hub := adapterFixture(t)
-	src := newLabsSources(hub, libs)
-	ctx := context.Background()
-	host := &auth.Principal{Kind: auth.KindUser, UserID: "host"}
-	room, err := hub.Create(ctx, host, "movie", "m2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := src.Resolve(ctx, labs.Selection{RoomID: room.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Path != filepath.FromSlash("/x/b.mp4") || got.ItemID != "m2" || got.Title != "Signal Kids" || got.Playing {
-		t.Fatalf("party source = %+v", got)
-	}
-	single, err := src.Resolve(ctx, labs.Selection{ItemKind: "movie", ItemID: "m1"})
-	if err != nil || single.Path != filepath.FromSlash("/x/a.mp4") || !single.Playing {
-		t.Fatalf("title source = %+v err %v", single, err)
-	}
-	if _, err := src.Resolve(ctx, labs.Selection{RoomID: "missing"}); !errors.Is(err, labs.ErrSourceGone) {
-		t.Fatalf("missing room err = %v", err)
-	}
-	parties, err := src.ActiveParties(ctx)
-	if err != nil || len(parties) != 1 || parties[0].RoomID != room.ID || parties[0].Title != "Signal Kids" {
-		t.Fatalf("active parties = %+v err %v", parties, err)
 	}
 }

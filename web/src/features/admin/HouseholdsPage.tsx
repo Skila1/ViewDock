@@ -10,6 +10,7 @@ import {
   type HouseholdInvite,
   type HouseholdMember,
 } from "@/api/households";
+import { Card, CardGrid, PageHeader, secondaryBtn } from "./ui";
 
 const MEMBER_ROLES: AssignableHouseholdRole[] = ["adult", "member", "child"];
 
@@ -39,15 +40,14 @@ export function HouseholdsPage() {
   const households = list.data ?? [];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-base font-medium">Households</h1>
-          <p className="text-sm text-dim">
-            People join a household by accepting an invite. Administrators can reorganise existing members, set content
-            restrictions and transfer ownership.
-          </p>
-        </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Households"
+        description="People join a household by accepting an invite. Administrators can reorganise existing members, set content restrictions and transfer ownership."
+      />
+      <CardGrid>
+      <div className="min-w-0 space-y-4">
+        <Card id="households-list" title="All households">
         {list.isLoading ? <p className="text-xs text-dim">Loading…</p> : null}
         {list.isError ? <p className="text-xs text-danger">Households are unavailable.</p> : null}
         {!list.isLoading && !list.isError && households.length === 0 ? (
@@ -74,9 +74,10 @@ export function HouseholdsPage() {
             ))}
           </ul>
         ) : null}
+        </Card>
 
+        <Card id="households-create" title="Create household">
         <form onSubmit={create} className="space-y-2">
-          <h2 className="text-sm font-medium">Create household</h2>
           <input className="w-full" placeholder="Household name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} required />
           <select className="w-full" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} required>
             <option value="">Select an owner (not already in a household).</option>
@@ -86,14 +87,15 @@ export function HouseholdsPage() {
               </option>
             ))}
           </select>
-          <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
+          <button type="submit" className={secondaryBtn}>
             Create
           </button>
         </form>
         {err ? <p className="text-xs text-danger">{err}</p> : null}
+        </Card>
       </div>
 
-      <div>
+      <div className="min-w-0">
         {selected ? (
           <HouseholdDetail
             key={selected}
@@ -105,6 +107,7 @@ export function HouseholdsPage() {
           <p className="text-xs text-dim">Select a household to manage members.</p>
         )}
       </div>
+      </CardGrid>
     </div>
   );
 }
@@ -148,7 +151,7 @@ function HouseholdDetail({ id, others, onDeleted }: { id: string; others: Househ
     run(() => adminHouseholds.updateMember(id, m.id, body), "Member updated");
 
   return (
-    <div className="space-y-4 rounded-md border border-line p-3">
+    <Card id="household-detail" title={household.name} description={`${members.length} member${members.length === 1 ? "" : "s"}`}>
       <form
         className="flex flex-wrap items-center gap-2"
         onSubmit={(e: FormEvent) => {
@@ -159,7 +162,6 @@ function HouseholdDetail({ id, others, onDeleted }: { id: string; others: Househ
       >
         {rename === null ? (
           <>
-            <h2 className="text-sm font-medium">{household.name}</h2>
             <button type="button" className="text-xs text-accent" onClick={() => setRename(household.name)}>
               Rename
             </button>
@@ -319,6 +321,6 @@ function HouseholdDetail({ id, others, onDeleted }: { id: string; others: Househ
 
       {msg ? <p className="text-xs text-accent">{msg}</p> : null}
       {err ? <p className="text-xs text-danger">{err}</p> : null}
-    </div>
+    </Card>
   );
 }

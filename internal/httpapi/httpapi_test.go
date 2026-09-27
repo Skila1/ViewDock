@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +22,26 @@ func TestHealthz(t *testing.T) {
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
 		t.Fatalf("healthz %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFramingFollowsFrameAncestors(t *testing.T) {
+	s := New(config.Config{}, nil, nil, fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}})
+	var origins []string
+	s.FrameAncestors = func(context.Context) []string { return origins }
+	h := s.Handler()
+	serve := func() http.Header {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		return rec.Header()
+	}
+	if hdr := serve(); hdr.Get("X-Frame-Options") != "DENY" || hdr.Get("Content-Security-Policy") != "" {
+		t.Fatalf("default headers = %v", hdr)
+	}
+	origins = []string{"https://discord.com", "https://1.discordsays.com"}
+	hdr := serve()
+	if hdr.Get("X-Frame-Options") != "" || hdr.Get("Content-Security-Policy") != "frame-ancestors 'self' https://discord.com https://1.discordsays.com" {
+		t.Fatalf("embedding headers = %v", hdr)
 	}
 }
 

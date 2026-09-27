@@ -73,21 +73,9 @@ func (s *Service) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/settings/connected?linked=1", http.StatusFound)
 		return
 	}
-	if _, exists := s.userByDiscord(r.Context(), prof.ID); exists != nil {
-		if !isAdminDiscordID(prof.ID, oauth.AdminDiscordIDs) {
-			if err := CheckDiscordRegistration(r.Context(), access, oauth.DiscordRegistration); err != nil {
-				fail(err.Error())
-				return
-			}
-		}
-	}
-	u, err := s.UpsertDiscordUser(r.Context(), prof)
+	u, err := s.discordAccount(r.Context(), oauth, prof, access)
 	if err != nil {
 		fail(err.Error())
-		return
-	}
-	if u.Disabled {
-		fail("disabled")
 		return
 	}
 	raw, exp, err := s.Sessions.Create(r.Context(), u.ID, httpapi.ClientIPString(r, s.Cfg), r.UserAgent())
@@ -95,10 +83,7 @@ func (s *Service) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		fail("session")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: SessionCookie, Value: raw, Path: "/", HttpOnly: true,
-		Secure: httpapi.CookieSecure(r, s.Cfg), SameSite: http.SameSiteLaxMode, Expires: exp,
-	})
+	s.setSessionCookie(w, r, raw, exp)
 	_, _ = IssueCSRF(w, r, s.Cfg)
 	s.Audit.Event(r.Context(), u.ID, "login.discord", prof.ID, httpapi.ClientIPString(r, s.Cfg), "")
 	http.Redirect(w, r, "/", http.StatusFound)

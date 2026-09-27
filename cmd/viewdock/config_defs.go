@@ -25,6 +25,7 @@ const (
 	cfgDiscordSeparate   = "discord.bot.separate"
 	cfgDiscordSepToken   = "discord.bot.separate_token"
 	cfgDiscordSepKey     = "discord.bot.separate_public_key"
+	cfgDiscordActivity   = "discord.activity.enabled"
 	cfgBlockUnrated      = "content.block_unrated"
 	cfgCertCountry       = "metadata.certification_country"
 	cfgOfflineMaxItems   = "offline.max_items"
@@ -73,26 +74,28 @@ func configDefs(cfg config.Config) []runtimecfg.Def {
 			Help: "Bot token of a separate Discord application. Used only when the separate bot configuration is on."},
 		{Key: cfgDiscordSepKey, Label: "Separate Discord bot public key", Category: "Discord", Kind: runtimecfg.KindSecret,
 			Help: "Hex Ed25519 public key of the separate bot application. Used only when the separate bot configuration is on."},
+		{Key: cfgDiscordActivity, Label: "Discord Activity", Category: "Discord", Kind: runtimecfg.KindBool, Default: "0",
+			Help: "Lets people open ViewDock inside a Discord voice channel and watch that channel's party together. Uses the sign-in application; Activities must also be enabled for it in the Developer Portal."},
 		{Key: cfgTranscodeSlots, Label: "Concurrent transcodes", Category: "Playback", Kind: runtimecfg.KindInt,
 			Default: strconv.Itoa(bandwidth.DefaultSlots), Min: 1, Max: 64,
 			Help: "Simultaneous FFmpeg transcodes on this node. New sessions beyond the limit are refused."},
 		{Key: cfgMeshPlayback, Label: "Play on registered media workers", Category: "Playback", Kind: runtimecfg.KindBool, Default: "0",
 			Help: "Place new playback sessions on healthy registered workers instead of this server. Always on when VD_ROLE=control."},
-		{Key: cfgDownloads, Label: "Downloads and Offline Vault", Category: "Features", Kind: runtimecfg.KindBool, Default: "1"},
-		{Key: cfgOfflineMaxItems, Label: "Offline titles per account per device", Category: "Features", Kind: runtimecfg.KindInt,
+		{Key: cfgDownloads, Label: "Downloads and Offline Vault", Category: "Offline Vault", Kind: runtimecfg.KindBool, Default: "1"},
+		{Key: cfgOfflineMaxItems, Label: "Offline titles per account per device", Category: "Offline Vault", Kind: runtimecfg.KindInt,
 			Default: strconv.Itoa(download.DefaultMaxItems), Min: 1, Max: download.MaxItemsLimit,
 			Help: "Most titles one account may keep in the Offline Vault on a single device."},
-		{Key: cfgOfflineExpiryDays, Label: "Offline download expiry (days)", Category: "Features", Kind: runtimecfg.KindInt,
+		{Key: cfgOfflineExpiryDays, Label: "Offline download expiry (days)", Category: "Offline Vault", Kind: runtimecfg.KindInt,
 			Default: strconv.Itoa(download.DefaultExpiryDays), Min: 0, Max: download.MaxExpiryDays,
 			Help: "Days after download before an offline title is removed. 0 keeps titles until the user removes them. Shortening this also shortens existing downloads the next time the device is online."},
-		{Key: cfgOfflineMaxItemGB, Label: "Largest offline title (GB)", Category: "Features", Kind: runtimecfg.KindInt,
+		{Key: cfgOfflineMaxItemGB, Label: "Largest offline title (GB)", Category: "Offline Vault", Kind: runtimecfg.KindInt,
 			Default: "0", Min: 0, Max: 1024,
 			Help: "Titles larger than this cannot be saved offline. 0 means no limit beyond device storage."},
 		{Key: cfgBlockUnrated, Label: "Hide unrated titles from restricted viewers", Category: "Accounts", Kind: runtimecfg.KindBool,
 			Default: "1", Help: "Applies only to accounts with a content restriction. Turn off to show titles that have no rating."},
 		{Key: cfgCertCountry, Label: "Content rating country", Category: "Metadata", Kind: runtimecfg.KindString,
 			Default: "US", Help: "Two-letter ISO country code whose TMDB certification becomes the title rating. US is the fallback."},
-		{Key: cfgWatchTogether, Label: "Watch parties", Category: "Features", Kind: runtimecfg.KindBool, Default: "1"},
+		{Key: cfgWatchTogether, Label: "Watch parties", Category: "Watch parties", Kind: runtimecfg.KindBool, Default: "1"},
 		{Key: cfgHardDrift, Label: "Party hard resync threshold (ms)", Category: "Watch parties", Kind: runtimecfg.KindInt,
 			Default: "1000", Min: 250, Max: 10000, Help: "Members further than this from the room timeline seek to it. Smaller drift above 250 ms is corrected by adjusting playback speed."},
 		{Key: cfgGuestHours, Label: "Longest guest account lifetime (hours)", Category: "Accounts", Kind: runtimecfg.KindInt,

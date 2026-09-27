@@ -19,6 +19,8 @@ func (s *Service) Routes(r chi.Router) {
 	r.With(RequireUser).Post("/auth/logout-all", s.handleLogoutAll)
 	r.Get("/auth/discord", s.handleDiscordStart)
 	r.Get("/auth/discord/callback", s.handleDiscordCallback)
+	r.Get("/auth/discord/activity", s.handleActivityConfig)
+	r.With(RateLimit(s.Cfg, 10, time.Minute)).Post("/auth/discord/activity", s.handleActivitySignIn)
 	r.With(RequireUser).Get("/me", s.handleMe)
 	r.With(RequireUser).Patch("/me", s.handlePatchMe)
 	r.With(RequireUser).Get("/me/preferences", s.handleGetPrefs)
@@ -70,10 +72,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: SessionCookie, Value: raw, Path: "/", HttpOnly: true,
-		Secure: httpapi.CookieSecure(r, s.Cfg), SameSite: http.SameSiteLaxMode, Expires: exp,
-	})
+	s.setSessionCookie(w, r, raw, exp)
 	if _, err := IssueCSRF(w, r, s.Cfg); err != nil {
 		httpapi.WriteErr(w, 500, "csrf", "failed")
 		return
@@ -86,7 +85,7 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		s.Sessions.Delete(r.Context(), c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1})
+	s.clearSessionCookie(w, r)
 	httpapi.WriteOK(w)
 }
 
@@ -184,7 +183,7 @@ func (s *Service) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
 	p := FromRequest(r)
 	s.Sessions.DeleteAllForUser(r.Context(), p.UserID)
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1})
+	s.clearSessionCookie(w, r)
 	httpapi.WriteOK(w)
 }
 

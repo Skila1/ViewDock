@@ -123,6 +123,11 @@ type Deps struct {
 	Gateway func() gateway.Status
 	// ReconnectGateway asks the presence connection to retry now. Optional.
 	ReconnectGateway func()
+	// ActivityEnabled reports the Discord Activity switch; nil means off.
+	ActivityEnabled func() bool
+	// DiscordUserID returns the Discord account linked to a ViewDock user,
+	// or "". *auth.Service implements it.
+	DiscordUserID func(ctx context.Context, userID string) string
 }
 
 // BotSetup describes the bot credentials in use, never their values.

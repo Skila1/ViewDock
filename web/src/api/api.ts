@@ -56,6 +56,8 @@ import { asArray } from "@/lib/asArray";
 import { clearCsrf, ensureCsrf, head, request } from "./client";
 import { detectClientProfile } from "./profile";
 
+export type ActivityRoom = { room_id: string; invite_code: string; title: string; created?: boolean };
+
 // Per-session calls go to the media worker that owns the session. Workers
 // authenticate these with the session stream token, so no cookie is required.
 const sessionBases = new Map<string, { base: string; stoken?: string }>();
@@ -93,6 +95,22 @@ export const api = {
     await request("/api/v1/auth/logout", { method: "POST", body: {} });
     clearCsrf();
   },
+  getActivityConfig: () =>
+    request<{ enabled: boolean; client_id?: string; scopes?: string[] }>("/api/v1/auth/discord/activity"),
+  activitySignIn: async (code: string) => {
+    const out = await request<{ access_token: string; user: Me }>("/api/v1/auth/discord/activity", {
+      method: "POST",
+      body: { code },
+    });
+    clearCsrf();
+    await ensureCsrf();
+    return out;
+  },
+  activityRoom: (body: { instance_id: string; item_kind?: "movie" | "episode"; item_id?: string }) =>
+    request<{ room: ActivityRoom | null; can_create?: boolean }>("/api/v1/discord/activity/room", {
+      method: "POST",
+      body,
+    }),
   getMe: () => request<Me>("/api/v1/me"),
   patchMe: (body: { display_name: string }) =>
     request<Me>("/api/v1/me", { method: "PATCH", body, queueWhenOffline: true }),
@@ -252,6 +270,10 @@ export const api = {
   deleteRole: (id: string) => request(`/api/v1/admin/roles/${id}`, { method: "DELETE" }),
   addRoleMembers: (id: string, userIds: string[]) =>
     request(`/api/v1/admin/roles/${id}/members`, { method: "POST", body: { user_ids: userIds } }),
+  getRole: (id: string) =>
+    request<{ role: RoleRow; members: { id: string; username: string; display_name: string }[] }>(`/api/v1/admin/roles/${id}`),
+  removeRoleMember: (id: string, userId: string) =>
+    request(`/api/v1/admin/roles/${id}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   listLibraryGrants: (libraryId: string) =>
     request<{ users: import("@/types/api.gen").LibraryGrantUser[]; roles: import("@/types/api.gen").LibraryGrantRole[] }>(
       `/api/v1/admin/libraries/${libraryId}/grants`,

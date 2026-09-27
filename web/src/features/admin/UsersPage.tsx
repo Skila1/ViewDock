@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
+import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
 import { ageLimitLabel, ageLimitOptions, contentRatings, type ContentRestriction } from "@/api/households";
 import { useAuth } from "@/store/auth";
+import { Card, CardGrid, PageHeader, secondaryBtn } from "./ui";
 
 type RestrictedUser = { content_age_limit?: number; content_restriction?: ContentRestriction };
 
@@ -105,10 +107,14 @@ export function UsersPage() {
     set(current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
   };
 
+  const libName = (id: string) => (libs.data ?? []).find((l) => l.id === id)?.name ?? id;
+  const roleName = (id: string) => (roles.data ?? []).find((r) => r.id === id)?.name ?? id;
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div>
-        <h1 className="mb-3 text-base font-medium">Users</h1>
+    <div className="space-y-4">
+      <PageHeader title="Users" description="Accounts, their status and content restrictions. Groups and library access are edited on their own pages." />
+      <CardGrid>
+      <Card id="users-list" title="People">
         <ul className="divide-y divide-line rounded-md border border-line">
           {(users.data ?? []).map((u) => (
             <li key={u.id}>
@@ -131,17 +137,19 @@ export function UsersPage() {
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-4">
         {discordOnly ? (
-          <p className="text-xs text-dim">
-            Discord sign-in is on, so local accounts cannot be created. New people join through Discord
-            (and the guild/role whitelist). Link Discord on an existing account under Settings → Connected.
-          </p>
+          <Card id="users-create" title="New accounts">
+            <p className="text-xs text-dim">
+              Discord sign-in is on, so local accounts cannot be created. New people join through Discord (and the server and role
+              whitelist). Link Discord on an existing account under Settings, Connected accounts.
+            </p>
+          </Card>
         ) : (
+        <Card id="users-create" title="Create user">
         <form onSubmit={onCreate} className="space-y-2">
-          <h2 className="text-sm font-medium">Create user</h2>
           <input className="w-full" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <input className="w-full" placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           <input className="w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
@@ -157,39 +165,16 @@ export function UsersPage() {
               </label>
             ))}
           </div>
-          <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white">
+          <button type="submit" className={secondaryBtn}>
             Create
           </button>
         </form>
+        </Card>
         )}
         {err ? <p className="text-xs text-danger">{err}</p> : null}
 
         {detail.data ? (
-          <div className="space-y-3 rounded-md border border-line p-3">
-            <h2 className="text-sm font-medium">{detail.data.display_name || detail.data.username}</h2>
-            <div className="flex flex-wrap gap-2 text-xs">
-              {(roles.data ?? []).filter((r) => r.id !== "sys-superadmin" || canAssignSuperadmin).map((r) => {
-                const locked = r.id === "sys-superadmin" && detail.data.protected;
-                return (
-                <label key={r.id} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={(detail.data.role_ids ?? []).includes(r.id) || locked}
-                    disabled={locked}
-                    onChange={async () => {
-                      const next = (detail.data.role_ids ?? []).includes(r.id)
-                        ? (detail.data.role_ids ?? []).filter((id) => id !== r.id)
-                        : [...(detail.data.role_ids ?? []), r.id];
-                      await api.patchUser(detail.data.id, { role_ids: next });
-                      await qc.invalidateQueries({ queryKey: ["user", detail.data.id] });
-                      await qc.invalidateQueries({ queryKey: ["users"] });
-                    }}
-                  />
-                  {r.name}
-                </label>
-                );
-              })}
-            </div>
+          <Card id="users-detail" title={detail.data.display_name || detail.data.username} description={detail.data.username}>
             <ContentLimitField
               userId={detail.data.id}
               user={detail.data as RestrictedUser}
@@ -234,53 +219,32 @@ export function UsersPage() {
                 </button>
               )}
             </div>
-            <div>
-              <h3 className="mb-1 text-xs font-medium">Library grants</h3>
-              <ul className="space-y-1 text-xs">
-                {(libs.data ?? []).map((lib) => {
-                  const g = (detail.data.grants ?? []).find((x) => x.library_id === lib.id);
-                  return (
-                    <li key={lib.id} className="flex items-center justify-between gap-2">
-                      <span>{lib.name}</span>
-                      <span className="flex items-center gap-2">
-                        <label className="flex items-center gap-1">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(g)}
-                            onChange={async () => {
-                              if (g) await api.deleteUserGrant(detail.data.id, lib.id);
-                              else await api.setUserGrant(detail.data.id, { library_id: lib.id, can_download: false });
-                              await qc.invalidateQueries({ queryKey: ["user", detail.data.id] });
-                            }}
-                          />
-                          access
-                        </label>
-                        <label className="flex items-center gap-1">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(g?.can_download)}
-                            disabled={!g}
-                            onChange={async () => {
-                              await api.setUserGrant(detail.data.id, {
-                                library_id: lib.id,
-                                can_download: !g?.can_download,
-                              });
-                              await qc.invalidateQueries({ queryKey: ["user", detail.data.id] });
-                            }}
-                          />
-                          download
-                        </label>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-line pt-3 text-xs">
+              <dt className="text-dim">Groups</dt>
+              <dd>
+                {(detail.data.role_ids ?? []).length ? (detail.data.role_ids ?? []).map(roleName).join(", ") : "None"}{" "}
+                <Link className="text-accent" to="/admin/roles">
+                  Manage groups
+                </Link>
+              </dd>
+              <dt className="text-dim">Library access</dt>
+              <dd>
+                {(detail.data.grants ?? []).length
+                  ? (detail.data.grants ?? []).map((g) => `${libName(g.library_id)}${g.can_download ? " (downloads)" : ""}`).join(", ")
+                  : detail.data.is_admin
+                    ? "Every library (administrator)"
+                    : "No direct access; groups may grant more"}{" "}
+                <Link className="text-accent" to="/admin/grants">
+                  Manage access
+                </Link>
+              </dd>
+            </dl>
+          </Card>
         ) : (
-          <p className="text-xs text-dim">Select a user to edit groups and library grants.</p>
+          <p className="text-xs text-dim">Select a user to see their details.</p>
         )}
       </div>
+      </CardGrid>
     </div>
   );
 }

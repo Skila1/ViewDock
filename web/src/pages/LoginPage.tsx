@@ -5,7 +5,7 @@ import { api } from "@/api/api";
 import { report } from "@/lib/journey";
 import { useAuth } from "@/store/auth";
 
-function loginError(raw: string) {
+export function loginError(raw: string) {
   switch (raw) {
     case "not_in_server":
       return "Your Discord account is not in the allowed server.";

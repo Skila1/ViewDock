@@ -22,7 +22,6 @@ exclude_docs: |
   !/upgrade.md
   !/environment.md
   !/discord.md
-  !/labs-virtual-camera.md
   !/uploads.md
   !/backups.md
   !/api.md
@@ -138,7 +137,6 @@ nav:
   - Configuration:
       - Environment: environment.md
       - Discord: discord.md
-      - "Labs: virtual camera": labs-virtual-camera.md
       - Uploads: uploads.md
       - Backups and restore: backups.md
   - Reference:

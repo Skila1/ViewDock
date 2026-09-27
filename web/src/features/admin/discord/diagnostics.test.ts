@@ -41,6 +41,12 @@ describe("discord diagnostics helpers", () => {
     expect(groups[2].label).toBe("HTTP interactions endpoint");
   });
 
+  it("lists the Discord Activity checks last", () => {
+    const groups = groupChecks([check("activity", "activity", "error"), check("mode", "configuration", "info")]);
+    expect(groups.map((g) => g.id)).toEqual(["configuration", "activity"]);
+    expect(groups[1]).toMatchObject({ label: "Discord Activity", open: true });
+  });
+
   it("summarises the Gateway state", () => {
     const base = { presence: "offline", activity: "Watching movies & TV", token_rejected: false, attempts: 0 };
     expect(gatewaySummary({ ...base, state: "online", presence: "online" })).toEqual({ text: "Online, Watching movies & TV", status: "ok" });

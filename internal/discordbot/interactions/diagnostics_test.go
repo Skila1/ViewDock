@@ -33,6 +33,8 @@ type fakeDiscord struct {
 	commands []discordbot.Command
 	cmdCode  int
 	oauth    int
+	// put is the last bulk overwrite body.
+	put []discordbot.Command
 }
 
 func (f *fakeDiscord) handler(t *testing.T) http.Handler {
@@ -70,6 +72,15 @@ func (f *fakeDiscord) handler(t *testing.T) http.Handler {
 		case strings.HasSuffix(r.URL.Path, "/commands"):
 			if f.cmdCode != 0 {
 				reply(f.cmdCode, map[string]any{"code": 50001, "message": "Missing Access"})
+				return
+			}
+			if r.Method == http.MethodPut {
+				var body []discordbot.Command
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				f.mu.Lock()
+				f.put = body
+				f.mu.Unlock()
+				reply(http.StatusOK, body)
 				return
 			}
 			reply(http.StatusOK, f.commands)
@@ -335,6 +346,34 @@ func TestDiagnosticsIncompleteCredentials(t *testing.T) {
 	} {
 		if got := checkByID(t, out, id).Status; got != status {
 			t.Errorf("%s = %s, want %s", id, got, status)
+		}
+	}
+}
+
+func TestRegisterKeepsActivityEntryPoint(t *testing.T) {
+	d := newDiagHarness(t)
+	entry := discordbot.Command{ID: "900000000000000001", Type: discordbot.CommandEntryPoint, Name: "launch", Description: "Launch ViewDock", Handler: 2, IntegrationTypes: []int{0}, Contexts: []int{0}}
+	d.discord.commands = append(Commands(), entry)
+	register := func(body string) {
+		req := httptest.NewRequest(http.MethodPost, "/admin/integrations/discord/commands", strings.NewReader(body))
+		req = req.WithContext(auth.WithPrincipal(req.Context(), &auth.Principal{Kind: auth.KindUser, UserID: "u-admin"}))
+		rec := httptest.NewRecorder()
+		d.svc.handleRegister(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("register %s = %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	register(`{}`)
+	if len(d.discord.put) != len(Commands())+1 {
+		t.Fatalf("global overwrite = %+v", d.discord.put)
+	}
+	if got := d.discord.put[len(d.discord.put)-1]; got.ID != entry.ID || got.Type != discordbot.CommandEntryPoint || got.Handler != 2 {
+		t.Fatalf("entry point = %+v", got)
+	}
+	register(`{"guild_id":"` + guildID + `"}`)
+	for _, c := range d.discord.put {
+		if c.Type == discordbot.CommandEntryPoint {
+			t.Fatalf("guild overwrite must not carry the global entry point: %+v", d.discord.put)
 		}
 	}
 }

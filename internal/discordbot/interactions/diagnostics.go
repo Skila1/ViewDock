@@ -30,8 +30,9 @@ const (
 )
 
 // Check groups, in display order. "gateway" is the presence connection;
-// "interactions" is the HTTP endpoint that carries slash commands.
-var checkGroups = []string{"configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions"}
+// "interactions" is the HTTP endpoint that carries slash commands; "activity"
+// is the Discord Activity that opens ViewDock inside a voice channel.
+var checkGroups = []string{"configuration", "oauth", "bot", "gateway", "servers", "commands", "interactions", "activity"}
 
 // Corrective actions the admin page knows how to perform.
 const (
@@ -39,6 +40,7 @@ const (
 	ActionEditBot      = "edit_bot"
 	ActionEditRegister = "edit_registration"
 	ActionSettings     = "open_settings"
+	ActionEditActivity = "edit_activity"
 	ActionRegister     = "register_commands"
 	ActionSetEndpoint  = "set_endpoint"
 	ActionInviteBot    = "invite_bot"
@@ -109,10 +111,12 @@ type diagInput struct {
 	reg        *Registration
 	linkGuilds []string
 	parties    bool
+	activity   bool
 }
 
 func (s *Service) diagInput(ctx context.Context) diagInput {
-	in := diagInput{setup: s.setup(), bot: s.bot(), base: s.publicBase(ctx), endpoint: s.endpointURL(ctx), reg: s.registration(ctx), parties: s.partiesEnabled()}
+	in := diagInput{setup: s.setup(), bot: s.bot(), base: s.publicBase(ctx), endpoint: s.endpointURL(ctx), reg: s.registration(ctx), parties: s.partiesEnabled(),
+		activity: s.ActivityEnabled != nil && s.ActivityEnabled()}
 	if s.OAuth != nil {
 		in.oauth, in.oauthKnown = s.OAuth(ctx), true
 	}
@@ -145,6 +149,7 @@ func (in diagInput) fingerprint() string {
 		fmt.Sprint(in.setup.Separate), in.oauth.ClientID, in.oauth.Secret, fmt.Sprint(in.oauth.LoginEnabled),
 		in.oauth.GuildID, fmt.Sprint(in.oauth.GuildEnabled || in.oauth.RoleEnabled),
 		token, strings.ToLower(in.publicKey), in.endpoint, string(reg), strings.Join(in.linkGuilds, ","),
+		fmt.Sprint(in.activity),
 	} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
@@ -336,7 +341,59 @@ func localChecks(in diagInput) []Check {
 	} else {
 		add(Check{ID: "parties", Group: "interactions", Label: "Watch parties", Status: CheckWarn, Detail: "Off. /party commands reply that watch parties are turned off.", Action: &CheckAction{ID: ActionSettings, Label: "Open settings"}})
 	}
+	out = append(out, activityChecks(in)...)
 	return out
+}
+
+// activityChecks cover the Discord Activity configuration on this server.
+func activityChecks(in diagInput) []Check {
+	c := Check{ID: "activity", Group: "activity", Label: "Discord Activity"}
+	switch {
+	case !in.activity:
+		c.Status, c.Detail = CheckInfo, "Off. Turn it on under Discord Activity to watch parties inside a voice channel."
+		c.Action = &CheckAction{ID: ActionEditActivity, Label: "Set up the Activity"}
+		return []Check{c}
+	case in.setup.Separate:
+		c.Status = CheckError
+		c.Detail = "The Activity runs on the sign-in application, but the bot uses a separate application, so ViewDock cannot confirm who is in an Activity. Turn off the separate bot configuration."
+		c.Action = &CheckAction{ID: ActionEditBot, Label: "Edit bot configuration"}
+	case !discordbot.ValidSnowflake(in.oauth.ClientID) || !in.oauth.ClientSecretSet:
+		c.Status, c.Detail = CheckError, "Needs the sign-in application's client ID and secret to sign people in."
+		c.Action = &CheckAction{ID: ActionEditAuth, Label: "Edit sign-in"}
+	case in.bot == nil:
+		c.Status, c.Detail = CheckError, "Needs the bot token to confirm who is in an Activity."
+		c.Action = &CheckAction{ID: ActionEditBot, Label: "Add bot token"}
+	case !in.parties:
+		c.Status, c.Detail = CheckWarn, "On, but watch parties are off, so the Activity cannot start or join a party."
+		c.Action = &CheckAction{ID: ActionSettings, Label: "Open settings"}
+	default:
+		c.Status, c.Detail = CheckOK, "On. Launching ViewDock from a voice channel opens that channel's watch party."
+	}
+	out := []Check{c}
+	if in.activity {
+		m := Check{ID: "activity_mapping", Group: "activity", Label: "URL mapping"}
+		if !strings.HasPrefix(in.base, "https://") {
+			m.Status, m.Detail = CheckError, "Set an https public URL; Discord's Activity URL mapping must point at it."
+			m.Action = &CheckAction{ID: ActionSettings, Label: "Set public URL"}
+		} else {
+			m.Status = CheckInfo
+			m.Detail = "In the Developer Portal, under Activities, URL Mappings, map the root prefix / to " + strings.TrimPrefix(strings.TrimRight(in.base, "/"), "https://") + "."
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// activityAppCheck reports whether Activities are enabled for the application.
+func activityAppCheck(app discordbot.Application) Check {
+	c := Check{ID: "activity_app", Group: "activity", Label: "Activities in Discord"}
+	if app.Flags&discordbot.ApplicationFlagEmbedded != 0 {
+		c.Status, c.Detail = CheckOK, "Activities are enabled for "+app.Name+"."
+		return c
+	}
+	c.Status = CheckWarn
+	c.Detail = "Activities are not enabled for " + app.Name + ". In the Developer Portal, open Activities, Settings and enable Activities."
+	return c
 }
 
 func registrationCheck(o auth.DiscordOAuthConfig) Check {
@@ -446,6 +503,9 @@ func (s *Service) remoteChecks(ctx context.Context, in diagInput) ([]Check, *Dia
 	add(applicationCheck(in, app))
 	add(publicKeyCheck(in, app))
 	add(endpointCheck(in, app))
+	if in.activity && !in.setup.Separate {
+		add(activityAppCheck(app))
+	}
 
 	wg.Add(2)
 	go func() {

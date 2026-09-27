@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
 import { discordLabsApi, type DiscordChannelLink, type DiscordCheck, type DiscordInteractionsStatus } from "@/api/discordLabs";
@@ -7,74 +7,22 @@ import { cn } from "@/lib/cn";
 import { useAuth } from "@/store/auth";
 import { DiagnosticsPanel } from "./discord/DiagnosticsPanel";
 import { diagnosticsRefetchMs, needsAutoRun } from "./discord/diagnostics";
+import { Card, errText, inputCls, NoteLine, Pill, primaryBtn, secondaryBtn, type Note } from "./ui";
 
 const BOT_TOKEN_KEY = "discord.bot_token";
 const PUBLIC_KEY_KEY = "discord.public_key";
 const SEPARATE_KEY = "discord.bot.separate";
 const SEP_TOKEN_KEY = "discord.bot.separate_token";
 const SEP_PUBLIC_KEY_KEY = "discord.bot.separate_public_key";
+const ACTIVITY_KEY = "discord.activity.enabled";
+const PUBLIC_URL_KEY = "app.public_url";
 
 const DIAG_KEY = ["discord-diagnostics"];
-
-function errText(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback;
-}
-
-type Note = { ok: boolean; text: string } | null;
-
-function NoteLine({ note }: { note: Note }) {
-  if (!note) return null;
-  return (
-    <p role="status" className={note.ok ? "text-xs text-ok" : "text-xs text-danger"}>
-      {note.text}
-    </p>
-  );
-}
-
-function Card({
-  id,
-  title,
-  description,
-  aside,
-  className,
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: ReactNode;
-  aside?: ReactNode;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section id={id} aria-labelledby={`${id}-title`} className={cn("min-w-0 scroll-mt-4 space-y-3 rounded-lg border border-line bg-raised p-4", className)}>
-      <header className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 id={`${id}-title`} className="text-sm font-semibold">
-            {title}
-          </h2>
-          {description ? <p className="mt-0.5 text-xs text-dim">{description}</p> : null}
-        </div>
-        {aside}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Pill({ tone, children }: { tone: "ok" | "warn" | "dim" | "accent"; children: ReactNode }) {
-  const cls = { ok: "text-ok", warn: "text-warn", dim: "text-dim", accent: "text-accent" }[tone];
-  return <span className={cn("shrink-0 rounded-full bg-overlay px-2 py-0.5 text-[11px] font-medium", cls)}>{children}</span>;
-}
 
 function savedText(s: ConfigSetting | undefined, unset = "not set") {
   if (!s?.set) return unset;
   return s.source === "environment" ? "set from environment" : "saved";
 }
-
-const inputCls = "mt-1 w-full";
-const primaryBtn = "btn-green rounded-full px-4 py-1.5 text-sm";
-const secondaryBtn = "rounded-full border border-line px-4 py-1.5 text-sm";
 
 /* Discord authentication: sign-in, the Superadmin identity and the OAuth application credentials. */
 function AuthCard({ data, onSaved }: { data: DiscordSettings | undefined; onSaved: () => Promise<void> }) {
@@ -626,10 +574,88 @@ function PartyInvitesCard({ links, botConfigured, onChanged }: { links: DiscordC
   );
 }
 
+/* The Discord Activity: ViewDock inside a voice channel, on the sign-in application. */
+function ActivityCard({ discord, onSaved }: { discord: DiscordSettings | undefined; onSaved: () => Promise<void> }) {
+  const cfg = useQuery({ queryKey: ["admin-config"], queryFn: api.getConfig });
+  const setting = cfg.data?.settings.find((s) => s.key === ACTIVITY_KEY);
+  const saved = setting?.value === "1";
+  const separate = cfg.data?.settings.find((s) => s.key === SEPARATE_KEY)?.value === "1";
+  const publicURL = cfg.data?.settings.find((s) => s.key === PUBLIC_URL_KEY)?.value ?? "";
+  const host = publicURL.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const [note, setNote] = useState<Note>(null);
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async (next: boolean) => {
+    if (!cfg.data) return;
+    setNote(null);
+    setBusy(true);
+    try {
+      await api.putConfig({ version: cfg.data.version, values: { [ACTIVITY_KEY]: next ? "1" : "0" }, note: "Discord Activity" });
+      setNote({ ok: true, text: next ? "Discord Activity turned on" : "Discord Activity turned off" });
+      await cfg.refetch();
+      await onSaved();
+    } catch (e) {
+      setNote({ ok: false, text: errText(e, "the Discord Activity setting could not be saved") });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const app = discord?.client_id ? `the sign-in application (client ID ${discord.client_id})` : "the sign-in application";
+  return (
+    <Card
+      id="discord-activity"
+      title="Discord Activity"
+      description="Open ViewDock from a voice channel's Activities button. Everyone in the channel lands in that channel's watch party."
+      aside={cfg.data ? <Pill tone={saved ? "ok" : "dim"}>{saved ? "On" : "Off"}</Pill> : null}
+    >
+      {cfg.isError ? <p className="text-xs text-danger">{errText(cfg.error, "runtime settings could not be loaded")}</p> : null}
+      {cfg.isSuccess && !setting ? (
+        <p className="text-xs text-warn">
+          This server does not define the <code>{ACTIVITY_KEY}</code> setting yet. Update ViewDock to use the Activity.
+        </p>
+      ) : null}
+      {separate ? (
+        <p className="text-xs text-warn">
+          The Activity needs the bot to use the sign-in application. Turn off the separate bot configuration first.
+        </p>
+      ) : null}
+      <ol className="list-decimal space-y-1 pl-5 text-xs text-dim">
+        <li>In the Discord Developer Portal, open {app}, then Activities, Settings, and enable Activities.</li>
+        <li>
+          Under Activities, URL Mappings, map the root prefix <code>/</code> to{" "}
+          {host ? <code className="break-all">{host}</code> : "this server's public host (set the public URL under Settings first)"}.
+        </li>
+        <li>
+          If the public host sits behind a login proxy such as Cloudflare Access, let Discord&apos;s proxy through; ViewDock still
+          requires every viewer to sign in.
+        </li>
+        <li>Turn the Activity on here. Discord adds the launch button itself, and registering slash commands here keeps it.</li>
+      </ol>
+      <p className="text-xs text-dim">
+        People sign in with the Discord account running the Activity. Only accounts that could sign in with Discord on the web can use
+        it; with Discord sign-in off, only accounts already linked to Discord can.
+      </p>
+      <NoteLine note={note} />
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || !setting || (!saved && separate)}
+          className={saved ? secondaryBtn : primaryBtn}
+          onClick={() => void toggle(!saved)}
+        >
+          {saved ? "Turn off" : "Turn on"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
 const FOCUS_TARGETS: Record<string, string> = {
   edit_auth: "discord-auth",
   edit_bot: "discord-bot",
   edit_registration: "discord-registration",
+  edit_activity: "discord-activity",
 };
 
 export function DiscordPage() {
@@ -722,7 +748,7 @@ export function DiscordPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-base font-medium">Discord</h1>
-        <p className="text-sm text-dim">Discord sign-in, registration, the official bot and slash commands.</p>
+        <p className="text-sm text-dim">Discord sign-in, registration, the official bot, slash commands and the Activity.</p>
       </div>
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
         <aside className="min-w-0 xl:sticky xl:top-4 xl:order-last xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
@@ -749,6 +775,7 @@ export function DiscordPage() {
             botConfigured={Boolean(interactions.data?.bot_configured)}
             onChanged={() => void refreshDiscord()}
           />
+          <ActivityCard discord={settings.data} onSaved={refreshDiscord} />
         </div>
       </div>
     </div>

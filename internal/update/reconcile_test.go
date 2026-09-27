@@ -129,6 +129,43 @@ func TestRestartingHostKeepsWaiting(t *testing.T) {
 	}
 }
 
+func TestFinishedHostUpdateCompletesImmediately(t *testing.T) {
+	dir, kv := updateEnv(t)
+	saveUpdating(t, kv, 20*time.Second)
+	writeProgress(100, "done", "Update complete")
+	if err := os.WriteFile(filepath.Join(dir, "applied"), []byte("ghcr.io/example/viewdock-test@sha256:new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := Load(context.Background(), kv)
+	if st.Updating || st.LastStatus != "ok" || st.CurrentDigest != "sha256:new" {
+		t.Fatalf("a finished host run must complete at once, got updating=%v status=%q digest=%q", st.Updating, st.LastStatus, st.CurrentDigest)
+	}
+}
+
+func TestFinishedHostUpdateWithoutDigestCompletes(t *testing.T) {
+	_, kv := updateEnv(t)
+	saveUpdating(t, kv, 20*time.Second)
+	writeProgress(100, "done", "Update complete")
+	st := Load(context.Background(), kv)
+	if st.Updating || st.LastStatus != "ok" {
+		t.Fatalf("done without an applied digest must not wait, got updating=%v status=%q", st.Updating, st.LastStatus)
+	}
+}
+
+func TestProgressLogShowsOnlyCurrentRun(t *testing.T) {
+	dir, kv := updateEnv(t)
+	log := "---- 2026-09-27T06:00:00Z ----\nold: Pull complete\ndone\n---- 2026-09-27T07:00:00Z ----\nnew: Downloading 40%\n"
+	if err := os.WriteFile(filepath.Join(dir, "last.log"), []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	saveUpdating(t, kv, 10*time.Second)
+	writeProgress(30, "pulling", "new: Downloading 40%")
+	st := Load(context.Background(), kv)
+	if st.Progress == nil || strings.Contains(st.Progress.Log, "old:") || !strings.Contains(st.Progress.Log, "new: Downloading") {
+		t.Fatalf("progress log should hold only the current run, got %#v", st.Progress)
+	}
+}
+
 func TestReloadAfterCheckKeepsConcurrentApply(t *testing.T) {
 	_, kv := updateEnv(t)
 	ctx := context.Background()

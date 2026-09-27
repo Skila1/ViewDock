@@ -127,6 +127,20 @@ func noStoreAPI(next http.Handler) http.Handler {
 	})
 }
 
+// frameAncestors replaces X-Frame-Options DENY with a frame-ancestors policy
+// while embedding is allowed.
+func (s *Server) frameAncestors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.FrameAncestors != nil {
+			if origins := s.FrameAncestors(r.Context()); len(origins) > 0 {
+				w.Header().Del("X-Frame-Options")
+				w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' "+strings.Join(origins, " "))
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

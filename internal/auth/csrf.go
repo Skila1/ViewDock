@@ -24,9 +24,10 @@ func IssueCSRF(w http.ResponseWriter, r *http.Request, cfg config.Config) (strin
 	if err != nil {
 		return "", err
 	}
+	secure, same, partitioned := cookieAttrs(r, httpapi.CookieSecure(r, cfg))
 	http.SetCookie(w, &http.Cookie{
 		Name: CSRFCookie, Value: tok, Path: "/", HttpOnly: false,
-		Secure: httpapi.CookieSecure(r, cfg), SameSite: http.SameSiteLaxMode,
+		Secure: secure, SameSite: same, Partitioned: partitioned,
 	})
 	return tok, nil
 }

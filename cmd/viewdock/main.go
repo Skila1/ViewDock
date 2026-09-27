@@ -123,9 +123,6 @@ func main() {
 		}
 	}
 	defer app.Playback.Close()
-	if app.Labs != nil {
-		defer app.Labs.Close()
-	}
 	if app.Backend != nil {
 		defer app.Backend.Close()
 	}
