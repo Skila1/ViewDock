@@ -50,15 +50,29 @@ func AppliedDigest() string {
 }
 
 func RequestPending() bool {
-	st, err := os.Stat(filepath.Join(RequestDir(), "request"))
+	_, ok := requestAge()
+	return ok
+}
+
+// requestAge reports how long update/request has been waiting for the host.
+// Older installers let systemd create update/request as a directory, which
+// is not a request; it is removed so the next Update now can write the file.
+func requestAge() (time.Duration, bool) {
+	path := filepath.Join(RequestDir(), "request")
+	st, err := os.Stat(path)
 	if err != nil {
-		return false
+		return 0, false
 	}
-	if time.Since(st.ModTime()) > 30*time.Minute {
-		_ = os.Remove(filepath.Join(RequestDir(), "request"))
-		return false
+	if st.IsDir() {
+		_ = os.Remove(path)
+		return 0, false
 	}
-	return true
+	age := time.Since(st.ModTime())
+	if age > 30*time.Minute {
+		_ = os.Remove(path)
+		return 0, false
+	}
+	return age, true
 }
 
 func ClearRequest() {

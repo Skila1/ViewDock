@@ -85,6 +85,12 @@ func TestWriteHostRunner(t *testing.T) {
 	if !strings.Contains(string(b), "docker compose pull") || !strings.Contains(string(b), "docker compose up -d") {
 		t.Fatalf("script %s", b)
 	}
+	script := string(b)
+	idle := strings.Index(script, "if [[ ! -f \"${REQ}\" ]]; then\n  exit 0\nfi")
+	logged := strings.Index(script, ">>\"${LOG}\"")
+	if idle < 0 || logged < 0 || idle > logged {
+		t.Fatal("idle timer runs must exit before writing to last.log")
+	}
 }
 
 func TestRequestUpdate(t *testing.T) {

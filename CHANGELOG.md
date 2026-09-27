@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Admin → Updates no longer shows "Updating" when nothing is running. The host helper's systemd unit could create `update/request` as a directory, which looked like an update that never finished; it is removed, and an update the host does not pick up now fails after 2 minutes with a hint instead of waiting 30.
+- The host helper no longer writes "no request" to `update/last.log` every few seconds; only real update runs are logged.
+- Check now no longer overwrites the status of an update started while the check was running.
+- Re-running the installer or `sudo viewdock update` pulls the image before stopping ViewDock, so a failed pull leaves the app running.
+- The web app manifest is requested with credentials, so it loads behind Cloudflare Access.
+
 ## 0.1.2
 
 - Admin → Discord is reorganised into cards with a status and diagnostics panel that checks credentials, sign-in, the bot's servers and permissions, slash commands and the interactions endpoint, with a fix for each problem.

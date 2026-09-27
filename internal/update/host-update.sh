@@ -21,6 +21,15 @@ APPLIED="${UPDATE}/applied"
 PROG="${UPDATE}/progress.json"
 mkdir -p "${UPDATE}"
 
+# The timer runs this every few seconds; idle runs leave no trace in the log.
+# Older installers let systemd create update/request as a directory.
+if [[ -d "${REQ}" ]]; then
+  rmdir "${REQ}" 2>/dev/null || true
+fi
+if [[ ! -f "${REQ}" ]]; then
+  exit 0
+fi
+
 exec 9>"${UPDATE}/.lock"
 if command -v flock >/dev/null 2>&1; then
   if ! flock -n 9; then
@@ -42,7 +51,7 @@ progress_write() {
 {
   echo "---- $(date -u +%Y-%m-%dT%H:%M:%SZ) ----"
   if [[ ! -f "${REQ}" ]]; then
-    echo "no request"
+    echo "request already handled"
     exit 0
   fi
   rm -f "${REQ}"

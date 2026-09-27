@@ -393,6 +393,15 @@ APPLIED="${UPDATE}/applied"
 PROG="${UPDATE}/progress.json"
 mkdir -p "${UPDATE}"
 
+# The timer runs this every few seconds; idle runs leave no trace in the log.
+# Older installers let systemd create update/request as a directory.
+if [[ -d "${REQ}" ]]; then
+  rmdir "${REQ}" 2>/dev/null || true
+fi
+if [[ ! -f "${REQ}" ]]; then
+  exit 0
+fi
+
 exec 9>"${UPDATE}/.lock"
 if command -v flock >/dev/null 2>&1; then
   if ! flock -n 9; then
@@ -414,7 +423,7 @@ progress_write() {
 {
   echo "---- $(date -u +%Y-%m-%dT%H:%M:%SZ) ----"
   if [[ ! -f "${REQ}" ]]; then
-    echo "no request"
+    echo "request already handled"
     exit 0
   fi
   rm -f "${REQ}"
@@ -508,7 +517,6 @@ PathExists=${PREFIX}/update/request
 PathChanged=${PREFIX}/update/request
 PathModified=${PREFIX}/update/request
 Unit=viewdock-update.service
-MakeDirectory=true
 
 [Install]
 WantedBy=multi-user.target
@@ -527,6 +535,12 @@ Unit=viewdock-update.service
 WantedBy=timers.target
 EOF
   systemctl daemon-reload
+  # MakeDirectory=true in older units created update/request as a directory,
+  # which the app read as an update that never finishes.
+  if [[ -d "${PREFIX}/update/request" ]]; then
+    rm -rf "${PREFIX}/update/request"
+  fi
+  systemctl restart viewdock-update.path >/dev/null 2>&1 || true
   systemctl enable --now viewdock-update.path
   systemctl enable --now viewdock-update.timer
   msg_ok "Host update helper enabled (viewdock-update.path + timer)"
@@ -812,11 +826,16 @@ clear_viewdock_runtime() {
   COMPOSE_PROFILES=cpu,gpu ${COMPOSE} down --remove-orphans --timeout 15 || true
 }
 
+# Pull before stopping anything, so a failed or interrupted pull leaves the
+# running container in place.
 compose_recreate() {
   cd "${PREFIX}"
-  clear_viewdock_runtime
   msg_info "Pulling ${IMAGE} in ${PREFIX}"
-  ${COMPOSE} pull
+  if ! ${COMPOSE} pull; then
+    msg_err "Could not pull ${IMAGE}. The running ViewDock container was left in place."
+    exit 1
+  fi
+  clear_viewdock_runtime
   if ${COMPOSE} up -d --remove-orphans; then
     return 0
   fi
@@ -1050,7 +1069,7 @@ cmd_doctor() {
       echo "media folder writable: ${PREFIX}/media"
     fi
     if grep -q '/media:ro' "${PREFIX}/docker-compose.yml" 2>/dev/null; then
-      echo "docker-compose.yml still mounts /media:ro — change to /media so uploads can write"
+      echo "docker-compose.yml still mounts /media:ro; change it to /media so uploads can write"
     fi
   fi
   echo

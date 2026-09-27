@@ -185,23 +185,38 @@ func Check(ctx context.Context, kv *settings.Store) (Status, error) {
 	}
 	latest, err := RegistryDigest(ctx, img)
 	if err != nil {
-		st.LastStatus = "error"
-		st.LastError = err.Error()
+		st = reloadAfterCheck(ctx, kv, now)
+		if st.LastStatus == "checking" {
+			st.LastStatus = "error"
+			st.LastError = err.Error()
+		}
 		_ = save(ctx, kv, st)
 		return Load(ctx, kv), err
 	}
+	lv, notes := FetchReleaseNotes(ctx, version.Version)
+	st = reloadAfterCheck(ctx, kv, now)
 	st.CurrentDigest = current
 	st.LatestDigest = latest
-	if lv, notes := FetchReleaseNotes(ctx, version.Version); lv != "" || len(notes) > 0 {
+	if lv != "" || len(notes) > 0 {
 		if lv != "" {
 			st.LatestVersion = lv
 		}
 		st.Changelog = notes
 	}
-	st.Available = versionUpdateAvailable(version.Version, st.LatestVersion)
-	st.LastStatus = "ok"
+	if st.LastStatus == "checking" {
+		st.Available = versionUpdateAvailable(version.Version, st.LatestVersion)
+		st.LastStatus = "ok"
+	}
 	_ = save(ctx, kv, st)
 	return Load(ctx, kv), nil
+}
+
+// reloadAfterCheck re-reads the stored state after the network calls, so an
+// Update now or auto-update toggle saved during the check is kept.
+func reloadAfterCheck(ctx context.Context, kv *settings.Store, checkedAt time.Time) stored {
+	st := loadStored(ctx, kv)
+	st.LastCheckAt = &checkedAt
+	return st
 }
 
 func Apply(ctx context.Context, kv *settings.Store, by string) error {
@@ -330,9 +345,28 @@ func helperTookOver() bool {
 	}
 }
 
+// helperPickupTimeout is how long a request may wait before it is treated as
+// not picked up. The host timer polls every few seconds.
+const helperPickupTimeout = 2 * time.Minute
+
+const helperNotRunning = "The host helper did not pick up the update. On the host, check systemctl status viewdock-update.timer or run sudo viewdock update."
+
 func reconcile(ctx context.Context, kv *settings.Store) {
+	mu.Lock()
+	ap := applying
+	mu.Unlock()
+	if ap || HelperActive() {
+		return
+	}
 	st := loadStored(ctx, kv)
-	if RequestPending() || HelperActive() {
+	if age, pending := requestAge(); pending {
+		if age < helperPickupTimeout {
+			return
+		}
+		ClearRequest()
+		st.LastStatus = "error"
+		st.LastError = helperNotRunning
+		_ = save(ctx, kv, st)
 		return
 	}
 	if st.LastStatus != "updating" {
@@ -349,9 +383,22 @@ func reconcile(ctx context.Context, kv *settings.Store) {
 		if started == nil {
 			started = st.LastCheckAt
 		}
-		if started != nil && time.Since(*started) > 30*time.Minute {
+		prog := ReadHostProgress(false)
+		switch {
+		case prog.Stage == "error":
 			st.LastStatus = "error"
-			st.LastError = "update did not finish. Use docker compose pull && docker compose up -d on the host."
+			st.LastError = "Update failed on the host: " + prog.Detail
+			_ = save(ctx, kv, st)
+		case prog.Stage == "restarting" || prog.Stage == "done":
+			// The host is replacing this container; the new one finishes the update.
+			if started != nil && time.Since(*started) > 30*time.Minute {
+				st.LastStatus = "error"
+				st.LastError = "update did not finish. Use docker compose pull && docker compose up -d on the host."
+				_ = save(ctx, kv, st)
+			}
+		case started == nil || time.Since(*started) > helperPickupTimeout:
+			st.LastStatus = "error"
+			st.LastError = helperNotRunning
 			_ = save(ctx, kv, st)
 		}
 		return
