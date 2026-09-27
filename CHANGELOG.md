@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6
 
 - Registering slash commands globally adds the Discord Activity's launch command back when Activities are enabled but Discord has none, for example after an earlier registration removed it.
 
