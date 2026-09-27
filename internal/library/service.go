@@ -167,7 +167,7 @@ func (s *Service) Update(ctx context.Context, id string, patch Patch) (Library, 
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM libraries WHERE id = ?`, id)
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM libraries WHERE id = ? AND id NOT IN (`+remoteLibraries+`)`, id)
 	if err != nil {
 		return err
 	}

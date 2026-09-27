@@ -144,6 +144,15 @@ export const api = {
   patchLibrary: (id: string, body: Partial<Library>) =>
     request<Library>(`/api/v1/libraries/${id}`, { method: "PATCH", body }),
   scanLibrary: (id: string) => request(`/api/v1/libraries/${id}/scan`, { method: "POST", body: {} }),
+  deleteLibrary: (id: string) => request(`/api/v1/libraries/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  matchTitle: (kind: "movie" | "series", id: string, tmdbId: number) =>
+    request(`/api/v1/${kind === "movie" ? "movies" : "series"}/${encodeURIComponent(id)}/match`, { method: "POST", body: { tmdb_id: tmdbId } }),
+  uploadPoster: (kind: "movie" | "series", id: string, file: File) =>
+    request(`/api/v1/artwork/poster/${kind}/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: file,
+      headers: { "Content-Type": file.type || "image/jpeg", "X-Filename": file.name },
+    }),
 
   listMovies: async () => asArray<Movie>(await request("/api/v1/movies")),
   getMovie: (id: string) => request<MovieDetail>(`/api/v1/movies/${id}`),
@@ -316,6 +325,8 @@ export const api = {
   listMediaSources: async () => asArray<MediaSource>(await request("/api/v1/admin/media-sources")),
   createMediaSource: (body: MediaSourceInput) =>
     request<MediaSource>("/api/v1/admin/media-sources", { method: "POST", body }),
+  mediaSourceLibraries: async (id: string) =>
+    asArray<MediaSourceLibrary>(await request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/libraries`)),
   mediaSourceEvents: async (id: string) =>
     asArray<MediaSourceEvent>(await request(`/api/v1/admin/media-sources/${encodeURIComponent(id)}/events`)),
   mediaSourceActivity: async (id: string) =>

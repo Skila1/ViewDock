@@ -16,7 +16,7 @@ export function ContinueStrip({ items }: { items: ProgressRecord[] }) {
             <div key={`${item.item_kind}-${item.item_id}`} className="w-[132px] shrink-0">
               <PosterCard
                 to={`/watch/${kind}/${item.item_id}${t ? `?t=${Math.floor(t)}` : ""}`}
-                title={item.title || item.item_id}
+                title={item.title || "Untitled"}
                 posterUrl={item.poster_url}
                 unmatched={item.unmatched}
                 progress={pct}

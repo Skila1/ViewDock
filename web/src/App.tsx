@@ -9,6 +9,8 @@ import { StreamsPage } from "@/features/admin/StreamsPage";
 import { DiscordPage } from "@/features/admin/DiscordPage";
 import { NodesPage } from "@/features/admin/NodesPage";
 import { MediaSourcesPage } from "@/features/admin/MediaSourcesPage";
+import { MediaLibrariesPage } from "@/features/admin/MediaLibrariesPage";
+import { MediaTitlesPage } from "@/features/admin/MediaTitlesPage";
 import { WatchPartiesPage } from "@/features/admin/WatchPartiesPage";
 import { BackupsPage } from "@/features/admin/BackupsPage";
 import { SettingsPage } from "@/features/admin/SettingsPage";
@@ -157,14 +159,19 @@ export function App() {
                   <Route path="streams/:sessionId" element={<InspectorPage />} />
                   <Route path="diagnostics" element={<DiagnosticsPage />} />
                   <Route path="nodes" element={<NodesPage />} />
-                  <Route path="media-sources" element={<MediaSourcesPage />} />
+                  <Route path="media" element={<MediaLibrariesPage />} />
+                  <Route path="media/titles" element={<MediaTitlesPage />} />
+                  <Route path="media/uploads" element={<UploadsPage />} />
+                  <Route path="media/access" element={<GrantsPage />} />
+                  <Route path="media/sources" element={<MediaSourcesPage />} />
+                  <Route path="media-sources" element={<Navigate to="/admin/media/sources" replace />} />
+                  <Route path="uploads" element={<Navigate to="/admin/media/uploads" replace />} />
+                  <Route path="grants" element={<Navigate to="/admin/media/access" replace />} />
                   <Route path="watch-parties" element={<WatchPartiesPage />} />
                   <Route path="backups" element={<BackupsPage />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="households" element={<HouseholdsPage />} />
                   <Route path="roles" element={<RolesPage />} />
-                  <Route path="grants" element={<GrantsPage />} />
-                  <Route path="uploads" element={<UploadsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="api-keys" element={<APIKeysPage />} />
                   <Route path="logs" element={<LogsPage />} />

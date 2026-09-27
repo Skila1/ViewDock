@@ -6,6 +6,7 @@ import { useAuth } from "@/store/auth";
 import { cn } from "@/lib/cn";
 import { ConnectivityBanner } from "@/components/layout/ConnectivityBanner";
 import { ADMIN_SECTIONS, isAdminPath } from "@/features/admin/adminNav";
+import { SubnavSidebar, useAdminSubnav } from "@/features/admin/AdminSubnav";
 
 const sideLink = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim hover:bg-overlay hover:text-ink";
 
@@ -21,6 +22,7 @@ export function AppShell() {
   const { me, logout, pinLocked, unlockPin } = useAuth();
   const navigate = useNavigate();
   const inAdmin = isAdminPath(useLocation().pathname);
+  const subnav = useAdminSubnav(Boolean(me?.is_admin && inAdmin));
   const [q, setQ] = useState("");
   const [pin, setPin] = useState("");
   const [pinErr, setPinErr] = useState("");
@@ -71,7 +73,9 @@ export function AppShell() {
           <Logo className="h-12 w-12" />
           <span className="text-sm font-bold tracking-wide">View<span className="text-accent">Dock</span></span>
         </Link>
-        {me?.is_admin && inAdmin ? (
+        {subnav ? (
+          <SubnavSidebar nav={subnav} linkClass={sideLink} />
+        ) : me?.is_admin && inAdmin ? (
           <nav aria-label="Admin" className="flex-1 overflow-y-auto px-2 pt-3">
             <Link to="/" className={sideLink}>
               <ArrowLeft className="h-4 w-4 shrink-0" />

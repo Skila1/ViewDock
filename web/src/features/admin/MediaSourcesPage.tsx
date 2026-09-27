@@ -16,35 +16,93 @@ const DEFAULT_POLICY: MediaSourcePolicy = { images: true, stream: true, transcod
 
 const sameId = (a: string, b: string) => a.replace(/-/g, "").toLowerCase() === b.replace(/-/g, "").toLowerCase();
 
-function LibraryPicker({
+/** The kind of content a Jellyfin library holds, as shown to admins. */
+export function libraryType(lib: MediaSourceLibrary): string {
+  if (/anime/i.test(lib.name)) return "Anime";
+  if (lib.collection_type === "movies") return "Movies";
+  if (lib.collection_type === "tvshows") return "TV shows";
+  return "Mixed";
+}
+
+const TYPE_ORDER = ["Movies", "TV shows", "Anime", "Mixed"];
+
+/**
+ * Chooses what a source imports: everything its Jellyfin user can see
+ * (an empty list, which also picks up libraries added later), or only
+ * the libraries ticked here.
+ */
+function SyncSelection({
   libraries,
   selected,
+  picking,
+  onPicking,
   onChange,
 }: {
   libraries: MediaSourceLibrary[];
   selected: string[];
+  picking: boolean;
+  onPicking: (picking: boolean) => void;
   onChange: (ids: string[]) => void;
 }) {
-  if (libraries.length === 0) return <p className="text-xs text-dim">This account cannot see any movie or TV libraries.</p>;
-  const all = selected.length === 0;
+  const setPicking = onPicking;
+  if (libraries.length === 0) {
+    return <p className="text-xs text-dim">The Jellyfin user ViewDock browses as cannot see any movie or TV libraries.</p>;
+  }
+  const groups = TYPE_ORDER.map((type) => [type, libraries.filter((l) => libraryType(l) === type)] as const).filter(([, list]) => list.length > 0);
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...selected, id])] : selected.filter((x) => x !== id);
+    onChange(next);
+  };
+  const toggleGroup = (list: readonly MediaSourceLibrary[], on: boolean) => {
+    const ids = list.map((l) => l.id);
+    onChange(on ? [...new Set([...selected, ...ids])] : selected.filter((x) => !ids.includes(x)));
+  };
   return (
-    <fieldset className="space-y-1">
-      <legend className="text-xs text-dim">Libraries to import (none selected imports all)</legend>
-      {libraries.map((lib) => (
-        <label key={lib.id} className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={all || selected.includes(lib.id)}
-            onChange={(e) => {
-              const base = all ? libraries.map((l) => l.id) : selected;
-              const next = e.target.checked ? [...base, lib.id] : base.filter((id) => id !== lib.id);
-              onChange(next.length === libraries.length ? [] : next);
-            }}
-          />
-          {lib.name}
-          <span className="text-[11px] text-dim">{lib.collection_type === "tvshows" ? "TV" : lib.collection_type === "movies" ? "Movies" : "Mixed"}</span>
-        </label>
-      ))}
+    <fieldset className="space-y-2">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          checked={!picking}
+          onChange={() => {
+            setPicking(false);
+            onChange([]);
+          }}
+        />
+        Everything available ({libraries.length} {libraries.length === 1 ? "library" : "libraries"}, and any added later)
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          checked={picking}
+          onChange={() => {
+            setPicking(true);
+            onChange(selected.length ? selected : libraries.map((l) => l.id));
+          }}
+        />
+        Only the libraries I choose
+      </label>
+      {picking ? (
+        <div className="grid gap-3 pl-6 sm:grid-cols-2">
+          {groups.map(([type, list]) => {
+            const allOn = list.every((l) => selected.includes(l.id));
+            return (
+              <div key={type} className="space-y-1">
+                <label className="flex items-center gap-2 text-xs font-medium text-ink">
+                  <input type="checkbox" checked={allOn} onChange={(e) => toggleGroup(list, e.target.checked)} />
+                  {type}
+                </label>
+                {list.map((lib) => (
+                  <label key={lib.id} className="flex items-center gap-2 pl-5 text-sm">
+                    <input type="checkbox" checked={selected.includes(lib.id)} onChange={(e) => toggle(lib.id, e.target.checked)} />
+                    {lib.name}
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {picking && selected.length === 0 ? <p className="pl-6 text-xs text-warn">Choose at least one library.</p> : null}
     </fieldset>
   );
 }
@@ -152,14 +210,11 @@ function AddSource() {
   const [f, setF] = useState<Draft>(EMPTY);
   const [users, setUsers] = useState<MediaSourceUser[] | null>(null);
   const [account, setAccount] = useState<MediaSourceUser | undefined>();
-  const [libraries, setLibraries] = useState<MediaSourceLibrary[] | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
   const [policy, setPolicy] = useState<MediaSourcePolicy>(DEFAULT_POLICY);
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<Draft>) => {
     setF((cur) => ({ ...cur, ...patch }));
-    setLibraries(null);
     setAccount(undefined);
     if (!("user" in patch)) setUsers(null);
   };
@@ -176,10 +231,10 @@ function AddSource() {
       const res = await api.testMediaSource({ url: d.url.trim(), ...credentials(d) });
       if (res.users) setUsers(res.users);
       setAccount(res.account);
-      setLibraries(res.account ? res.libraries : null);
-      setSelected([]);
       const who = res.account ? ` as ${res.account.name}` : "";
-      setNote({ ok: true, text: `Connected to ${res.server_name || "Jellyfin"} ${res.version}${who}` });
+      const seen = res.account ? `, ${res.libraries.length} ${res.libraries.length === 1 ? "library" : "libraries"} available` : "";
+      const next = d.mode === "api_key" && !d.user ? " Choose the Jellyfin user, then save." : " Nothing is saved yet: press Save to add it.";
+      setNote({ ok: true, text: `Test passed: ${res.server_name || "Jellyfin"} ${res.version}${who}${seen}.${next}` });
     } catch (e) {
       setNote({ ok: false, text: errText(e, "the connection test failed") });
     } finally {
@@ -192,15 +247,16 @@ function AddSource() {
     setBusy(true);
     setNote(null);
     try {
-      await api.createMediaSource({ name: f.name.trim(), url: f.url.trim(), ...credentials(f), libraries: selected, policy });
+      const src = await api.createMediaSource({ name: f.name.trim(), url: f.url.trim(), ...credentials(f), libraries: [], policy });
       setF(EMPTY);
       setUsers(null);
-      setLibraries(null);
+      setAccount(undefined);
       setPolicy(DEFAULT_POLICY);
-      setNote({ ok: true, text: "Server connected. The first sync has started." });
+      setNote({ ok: true, text: `Saved ${src.name}. It syncs everything available; choose what to sync in its box above.` });
       await qc.invalidateQueries({ queryKey: QUERY_KEY });
+      window.setTimeout(() => document.getElementById(`media-source-${src.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (e) {
-      setNote({ ok: false, text: errText(e, "the server could not be connected") });
+      setNote({ ok: false, text: errText(e, "the server could not be saved") });
     } finally {
       setBusy(false);
     }
@@ -209,7 +265,7 @@ function AddSource() {
   return (
     <Card
       id="media-source-add"
-      title="Connect a Jellyfin server"
+      title="Add a Jellyfin server"
       description="ViewDock only reads from the server, and only in the ways the usage restrictions allow."
     >
       <form onSubmit={onSubmit} className="space-y-3">
@@ -255,14 +311,14 @@ function AddSource() {
           </div>
         )}
         <AdminWarning user={account} mode={f.mode} />
-        {libraries ? <LibraryPicker libraries={libraries} selected={selected} onChange={setSelected} /> : null}
         <PolicyEditor value={policy} onChange={setPolicy} />
+        <p className="text-[11px] text-dim">After saving, choose which Jellyfin libraries (movies, TV, anime and so on) to sync in the server's box.</p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={secondaryBtn} disabled={busy || !ready} onClick={() => void test(f)}>
             Test connection
           </button>
-          <button type="submit" className={primaryBtn} disabled={busy || (f.mode === "api_key" && !f.user)}>
-            {busy ? "Working…" : "Connect"}
+          <button type="submit" className={primaryBtn} disabled={busy || !ready || (f.mode === "api_key" && !f.user)}>
+            {busy ? "Saving…" : "Save"}
           </button>
         </div>
         <NoteLine note={note} />
@@ -430,8 +486,16 @@ function SourceCard({ source }: { source: MediaSource }) {
   const qc = useQueryClient();
   const [note, setNote] = useState<Note>(null);
   const [busy, setBusy] = useState(false);
-  const [libraries, setLibraries] = useState<MediaSourceLibrary[] | null>(null);
+  const libraries = useQuery({
+    queryKey: [...QUERY_KEY, source.id, "libraries"],
+    queryFn: () => api.mediaSourceLibraries(source.id),
+    enabled: source.enabled,
+    retry: false,
+  });
   const [selected, setSelected] = useState<string[]>(source.libraries);
+  const [picking, setPicking] = useState(source.libraries.length > 0);
+  const savedKey = [...source.libraries].sort().join(",");
+  const dirty = picking ? [...selected].sort().join(",") !== savedKey : savedKey !== "";
   const [creds, setCreds] = useState(false);
   const [policy, setPolicy] = useState<MediaSourcePolicy | null>(null);
   const [log, setLog] = useState(false);
@@ -454,8 +518,8 @@ function SourceCard({ source }: { source: MediaSource }) {
     run(
       async () => {
         const res = await api.testMediaSource({ id: source.id });
-        setLibraries(res.libraries);
-        setNote({ ok: true, text: `Connected to ${res.server_name || "Jellyfin"} ${res.version}` });
+        setNote({ ok: true, text: `Test passed: ${res.server_name || "Jellyfin"} ${res.version}, ${res.libraries.length} libraries available.` });
+        await qc.invalidateQueries({ queryKey: [...QUERY_KEY, source.id, "libraries"] });
       },
       "",
       "the connection test failed",
@@ -473,8 +537,6 @@ function SourceCard({ source }: { source: MediaSource }) {
         <dd>{lastSync}</dd>
         <dt className="text-dim">Titles</dt>
         <dd>{source.item_count}</dd>
-        <dt className="text-dim">Libraries</dt>
-        <dd>{source.libraries.length === 0 ? "All" : `${source.libraries.length} selected`}</dd>
         <dt className="text-dim">Allowed</dt>
         <dd>
           {[
@@ -490,19 +552,37 @@ function SourceCard({ source }: { source: MediaSource }) {
         </dd>
       </dl>
       {source.last_error ? <p className="text-xs text-danger">{source.last_error}</p> : null}
-      {libraries ? (
-        <div className="space-y-2">
-          <LibraryPicker libraries={libraries} selected={selected} onChange={setSelected} />
-          <button
-            type="button"
-            className={secondaryBtn}
-            disabled={busy}
-            onClick={() => void run(() => api.updateMediaSource(source.id, { libraries: selected }), "Libraries saved. A resync has started.", "the libraries could not be saved")}
-          >
-            Save libraries
-          </button>
-        </div>
-      ) : null}
+      <section className="space-y-2 rounded-md border border-line p-3" aria-label="What to sync">
+        <p className="text-sm font-medium">What to sync</p>
+        {!source.enabled ? <p className="text-xs text-dim">Enable the source to choose what it syncs.</p> : null}
+        {libraries.isLoading ? <p className="text-xs text-dim">Loading the server's libraries…</p> : null}
+        {libraries.isError ? <p className="text-xs text-danger">{errText(libraries.error, "the server's libraries could not be loaded")}</p> : null}
+        {libraries.data ? (
+          <>
+            <SyncSelection
+              libraries={libraries.data}
+              selected={selected}
+              picking={picking}
+              onPicking={setPicking}
+              onChange={setSelected}
+            />
+            <button
+              type="button"
+              className={primaryBtn}
+              disabled={busy || !dirty || (picking && selected.length === 0)}
+              onClick={() =>
+                void run(
+                  () => api.updateMediaSource(source.id, { libraries: picking ? selected : [] }),
+                  "Saved. A resync has started; titles from libraries you left out are removed.",
+                  "the selection could not be saved",
+                )
+              }
+            >
+              Save
+            </button>
+          </>
+        ) : null}
+      </section>
       {policy ? (
         <div className="space-y-2">
           <PolicyEditor value={policy} onChange={setPolicy} />
@@ -550,7 +630,7 @@ function SourceCard({ source }: { source: MediaSource }) {
           Resync
         </button>
         <button type="button" className={secondaryBtn} disabled={busy} onClick={() => void test()}>
-          Test and choose libraries
+          Test connection
         </button>
         <button type="button" className={secondaryBtn} disabled={busy} onClick={() => setPolicy(policy ? null : source.policy)}>
           Restrictions

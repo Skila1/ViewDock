@@ -18,6 +18,8 @@ import (
 	"github.com/viewdock/viewdock/internal/hls"
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/inspector"
+	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/progress"
 	"github.com/viewdock/viewdock/internal/subtitle"
 )
 
@@ -163,12 +165,65 @@ func (a *API) handleContinue(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, 200, []any{})
 		return
 	}
-	list, err := a.Progress.Continue(r.Context(), p.UserID, 20)
+	list, err := a.Progress.Continue(r.Context(), p.UserID, continueScan)
 	if err != nil {
 		httpapi.WriteErr(w, 500, "progress", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, 200, list)
+	httpapi.WriteJSON(w, 200, a.continueItems(r.Context(), p, list))
+}
+
+const (
+	continueLimit = 20
+	// continueScan reads extra rows so hidden or removed titles do not
+	// shorten the list.
+	continueScan = 60
+)
+
+type itemPoster interface {
+	ItemPoster(ctx context.Context, itemKind, itemID string) *string
+}
+
+// continueItems drops progress for titles that no longer exist or that the
+// user may no longer see, and names the rest.
+func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progress.Record) []progress.Record {
+	out := make([]progress.Record, 0, min(len(list), continueLimit))
+	if a.Catalog == nil {
+		for _, rec := range list {
+			if len(out) < continueLimit {
+				out = append(out, rec)
+			}
+		}
+		return out
+	}
+	posters, _ := a.Catalog.(itemPoster)
+	for _, rec := range list {
+		if len(out) == continueLimit {
+			break
+		}
+		if !a.Catalog.Exists(ctx, rec.ItemKind, rec.ItemID) {
+			continue
+		}
+		if !p.IsAdmin {
+			libID, err := a.Catalog.LibraryIDForItem(ctx, rec.ItemKind, rec.ItemID)
+			if err != nil || (a.Grants != nil && !a.Grants.CanRead(ctx, p.UserID, libID)) {
+				continue
+			}
+		}
+		if a.DB != nil {
+			if ok, err := library.ItemPermitted(ctx, a.DB, p.UserID, rec.ItemKind, rec.ItemID); err != nil || !ok {
+				continue
+			}
+		}
+		if rec.Title == "" {
+			rec.Title, _ = a.Catalog.ItemTitle(ctx, rec.ItemKind, rec.ItemID)
+		}
+		if posters != nil {
+			rec.PosterURL = posters.ItemPoster(ctx, rec.ItemKind, rec.ItemID)
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
 func (a *API) handleSubtitles(w http.ResponseWriter, r *http.Request) {

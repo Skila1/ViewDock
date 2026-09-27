@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import type { ConfigSetting } from "@/types/api.gen";
@@ -25,7 +25,7 @@ export function settingsGroups(settings: ConfigSetting[]): [string, ConfigSettin
   return [...out.entries()];
 }
 
-function cardId(category: string) {
+export function cardId(category: string) {
   return `settings-${category.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 }
 
@@ -111,13 +111,6 @@ export function SettingsPage() {
   }, [q.data]);
 
   const groups = useMemo(() => settingsGroups(q.data?.settings ?? []), [q.data]);
-  const { hash } = useLocation();
-
-  useEffect(() => {
-    if (!hash || !groups.length) return;
-    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
-  }, [hash, groups.length]);
-
   const changes = useMemo(() => {
     const values: Record<string, string | null> = {};
     for (const [, items] of groups) {

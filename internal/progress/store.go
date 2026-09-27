@@ -3,15 +3,16 @@ package progress
 import "context"
 
 type Record struct {
-	ItemKind    string `json:"item_kind"`
-	ItemID      string `json:"item_id"`
-	MediaFileID string `json:"media_file_id"`
-	PositionMS  int64  `json:"position_ms"`
-	DurationMS  int64  `json:"duration_ms"`
-	Completed   bool   `json:"completed"`
-	ResumeMS    int64  `json:"resume_ms"`
-	UpdatedAt   string `json:"updated_at"`
-	Title       string `json:"title,omitempty"`
+	ItemKind    string  `json:"item_kind"`
+	ItemID      string  `json:"item_id"`
+	MediaFileID string  `json:"media_file_id"`
+	PositionMS  int64   `json:"position_ms"`
+	DurationMS  int64   `json:"duration_ms"`
+	Completed   bool    `json:"completed"`
+	ResumeMS    int64   `json:"resume_ms"`
+	UpdatedAt   string  `json:"updated_at"`
+	Title       string  `json:"title,omitempty"`
+	PosterURL   *string `json:"poster_url,omitempty"`
 }
 
 type Store interface {

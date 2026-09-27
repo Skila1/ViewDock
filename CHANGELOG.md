@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Admin, Media brings together Libraries (add, edit, scan and delete local libraries), Titles (search every movie and series, match it on TMDB, upload a poster, set its rating), Uploads, Library access and Jellyfin servers.
+- Media, Settings and Discord get their own sidebar in the admin area, with Back to admin at the top and their sections grouped below.
+- Adding a Jellyfin server now uses a Save button. Each saved server has a What to sync box listing its Jellyfin libraries by type (Movies, TV shows, Anime, Mixed), to sync everything or only chosen libraries.
+- Continue Watching shows titles and posters, and no longer shows items that were removed or that the viewer cannot access.
+
 ## 0.1.9
 
 - Admins can connect Jellyfin servers under Admin, Media sources. Their movies and shows (with posters and metadata) appear for every user and resync every 6 hours. A title that is also in a local library is listed once, plays locally by default, and the player can switch to the Jellyfin copy. Jellyfin playback supports seeking and works in watch parties. Credentials stay on the server.

@@ -234,7 +234,7 @@ export function UsersPage() {
                   : detail.data.is_admin
                     ? "Every library (administrator)"
                     : "No direct access; groups may grant more"}{" "}
-                <Link className="text-accent" to="/admin/grants">
+                <Link className="text-accent" to="/admin/media/access">
                   Manage access
                 </Link>
               </dd>

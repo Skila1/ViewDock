@@ -44,7 +44,7 @@ export function AdminPage() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="Live streams" value={streams.data?.length ?? 0} to="/admin/streams" />
             <Stat label="Users" value={users.data?.length ?? 0} to="/admin/users" />
-            <Stat label="Libraries" value={libs.data?.length ?? 0} to="/admin/grants" />
+            <Stat label="Libraries" value={libs.data?.length ?? 0} to="/admin/media" />
             <Stat label="Nodes" value={nodeList.length ? `${healthyNodes}/${nodeList.length}` : "Local"} to="/admin/nodes" />
           </div>
         </Card>
@@ -73,7 +73,7 @@ export function AdminPage() {
           description="Scan picks up new files straight away instead of waiting for the next automatic scan."
           className="lg:col-span-2"
           aside={
-            <Link className="text-xs text-accent" to="/admin/uploads">
+            <Link className="text-xs text-accent" to="/admin/media/uploads">
               Upload videos
             </Link>
           }

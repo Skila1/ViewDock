@@ -182,6 +182,25 @@ func (s *Service) ItemTitle(ctx context.Context, itemKind, itemID string) (strin
 	return title, err
 }
 
+// ItemPoster returns the artwork URL shown for an item in lists: the movie or
+// series poster, and for an episode its thumbnail or else its series poster.
+func (s *Service) ItemPoster(ctx context.Context, itemKind, itemID string) *string {
+	switch itemKind {
+	case "movie", "series":
+		return s.artworkURL(ctx, "poster", itemKind, itemID)
+	case "episode":
+		if u := s.artworkURL(ctx, "thumb", "episode", itemID); u != nil {
+			return u
+		}
+		var seriesID string
+		if err := s.DB.QueryRowContext(ctx, `SELECT series_id FROM episodes WHERE id = ?`, itemID).Scan(&seriesID); err != nil {
+			return nil
+		}
+		return s.artworkURL(ctx, "poster", "series", seriesID)
+	}
+	return nil
+}
+
 func (s *Service) Exists(ctx context.Context, itemKind, itemID string) bool {
 	var n int
 	var err error
