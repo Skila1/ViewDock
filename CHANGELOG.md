@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The close button in a watch party works inside the Discord Activity, and in a party opened from a link. In the Activity it returns to the title picker, with a Rejoin button while others are still watching.
+- The Discord Activity no longer reopens the last movie when nobody is watching it; the channel picks a new title instead.
+
 ## 0.1.7
 
 - The Discord Activity shows your movies and TV as the same poster grid as the home page, so you can pick a title without searching. Search narrows the grid.

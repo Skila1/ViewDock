@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "@/api/api";
 import { Player } from "@/components/player/Player";
+import { isDiscordActivity } from "@/lib/discordActivity";
 import { useAuth } from "@/store/auth";
 import type { ItemKind, ShareMeta, WTInvite } from "@/types/api.gen";
 
@@ -112,7 +113,15 @@ export function TogetherPage({ guest }: Props) {
       togetherCode={code}
       shareToken={guest ? token : undefined}
       guestItem={guest ? guestItem : undefined}
-      onClose={() => navigate(-1)}
+      onClose={() => {
+        if (isDiscordActivity()) {
+          navigate("/activity", { replace: true, state: { left: code } });
+        } else if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) {
+          navigate(-1);
+        } else {
+          navigate(guest ? `/s/${token}` : "/", { replace: true });
+        }
+      }}
     />
   );
 }

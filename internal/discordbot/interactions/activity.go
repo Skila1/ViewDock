@@ -52,6 +52,31 @@ func (s *Service) ActivityRoutes(r chi.Router) {
 	})
 }
 
+// connectedMembers counts the members of a room snapshot with a live
+// connection. Snapshots without connection details count every member.
+func connectedMembers(st map[string]any) int {
+	count := func(connected any) int {
+		if c, ok := connected.(bool); ok && !c {
+			return 0
+		}
+		return 1
+	}
+	n := 0
+	switch members := st["members"].(type) {
+	case []map[string]any:
+		for _, m := range members {
+			n += count(m["connected"])
+		}
+	case []any:
+		for _, raw := range members {
+			if m, ok := raw.(map[string]any); ok {
+				n += count(m["connected"])
+			}
+		}
+	}
+	return n
+}
+
 type activityRoom struct {
 	RoomID     string `json:"room_id"`
 	InviteCode string `json:"invite_code"`
@@ -122,11 +147,16 @@ func (s *Service) handleActivityRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if link, _, err := s.linkedRoom(ctx, channelID); err == nil {
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"room": activityRoom{RoomID: link.RoomID, InviteCode: link.InviteCode, Title: link.Title}})
+	kind, id := strings.TrimSpace(body.ItemKind), strings.TrimSpace(body.ItemID)
+	// A party nobody is watching any more is not resumed; the channel picks
+	// a new title instead and the new party replaces the link.
+	if link, st, err := s.linkedRoom(ctx, channelID); err == nil && connectedMembers(st) > 0 {
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{
+			"room":       activityRoom{RoomID: link.RoomID, InviteCode: link.InviteCode, Title: link.Title},
+			"can_create": !p.PartyOnly,
+		})
 		return
 	}
-	kind, id := strings.TrimSpace(body.ItemKind), strings.TrimSpace(body.ItemID)
 	if kind == "" && id == "" {
 		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"room": nil, "can_create": !p.PartyOnly})
 		return

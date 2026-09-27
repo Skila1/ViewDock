@@ -120,6 +120,28 @@ func TestActivityRoomCreatesAndSharesTheChannelParty(t *testing.T) {
 	}
 }
 
+func TestActivityRoomDoesNotResumeAnAbandonedParty(t *testing.T) {
+	h := newActivityHarness(t)
+	host := user("u-host", false)
+	_, out := h.room(host, map[string]any{"instance_id": activityInstance, "item_kind": "movie", "item_id": "m1"})
+	first, _ := out["room"].(map[string]any)
+	h.parties.rooms[first["room_id"].(string)].empty = true
+
+	code, out := h.room(host, map[string]any{"instance_id": activityInstance})
+	if code != http.StatusOK || out["room"] != nil || out["can_create"] != true {
+		t.Fatalf("abandoned party must not be resumed: %d %v", code, out)
+	}
+	_, out = h.room(host, map[string]any{"instance_id": activityInstance, "item_kind": "movie", "item_id": "m1"})
+	second, _ := out["room"].(map[string]any)
+	if second["created"] != true || second["room_id"] == first["room_id"] {
+		t.Fatalf("a new party must replace the abandoned one: %v", out)
+	}
+	link, err := h.svc.Links.Get(context.Background(), voiceChannel)
+	if err != nil || link.RoomID != second["room_id"] {
+		t.Fatalf("link = %+v err %v", link, err)
+	}
+}
+
 func TestActivityRoomRefusesOutsiders(t *testing.T) {
 	h := newActivityHarness(t)
 	cases := []struct {

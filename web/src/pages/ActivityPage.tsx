@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import { Logo } from "@/components/brand/Logo";
@@ -27,6 +27,7 @@ function useDebounced(value: string, ms: number): string {
 // picks the title.
 export function ActivityPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const instanceId = activityInstanceId();
   const room = useQuery({
     queryKey: ["activity-room", instanceId],
@@ -40,7 +41,12 @@ export function ActivityPage() {
       api.activityRoom({ instance_id: instanceId, ...item }),
   });
 
-  const code = create.data?.room?.invite_code ?? room.data?.room?.invite_code;
+  // After leaving a party with the close button, the page offers to rejoin
+  // it instead of sending the viewer straight back in.
+  const left = (location.state as { left?: string } | null)?.left ?? "";
+  const existing = room.data?.room ?? null;
+  const skipped = Boolean(existing && left && existing.invite_code === left);
+  const code = create.data?.room?.invite_code ?? (skipped ? undefined : existing?.invite_code);
   useEffect(() => {
     if (code) navigate(`/together/${encodeURIComponent(code)}`, { replace: true });
   }, [code, navigate]);
@@ -57,6 +63,31 @@ export function ActivityPage() {
         <button type="button" className="tap w-full rounded-full border border-line text-sm" onClick={() => void room.refetch()}>
           Try again
         </button>
+      </>
+    );
+  } else if (skipped && existing) {
+    body = (
+      <>
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-raised p-4">
+          <p className="min-w-0 flex-1 text-sm">
+            <span className="text-dim">Still playing in this channel: </span>
+            <span className="font-medium">{existing.title || "Watch party"}</span>
+          </p>
+          <button
+            type="button"
+            className="btn-green rounded-full px-4 py-1.5 text-sm"
+            onClick={() => navigate(`/together/${encodeURIComponent(existing.invite_code)}`, { replace: true })}
+          >
+            Rejoin
+          </button>
+        </div>
+        {room.data?.can_create ? (
+          <TitlePicker
+            busy={create.isPending}
+            error={create.isError ? errMessage(create.error) : ""}
+            onPick={(item) => create.mutate(item)}
+          />
+        ) : null}
       </>
     );
   } else if (room.data?.can_create) {

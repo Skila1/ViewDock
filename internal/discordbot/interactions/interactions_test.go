@@ -46,6 +46,8 @@ type fakeRoom struct {
 	host, kind, id, code string
 	playing              bool
 	pos                  int64
+	// empty marks a room whose members have all disconnected.
+	empty bool
 }
 
 type fakeParties struct {
@@ -71,7 +73,10 @@ func (f *fakeParties) State(roomID string) map[string]any {
 	}
 	return map[string]any{
 		"host": r.host, "playing": r.playing, "position_ms": r.pos, "item_kind": r.kind, "item_id": r.id,
-		"members": []map[string]any{{"id": r.host, "display_name": "Hosty"}, {"id": "u-guest", "display_name": "Guesty"}},
+		"members": []map[string]any{
+			{"id": r.host, "display_name": "Hosty", "connected": !r.empty},
+			{"id": "u-guest", "display_name": "Guesty", "connected": !r.empty},
+		},
 	}
 }
 
