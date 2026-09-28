@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 - Player errors have a Details dropdown with a Copy button, and are reported to admins with a report ID. This covers startup failures and streams that stop during playback, which previously froze without a message.
 - New Audit page in Admin: server and player errors with their details, plus the audit trail of admin actions. `GET /api/v1/admin/audit` and error reports are readable with a `logs.read` API key; the API key page has a copy button for new keys.
