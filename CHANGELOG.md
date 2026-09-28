@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Redesigned player controls. The quality box is replaced by a settings cog that opens upward with Quality, Server, Subtitles and Playback speed (0.25x to 1.5x). Previous and Skip are now 10 seconds back and forward buttons, also on the arrow keys.
+- Subtitles can be picked in the player. Text subtitles are drawn by the player and switch off without restarting the stream; image subtitles are burned in. Text subtitles are now extracted as WebVTT.
+- After 10 seconds paused, the player dims and shows what you're watching: title, season, episode and overview.
+- Fixed a crash when a video reached its end, which also stopped the next episode from starting automatically. The play button no longer gets stuck on Play after moving to another episode.
+
 ## 0.2.3
 
 - Player errors have a Details dropdown with a Copy button, and are reported to admins with a report ID. This covers startup failures and streams that stop during playback, which previously froze without a message.

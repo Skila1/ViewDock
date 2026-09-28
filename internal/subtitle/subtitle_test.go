@@ -31,3 +31,11 @@ func TestNoASSToVTT(t *testing.T) {
 		t.Fatal("must not convert ASS to VTT")
 	}
 }
+
+func TestTextSubsBecomeVTT(t *testing.T) {
+	for _, c := range []string{"subrip", "srt", "mov_text", "webvtt"} {
+		if ExtFor(c) != ".vtt" {
+			t.Fatalf("%s should extract as WebVTT, got %s", c, ExtFor(c))
+		}
+	}
+}

@@ -6,7 +6,6 @@ import {
   Pause,
   Play,
   Radio,
-  SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
@@ -29,6 +28,11 @@ import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedi
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
+import { PlayerSettingsMenu, type MenuOption } from "./PlayerSettingsMenu";
+import { PauseOverlay, type NowPlayingInfo } from "./PauseOverlay";
+import { SubtitleOverlay } from "./SubtitleOverlay";
+import { Forward10, Replay10 } from "./icons";
+import { activeCues, parseCues, subtitleBurnsIn, subtitleLabel, type Cue } from "@/playback/subtitles";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { shouldExitFullscreen } from "./fullscreenToggle";
 import { canSeekInWindow, generatedMediaEndSec, seekableBounds, vodMovieSeekable } from "./seekWindow";
@@ -42,6 +46,8 @@ type Props = {
   itemId: string;
   startMs?: number;
   title?: string;
+  /** Title details shown when playback has been paused for a while. */
+  info?: NowPlayingInfo;
   togetherCode?: string;
   shareToken?: string;
   guestItem?: { kind: string; id: string };
@@ -49,11 +55,35 @@ type Props = {
   onClose?: () => void;
 };
 
+const SPEEDS: MenuOption<number>[] = [
+  { value: 0.25, label: "0.25x" },
+  { value: 0.5, label: "0.5x" },
+  { value: 1, label: "Normal" },
+  { value: 1.25, label: "1.25x" },
+  { value: 1.5, label: "1.5x" },
+];
+
+const PAUSE_OVERLAY_MS = 10_000;
+
+function qualityLabel(q: string): string {
+  if (q === "auto") return "Auto";
+  return /^\d+$/.test(q) ? `${q}p` : q;
+}
+
+function withStoken(url: string, stoken?: string): string {
+  if (!stoken || /[?&]stoken=/.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}stoken=${encodeURIComponent(stoken)}`;
+}
+
+const ctrlBtn =
+  "tap grid h-11 w-11 place-items-center rounded-full sm:h-12 sm:w-12 sm:[&_svg]:scale-[1.15] text-white/90 outline-none transition duration-150 hover:bg-white/[0.12] hover:text-white active:scale-90 focus-visible:ring-2 focus-visible:ring-white/70";
+
 export function Player({
   itemKind,
   itemId,
   startMs = 0,
   title,
+  info,
   togetherCode,
   shareToken,
   guestItem,
@@ -72,7 +102,20 @@ export function Player({
   const [showUi, setShowUi] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
-  const [volOpen, setVolOpen] = useState(false);
+  const [quality, setQuality] = useState("auto");
+  const subtitleRef = useRef<number | null>(null);
+  const [subtitle, setSubtitle] = useState<number | null>(null);
+  const [cues, setCues] = useState<Cue[]>([]);
+  const [shownCues, setShownCues] = useState<Cue[]>([]);
+  const [speed, setSpeed] = useState(1);
+  const [settingsOpen, setSettingsOpenState] = useState(false);
+  const settingsOpenRef = useRef(false);
+  const menuClosedAtRef = useRef(0);
+  const [idlePaused, setIdlePaused] = useState(false);
+  const idleTimer = useRef<number>(0);
+  const [bufferedMs, setBufferedMs] = useState(0);
+  const [hoverSeek, setHoverSeek] = useState<{ ms: number; pct: number } | null>(null);
+  const [nudge, setNudge] = useState<{ dir: -1 | 1; key: number } | null>(null);
   const [fs, setFs] = useState(false);
   const [pageFs, setPageFs] = useState(false);
   const [pos, setPos] = useState(0);
@@ -236,6 +279,7 @@ export function Player({
           item_id: itemId,
           start_ms: startAt,
           quality: qualityRef.current,
+          subtitle_index: subtitleRef.current ?? undefined,
           replace_session_id: replaceId,
           source: sourceRef.current,
         });
@@ -382,6 +426,7 @@ export function Player({
 
   useEffect(() => {
     genRef.current += 1;
+    phaseRef.current = "idle";
     resumeRef.current = startMs;
     setResumeMs(startMs);
     void createAndAttach("START");
@@ -414,6 +459,17 @@ export function Player({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const onBuffered = () => {
+      const t = video.currentTime || 0;
+      const b = video.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (b.start(i) <= t + 0.5 && b.end(i) >= t) {
+          setBufferedMs(logicalPositionMs(originRef.current, b.end(i)));
+          return;
+        }
+      }
+      setBufferedMs(0);
+    };
     const onTime = () => {
       if (pendingSeekRef.current != null || attachBusyRef.current) return;
       const origin = originRef.current;
@@ -422,6 +478,7 @@ export function Player({
       lastStablePosRef.current = ms;
       setPos(ms);
       resumeRef.current = ms;
+      onBuffered();
     };
     const onDur = () => {
       const probed = sessionRef.current?.duration_ms ?? 0;
@@ -496,7 +553,7 @@ export function Player({
       bump("SEEKED");
       checkpoint("seek");
     };
-    const onEnded = () => {
+    const onVideoEnded = () => {
       bump("ENDED");
       checkpoint("ended");
       onEnded?.();
@@ -508,6 +565,7 @@ export function Player({
     ];
     const onDom = (e: Event) => noteMediaDom(video, e.type);
     video.addEventListener("timeupdate", onTime);
+    video.addEventListener("progress", onBuffered);
     video.addEventListener("durationchange", onDur);
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
@@ -517,10 +575,11 @@ export function Player({
     video.addEventListener("playing", onCanPlay);
     video.addEventListener("playing", onPlaying);
     video.addEventListener("seeked", onSeeked);
-    video.addEventListener("ended", onEnded);
+    video.addEventListener("ended", onVideoEnded);
     for (const name of domEv) video.addEventListener(name, onDom);
     return () => {
       video.removeEventListener("timeupdate", onTime);
+      video.removeEventListener("progress", onBuffered);
       video.removeEventListener("durationchange", onDur);
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
@@ -530,7 +589,7 @@ export function Player({
       video.removeEventListener("playing", onCanPlay);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("ended", onEnded);
+      video.removeEventListener("ended", onVideoEnded);
       for (const name of domEv) video.removeEventListener(name, onDom);
     };
   }, [bump, onEnded, itemKind, itemId, telemetry]);
@@ -607,16 +666,101 @@ export function Player({
     return () => window.clearInterval(id);
   }, []);
 
+  const scheduleHide = () => {
+    window.clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => {
+      const v = videoRef.current;
+      if (settingsOpenRef.current || !v || v.paused) return;
+      setShowUi(false);
+    }, 2800);
+  };
+
+  const armIdle = () => {
+    window.clearTimeout(idleTimer.current);
+    if (phaseRef.current !== "paused" || errShownRef.current || settingsOpenRef.current) return;
+    idleTimer.current = window.setTimeout(() => {
+      if (phaseRef.current !== "paused" || errShownRef.current || settingsOpenRef.current) return;
+      setIdlePaused(true);
+      setShowUi(false);
+    }, PAUSE_OVERLAY_MS);
+  };
+
   const reveal = () => {
     setShowUi(true);
-    window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => setShowUi(false), 2500);
+    setIdlePaused(false);
+    scheduleHide();
+    armIdle();
+  };
+
+  const setSettingsOpen = (open: boolean) => {
+    if (!open && settingsOpenRef.current) menuClosedAtRef.current = Date.now();
+    settingsOpenRef.current = open;
+    setSettingsOpenState(open);
+    if (open) {
+      window.clearTimeout(idleTimer.current);
+      setShowUi(true);
+    } else {
+      scheduleHide();
+      armIdle();
+    }
   };
 
   useEffect(() => {
     reveal();
-    return () => window.clearTimeout(hideTimer.current);
+    return () => {
+      window.clearTimeout(hideTimer.current);
+      window.clearTimeout(idleTimer.current);
+    };
+    // mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (phase === "paused") {
+      armIdle();
+      return;
+    }
+    window.clearTimeout(idleTimer.current);
+    setIdlePaused(false);
+    if (phase === "playing") scheduleHide();
+  }, [phase]);
+
+  const subtitleUrl = session?.urls?.subtitle ? withStoken(session.urls.subtitle, session.stoken) : "";
+  useEffect(() => {
+    setCues([]);
+    setShownCues([]);
+    if (!subtitleUrl) return;
+    const ctl = new AbortController();
+    fetch(subtitleUrl, { credentials: "include", signal: ctl.signal })
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`subtitles ${res.status}`))))
+      .then((text) => setCues(parseCues(text)))
+      .catch((e: unknown) => {
+        if (ctl.signal.aborted) return;
+        const video = videoRef.current;
+        if (video) noteAttach(video, "subtitles_failed", e instanceof Error ? e.message : "fetch failed");
+      });
+    return () => ctl.abort();
+  }, [subtitleUrl]);
+
+  useEffect(() => {
+    if (!cues.length) return;
+    let raf = 0;
+    let last = "";
+    const tick = () => {
+      const video = videoRef.current;
+      if (video) {
+        const now = activeCues(cues, logicalPositionMs(originRef.current, video.currentTime || 0));
+        const key = now.map((c) => c.startMs).join(",");
+        if (key !== last) {
+          last = key;
+          setShownCues(now);
+        }
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [cues]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -811,6 +955,7 @@ export function Player({
       return;
     }
     qualityRef.current = q;
+    setQuality(q);
     const video = videoRef.current;
     resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
     void createAndAttach("QUALITY");
@@ -820,9 +965,31 @@ export function Player({
     if (id === (sourceRef.current ?? session?.source)) return;
     sourceRef.current = id;
     qualityRef.current = undefined;
+    setQuality("auto");
+    subtitleRef.current = null;
+    setSubtitle(null);
     const video = videoRef.current;
     resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
     void createAndAttach("QUALITY");
+  };
+
+  const changeSubtitle = (index: number | null) => {
+    if (index === subtitleRef.current) return;
+    subtitleRef.current = index;
+    setSubtitle(index);
+    if (index == null) {
+      setCues([]);
+      setShownCues([]);
+      if (session?.urls?.subtitle) return;
+    }
+    const video = videoRef.current;
+    resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
+    void createAndAttach("QUALITY");
+  };
+
+  const skip = (dir: -1 | 1) => {
+    seek(Math.max(0, pos + dir * 10_000), dir < 0 ? "skip_back" : "skip_forward");
+    setNudge({ dir, key: Date.now() });
   };
 
   const partyApply = (playing: boolean, positionMs: number | null) => {
@@ -884,15 +1051,29 @@ export function Player({
   const canTogglePanel = inParty && (wt.isHost || wt.panel === "everyone");
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const rate = inParty ? 1 : speed;
+    video.defaultPlaybackRate = rate;
+    video.playbackRate = rate;
+  }, [speed, inParty, session?.id]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (settingsOpenRef.current) return;
+      if (e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
       if (e.code === "Space") {
         e.preventDefault();
         togglePlay("keyboard");
+        reveal();
       }
       if (e.key === "f" && !isIOSDevice()) toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
-      if (e.key === "ArrowRight") seek(pos + 10_000, "keyboard");
-      if (e.key === "ArrowLeft") seek(Math.max(0, pos - 10_000), "keyboard");
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        skip(e.key === "ArrowRight" ? 1 : -1);
+        reveal();
+      }
       if (e.key === "m") {
         const v = videoRef.current;
         if (v) {
@@ -921,6 +1102,42 @@ export function Player({
     phase === "recreating" ||
     phase === "buffering";
   const showSpinner = !err && (buffering || attaching);
+  const bufferPct = duration > 0 && bufferedMs > 0 ? Math.min(100, (bufferedMs / seekMax) * 100) : 0;
+  const subtitleTracks = session?.subtitles ?? [];
+  const qualityGroup = {
+    value: qualities.length > 0 ? quality : "auto",
+    options: (qualities.length > 0 ? qualities : ["auto"]).map((q) => ({
+      value: q,
+      label: qualityLabel(q),
+      hint: q === "auto" ? "Recommended" : undefined,
+    })),
+    onChange: changeQuality,
+  };
+  const serverGroup =
+    sources.length > 0
+      ? { value: session?.source ?? sources[0].id, options: sources.map((s) => ({ value: s.id, label: s.label })), onChange: changeSource }
+      : { value: "default", options: [{ value: "default", label: "Default" }], onChange: () => undefined };
+  const subtitleGroup = {
+    value: subtitle,
+    options:
+      subtitleTracks.length > 0
+        ? [
+            { value: null as number | null, label: "Off" },
+            ...subtitleTracks
+              .filter((t) => typeof t.index === "number")
+              .map((t, i) => ({ value: t.index as number, label: subtitleLabel(t, i + 1), hint: subtitleBurnsIn(t) ? "Burned in" : undefined })),
+          ]
+        : [],
+    onChange: changeSubtitle,
+    empty: "This title has no subtitles.",
+  };
+  const speedGroup = {
+    value: inParty ? 1 : speed,
+    options: SPEEDS,
+    onChange: setSpeed,
+    disabled: inParty ? "Party sync" : undefined,
+  };
+  const pauseInfo: NowPlayingInfo | null = info ?? (title ? { title } : null);
 
   return (
     <div
@@ -937,9 +1154,42 @@ export function Player({
         preload="auto"
         onClick={applePlayer ? undefined : (e) => {
           e.stopPropagation();
+          reveal();
+          if (Date.now() - menuClosedAtRef.current < 400) return;
           togglePlay("video_click");
         }}
       />
+
+      {pauseInfo && !applePlayer ? <PauseOverlay info={pauseInfo} visible={idlePaused && !err} /> : null}
+
+      {applePlayer ? null : (
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-44 bg-gradient-to-t from-black/90 via-black/55 to-transparent transition-opacity duration-300",
+            showUi ? "opacity-100" : "opacity-0",
+          )}
+        />
+      )}
+
+      <SubtitleOverlay cues={subtitle == null ? [] : shownCues} lifted={showUi && !applePlayer} />
+
+      {nudge ? (
+        <div
+          key={nudge.key}
+          className={cn(
+            "vd-nudge pointer-events-none absolute top-1/2 z-[7] -mt-12 grid h-24 w-24 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm",
+            nudge.dir < 0 ? "left-[18%]" : "right-[18%]",
+          )}
+          onAnimationEnd={() => setNudge(null)}
+          aria-hidden
+        >
+          <div className="flex flex-col items-center gap-0.5">
+            {nudge.dir < 0 ? <Replay10 size={34} /> : <Forward10 size={34} />}
+            <span className="text-[11px] font-semibold tracking-wide text-white/85">{nudge.dir < 0 ? "-10s" : "+10s"}</span>
+          </div>
+        </div>
+      ) : null}
 
       {debug ? (
         <PlaybackDiagnostics video={videoRef.current} session={session} engine={engine} originMs={originRef.current} />
@@ -1021,22 +1271,25 @@ export function Player({
       ) : (
         <div
           className={cn(
-            "pointer-events-none absolute inset-0 transition-opacity",
+            "pointer-events-none absolute inset-x-0 top-0 z-10 transition-opacity duration-300",
             showUi ? "opacity-100" : "opacity-0",
           )}
         >
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/80 via-black/35 to-transparent" />
           <div
-            className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3"
+            className="relative flex items-center justify-between gap-4 px-4 py-3 sm:px-6"
             style={{ paddingTop: "max(0.75rem, var(--sat))" }}
           >
-            <div className="pointer-events-auto min-w-0">
-              <p className="truncate text-sm font-medium text-white">{title}</p>
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-semibold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.6)] sm:text-[17px]">{title}</p>
+              {info?.episode ? <p className="truncate text-[13px] text-white/65 sm:text-sm">{[info.season, info.episode].filter(Boolean).join(" · ")}</p> : null}
             </div>
             {onClose ? (
               <button
                 type="button"
-                className="pointer-events-auto tap rounded-full bg-black/50 p-2 text-white"
+                className={cn(ctrlBtn, showUi ? "pointer-events-auto" : "pointer-events-none")}
                 aria-label="Exit player"
+                title="Exit (Esc)"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose();
@@ -1050,146 +1303,152 @@ export function Player({
       )}
 
       {applePlayer ? null : (
-      <div
-        className={cn(
-          "absolute inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 transition-opacity",
-          showUi ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
-        )}
-        style={{
-          bottom: 0,
-          paddingBottom: "max(1rem, var(--sab))",
-        }}
-      >
-        <input
-          type="range"
-          min={0}
-          max={seekMax}
-          value={seekValue}
-          onChange={(e) => seek(Number(e.target.value), "slider")}
-          className="player-range mb-3 h-8 w-full"
-          style={{ "--player-range-pct": `${progressPct}%` } as CSSProperties}
-        />
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => togglePlay("chrome")} className="tap text-white" aria-label="Play pause">
-            {phase === "playing" ? <Pause size={22} /> : <Play size={22} />}
-          </button>
-          <button
-            type="button"
-            className="tap text-white"
-            aria-label="Back 10 seconds"
-            onClick={() => seek(Math.max(0, pos - 10_000), "skip_back")}
-          >
-            <SkipBack size={20} />
-          </button>
-          <button
-            type="button"
-            className="tap text-white"
-            aria-label="Forward 10 seconds"
-            onClick={() => seek(pos + 10_000, "skip_forward")}
-          >
-            <SkipForward size={20} />
-          </button>
-          <span className="text-xs tabular-nums text-white/80">
-            {formatClock(pos)} / {formatClock(duration)}
-          </span>
-          <div
-            className="flex items-center gap-2"
-            onMouseEnter={() => setVolOpen(true)}
-            onMouseLeave={() => setVolOpen(false)}
-          >
-            <button
-              type="button"
-              className="tap text-white"
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.muted = !v.muted;
-                setMuted(v.muted);
+        <div
+          className={cn(
+            "absolute inset-x-0 bottom-0 z-10 transition-opacity duration-300",
+            showUi ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          )}
+          style={{ paddingBottom: "max(0.75rem, var(--sab))" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="relative px-3 sm:px-6">
+            <div
+              className="player-seek-wrap relative"
+              onMouseMove={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                const pct = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+                setHoverSeek({ ms: pct * seekMax, pct: pct * 100 });
               }}
-              aria-label="Mute"
+              onMouseLeave={() => setHoverSeek(null)}
             >
-              {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={muted ? 0 : volume}
-              aria-label="Volume"
-              className={cn("player-range h-8 transition-all", volOpen ? "w-24" : "w-16")}
-              style={{ "--player-range-pct": `${volumePct}%` } as CSSProperties}
-              onChange={(e) => {
-                const v = videoRef.current;
-                const next = Number(e.target.value);
-                setVolume(next);
-                if (v) {
-                  v.volume = next;
-                  v.muted = next === 0;
-                }
-                setMuted(next === 0);
-              }}
-            />
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {canTogglePanel ? (
+              {hoverSeek && duration > 0 ? (
+                <span
+                  className="pointer-events-none absolute bottom-full mb-1.5 -translate-x-1/2 rounded-md bg-black/85 px-2 py-1 text-[12px] font-semibold tabular-nums text-white shadow-lg ring-1 ring-white/10"
+                  style={{ left: `clamp(1.75rem, ${hoverSeek.pct}%, calc(100% - 1.75rem))` }}
+                >
+                  {formatClock(hoverSeek.ms)}
+                </span>
+              ) : null}
+              <input
+                type="range"
+                min={0}
+                max={seekMax}
+                value={seekValue}
+                aria-label="Seek"
+                aria-valuetext={`${formatClock(pos)} of ${formatClock(duration)}`}
+                onChange={(e) => seek(Number(e.target.value), "slider")}
+                className="player-seek"
+                style={{ "--player-range-pct": `${progressPct}%`, "--player-buffer-pct": `${bufferPct}%` } as CSSProperties}
+              />
+            </div>
+
+            <div className="mt-1 flex items-center gap-0.5 sm:gap-1.5">
               <button
                 type="button"
-                className={cn("tap", panelOpen ? "text-accent" : "text-white")}
-                aria-label={panelOpen ? "Hide Watch Together panel" : "Show Watch Together panel"}
-                aria-pressed={panelOpen}
-                onClick={() => setPanelLocal(panelOpen ? "closed" : "open")}
+                onClick={() => togglePlay("chrome")}
+                className={ctrlBtn}
+                aria-label={phase === "playing" ? "Pause" : "Play"}
+                title={phase === "playing" ? "Pause (Space)" : "Play (Space)"}
               >
-                <Radio size={18} />
+                {phase === "playing" ? <Pause size={24} fill="currentColor" strokeWidth={0} /> : <Play size={24} fill="currentColor" strokeWidth={0} className="translate-x-px" />}
               </button>
-            ) : null}
-            {session?.next_episode ? (
-              <button
-                type="button"
-                className="tap flex items-center gap-1 rounded border border-white/20 px-2 text-xs text-white"
-                onClick={() => onEnded?.()}
-              >
-                <SkipForward size={14} /> Next
+              <button type="button" className={ctrlBtn} aria-label="Back 10 seconds" title="Back 10 seconds (Left arrow)" onClick={() => skip(-1)}>
+                <Replay10 size={25} />
               </button>
-            ) : null}
-            {sources.length > 1 ? (
-              <select
-                className="tap max-w-[10rem] rounded border border-white/20 bg-black/40 px-2 text-xs"
-                aria-label="Playback source"
-                value={session?.source ?? sources[0].id}
-                onChange={(e) => changeSource(e.target.value)}
-              >
-                {sources.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            {qualities.length > 0 ? (
-              <select
-                className="tap rounded border border-white/20 bg-black/40 px-2 text-xs"
-                value={qualityRef.current ?? qualities[0]}
-                onChange={(e) => changeQuality(e.target.value)}
-              >
-                {qualities.map((q) => (
-                  <option key={q} value={q}>
-                    {q}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <button
-              type="button"
-              className="tap text-white"
-              aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
-              onClick={(e) => toggleFullscreen(e)}
-            >
-              {fs ? <Minimize size={18} /> : <Maximize size={18} />}
-            </button>
+              <button type="button" className={ctrlBtn} aria-label="Forward 10 seconds" title="Forward 10 seconds (Right arrow)" onClick={() => skip(1)}>
+                <Forward10 size={25} />
+              </button>
+
+              <div className="group/vol flex items-center">
+                <button
+                  type="button"
+                  className={ctrlBtn}
+                  onClick={() => {
+                    const v = videoRef.current;
+                    if (!v) return;
+                    v.muted = !v.muted;
+                    setMuted(v.muted);
+                  }}
+                  aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
+                  title={muted || volume === 0 ? "Unmute (M)" : "Mute (M)"}
+                >
+                  {muted || volume === 0 ? <VolumeX size={22} /> : <Volume2 size={22} />}
+                </button>
+                <div className="w-0 overflow-hidden opacity-0 transition-all duration-200 ease-out group-focus-within/vol:w-24 group-focus-within/vol:opacity-100 group-hover/vol:w-24 group-hover/vol:opacity-100">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={muted ? 0 : volume}
+                    aria-label="Volume"
+                    className="player-range ml-1 h-8 w-[5.25rem]"
+                    style={{ "--player-range-pct": `${volumePct}%` } as CSSProperties}
+                    onChange={(e) => {
+                      const v = videoRef.current;
+                      const next = Number(e.target.value);
+                      setVolume(next);
+                      if (v) {
+                        v.volume = next;
+                        v.muted = next === 0;
+                      }
+                      setMuted(next === 0);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <span className="ml-2 whitespace-nowrap text-[13px] font-medium tabular-nums text-white sm:text-sm">
+                {formatClock(pos)}
+                <span className="text-white/50"> / {formatClock(duration)}</span>
+              </span>
+
+              <div className="ml-auto flex items-center gap-0.5 sm:gap-1.5">
+                {session?.next_episode ? (
+                  <button
+                    type="button"
+                    className="tap mr-1 hidden h-9 items-center gap-1.5 rounded-full bg-white/[0.12] px-3.5 text-[13px] font-semibold text-white outline-none transition hover:bg-white/[0.2] focus-visible:ring-2 focus-visible:ring-white/70 sm:flex"
+                    onClick={() => onEnded?.()}
+                    title={session.next_episode.title ? `Next: ${session.next_episode.title}` : "Next episode"}
+                  >
+                    <SkipForward size={15} fill="currentColor" strokeWidth={0} aria-hidden />
+                    Next episode
+                  </button>
+                ) : null}
+                {canTogglePanel ? (
+                  <button
+                    type="button"
+                    className={cn(ctrlBtn, panelOpen && "text-accent hover:text-accent")}
+                    aria-label={panelOpen ? "Hide Watch Together panel" : "Show Watch Together panel"}
+                    title="Watch Together"
+                    aria-pressed={panelOpen}
+                    onClick={() => setPanelLocal(panelOpen ? "closed" : "open")}
+                  >
+                    <Radio size={21} />
+                  </button>
+                ) : null}
+                <PlayerSettingsMenu
+                  open={settingsOpen}
+                  onOpenChange={setSettingsOpen}
+                  quality={qualityGroup}
+                  server={serverGroup}
+                  subtitles={subtitleGroup}
+                  speed={speedGroup}
+                  buttonClassName={cn(ctrlBtn, settingsOpen && "bg-white/[0.12] text-white")}
+                />
+                <button
+                  type="button"
+                  className={ctrlBtn}
+                  aria-label={fs ? "Exit fullscreen" : "Fullscreen"}
+                  title={fs ? "Exit fullscreen (F)" : "Fullscreen (F)"}
+                  onClick={(e) => toggleFullscreen(e)}
+                >
+                  {fs ? <Minimize size={21} /> : <Maximize size={21} />}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
       )}
 
       {showSpinner ? (

@@ -1,8 +1,10 @@
+import { useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/api";
 import { Player } from "@/components/player/Player";
+import type { NowPlayingInfo } from "@/components/player/PauseOverlay";
 import { ResumeChoice } from "@/components/player/ResumeChoice";
 import { filenameTitle } from "@/lib/format";
 import type { ItemKind } from "@/types/api.gen";
@@ -24,6 +26,12 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
     queryFn: () => api.getEpisode(id),
     enabled: kind === "episode" && Boolean(id),
   });
+  const seriesId = episode.data?.series_id ?? "";
+  const series = useQuery({
+    queryKey: ["series", seriesId],
+    queryFn: () => api.getSeries(seriesId),
+    enabled: kind === "episode" && Boolean(seriesId),
+  });
   const cont = useQuery({
     queryKey: ["continue"],
     queryFn: api.continueWatching,
@@ -34,6 +42,27 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
     kind === "movie"
       ? filenameTitle(movie.data?.title || "")
       : filenameTitle(episode.data?.title || `S${episode.data?.season ?? 0}E${episode.data?.number ?? 0}`);
+
+  const info = useMemo<NowPlayingInfo | undefined>(() => {
+    if (kind === "movie") {
+      const m = movie.data;
+      if (!m) return undefined;
+      return {
+        title: filenameTitle(m.title),
+        meta: [m.year ? String(m.year) : "", m.content_rating ?? ""].filter(Boolean),
+        overview: m.overview,
+      };
+    }
+    const ep = episode.data;
+    if (!ep) return undefined;
+    const epTitle = filenameTitle(ep.title || "");
+    return {
+      title: series.data?.title ? filenameTitle(series.data.title) : epTitle || `Episode ${ep.number}`,
+      season: `Season ${ep.season}`,
+      episode: epTitle && series.data?.title ? `${epTitle}: Ep. ${ep.number}` : `Episode ${ep.number}`,
+      overview: ep.overview,
+    };
+  }, [kind, movie.data, episode.data, series.data]);
 
   const saved = (cont.data ?? []).find((p) => p.item_kind === kind && p.item_id === id);
   const resumeMs = saved?.resume_ms ?? saved?.position_ms ?? 0;
@@ -70,7 +99,8 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
       itemKind={kind}
       itemId={id}
       startMs={startMs}
-      title={title}
+      title={kind === "episode" && info ? info.title : title}
+      info={info}
       onEnded={() => {
         if (kind === "episode" && episode.data?.series_id) {
           void api

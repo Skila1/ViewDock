@@ -53,13 +53,13 @@ func classify(s ffmpeg.Stream, assJS bool) (string, string) {
 	}
 }
 
+// ExtFor is the extracted file type. Plain text formats become WebVTT, the
+// only text format browsers load as a track; ASS keeps its styling.
 func ExtFor(codec string) string {
 	switch strings.ToLower(codec) {
 	case "ass", "ssa":
 		return ".ass"
-	case "subrip", "srt":
-		return ".srt"
-	case "webvtt", "vtt":
+	case "subrip", "srt", "mov_text", "text", "webvtt", "vtt":
 		return ".vtt"
 	default:
 		return ".ass"
@@ -92,13 +92,17 @@ func (e *Extractor) Extract(ctx context.Context, src, destDir string, info *ffmp
 	if ff == nil {
 		ff = ffmpeg.New()
 	}
+	codecArgs := []string{"-c", "copy"}
+	if ext == ".vtt" {
+		codecArgs = []string{"-c:s", "webvtt"}
+	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error",
 		"-i", src,
 		"-map", fmt.Sprintf("0:%d", st.Index),
-		"-c", "copy",
-		"-y", out,
 	}
+	args = append(args, codecArgs...)
+	args = append(args, "-y", out)
 	cmd := execCmd(ctx, ff, args)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return Result{}, fmt.Errorf("extract sub: %w (%s)", err, string(b))
