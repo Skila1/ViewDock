@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { noteAttach, noteDisplayingFsChange, noteMedia, readAttachTrace } from "@/playback/attachTrace";
 import { inferDiagnosticOwner, type PlaybackEngine } from "@/playback/policy";
 import type { PlaybackSession } from "@/types/api.gen";
+import { copyBySelection } from "@/lib/clipboard";
 
 type AppleVideo = HTMLVideoElement & {
   webkitDisplayingFullscreen?: boolean;
@@ -118,36 +119,6 @@ function snapshot(video: HTMLVideoElement | null, session: PlaybackSession | nul
   return rows;
 }
 
-function copyDump(text: string, pre: HTMLElement | null): boolean {
-  try {
-    if (pre) {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(pre);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      if (document.execCommand("copy")) {
-        sel?.removeAllRanges();
-        return true;
-      }
-      sel?.removeAllRanges();
-    }
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.cssText = "position:fixed;top:0;left:0;width:2em;height:2em;opacity:0.01;border:none;padding:0";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
 export function PlaybackDiagnostics({ video, session, engine, originMs }: Props) {
   const [rows, setRows] = useState(() => snapshot(video, session, engine, originMs));
   const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
@@ -198,7 +169,7 @@ export function PlaybackDiagnostics({ video, session, engine, originMs }: Props)
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            const ok = copyDump(text, preRef.current);
+            const ok = copyBySelection(text, preRef.current);
             if (!ok && window.isSecureContext && navigator.clipboard?.writeText) {
               void navigator.clipboard.writeText(text).then(
                 () => {

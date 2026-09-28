@@ -5,15 +5,18 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/viewdock/viewdock/internal/audit"
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/httpapi"
 )
 
 func (s *Store) Routes(r chi.Router) {
 	r.Post("/client-logs", s.handleIngest)
+	r.Post("/error-reports", s.handleReport)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequirePerm(auth.PermLogsRead))
 		r.Get("/admin/logs", s.handleList)
+		r.Get("/admin/audit", s.handleAudit)
 	})
 }
 
@@ -35,6 +38,31 @@ func (s *Store) handleList(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if len(list) > 0 {
 		next = list[len(list)-1].CreatedAt
+	}
+	httpapi.WriteJSON(w, 200, map[string]any{"items": list, "next": next})
+}
+
+func (s *Store) handleAudit(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	list, err := audit.New(s.DB).List(r.Context(), audit.Filter{
+		Action: q.Get("action"),
+		Actor:  q.Get("actor"),
+		Q:      q.Get("q"),
+		Before: q.Get("before"),
+		Limit:  limit,
+	})
+	if err != nil {
+		httpapi.WriteErr(w, 500, "audit", err.Error())
+		return
+	}
+	for i := range list {
+		list[i].Target = Redact(list[i].Target)
+		list[i].Detail = Redact(list[i].Detail)
+	}
+	next := ""
+	if len(list) > 0 {
+		next = list[len(list)-1].At
 	}
 	httpapi.WriteJSON(w, 200, map[string]any{"items": list, "next": next})
 }

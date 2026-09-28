@@ -18,7 +18,8 @@ import { cn } from "@/lib/cn";
 import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
 import { flush, report, setJourneyContext } from "@/lib/journey";
-import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
+import { noteAttach, noteCurrentTimeWrite, noteLogical, noteMedia, noteMediaDom, noteUserControl, readAttachTrace, setAttachMeta, viewDockPause } from "@/playback/attachTrace";
+import { buildPlaybackErrorReport, mediaErrorMessage, type ErrorStage } from "@/playback/errorReport";
 import { isVodOnDemand, logicalPositionMs, seekReplacesSession, selectPlaybackEngine, sessionOriginMs } from "@/playback/controller";
 import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type PlaybackEngine } from "@/playback/policy";
 import { usePlayerStore } from "@/store/player";
@@ -27,6 +28,7 @@ import { diagnosticsApi } from "@/api/diagnostics";
 import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
+import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
 import { reducePlayer, type PlayerEvent, type PlayerPhase } from "./playerMachine";
 import { shouldExitFullscreen } from "./fullscreenToggle";
 import { canSeekInWindow, generatedMediaEndSec, seekableBounds, vodMovieSeekable } from "./seekWindow";
@@ -77,6 +79,9 @@ export function Player({
   const [dur, setDur] = useState(0);
   const movieDurRef = useRef(0);
   const [err, setErr] = useState<string | null>(null);
+  const [errDetails, setErrDetails] = useState("");
+  const [errReport, setErrReport] = useState<ReportStatus>({ state: "sending" });
+  const errShownRef = useRef(false);
   const hideTimer = useRef<number>(0);
   const goneAt = useRef(0);
   const seekTimer = useRef<number>(0);
@@ -144,6 +149,52 @@ export function Player({
     }
   };
 
+  const failPlayback = useCallback(
+    (message: string, code: string, stage: ErrorStage) => {
+      const video = videoRef.current;
+      const trace = readAttachTrace(video);
+      const page = typeof window === "undefined" ? "" : window.location.pathname;
+      const built = buildPlaybackErrorReport({
+        message,
+        code,
+        stage,
+        itemKind,
+        itemId,
+        title,
+        session: sessionRef.current,
+        engine: engineRef.current,
+        positionMs: video ? logicalPositionMs(originRef.current, video.currentTime || 0) : undefined,
+        video: video
+          ? {
+              readyState: video.readyState,
+              networkState: video.networkState,
+              currentTime: video.currentTime,
+              duration: video.duration,
+              paused: video.paused,
+              error: video.error ? { code: video.error.code, message: video.error.message } : null,
+            }
+          : null,
+        trace,
+        page: shareToken ? page.split(shareToken).join("[share]") : page,
+        userAgent: navigator.userAgent,
+        mse: typeof MediaSource !== "undefined",
+        nativeHls: nativeHlsSupported(),
+      });
+      errShownRef.current = true;
+      setBuffering(false);
+      setErr(message);
+      setErrDetails(built.text);
+      setErrReport({ state: "sending" });
+      bump("ERROR");
+      report("play.error", { code, stage, session_id: sessionRef.current?.id ?? "" });
+      api.reportClientError(built.request).then(
+        (res) => setErrReport({ state: "sent", id: res.id }),
+        () => setErrReport({ state: "failed" }),
+      );
+    },
+    [bump, itemId, itemKind, shareToken, title],
+  );
+
   const createAndAttach = useCallback(
     async (reason: "START" | "QUALITY" | "GONE") => {
       const video = videoRef.current;
@@ -167,6 +218,7 @@ export function Player({
       const gen = genRef.current;
       setBuffering(true);
       setErr(null);
+      errShownRef.current = false;
       try {
         const startAt = Math.floor(pendingSeekRef.current ?? resumeRef.current);
         pendingSeekRef.current = null;
@@ -253,6 +305,11 @@ export function Player({
               void createAndAttach("QUALITY");
             }, 350);
           },
+          (detail) => {
+            if (genRef.current !== gen || errShownRef.current) return;
+            telemetry.record("error", { code: "HLS_FATAL", detail });
+            failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
+          },
         );
         if (genRef.current !== gen) {
           teardownAttach();
@@ -301,8 +358,7 @@ export function Player({
             } catch (retryErr) {
               const detail = retryErr instanceof Error ? retryErr.message : "not supported";
               telemetry.record("startup_failed", { code: "NOT_SUPPORTED", detail });
-              setErr(hardwareAccelerationHelp());
-              bump("ERROR");
+              failPlayback(hardwareAccelerationHelp(), "NOT_SUPPORTED", "startup");
               return;
             }
           }
@@ -314,15 +370,14 @@ export function Player({
           void createAndAttach("GONE");
           return;
         }
-        setBuffering(false);
-        telemetry.record("startup_failed", { code: e instanceof ApiError ? (e.code ?? String(e.status)) : "ATTACH_FAILED" });
-        setErr(e instanceof Error ? e.message : "playback failed");
-        bump("ERROR");
+        const code = e instanceof ApiError ? (e.code ?? String(e.status)) : "ATTACH_FAILED";
+        telemetry.record("startup_failed", { code });
+        failPlayback(e instanceof Error ? e.message : "playback failed", code, "startup");
       } finally {
         if (genRef.current === gen) attachBusyRef.current = false;
       }
     },
-    [bump, itemId, itemKind, setPhase, setResumeMs, setSession, telemetry],
+    [bump, failPlayback, itemId, itemKind, setPhase, setResumeMs, setSession, telemetry],
   );
 
   useEffect(() => {
@@ -479,6 +534,29 @@ export function Player({
       for (const name of domEv) video.removeEventListener(name, onDom);
     };
   }, [bump, onEnded, itemKind, itemId, telemetry]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let timer = 0;
+    const onError = () => {
+      const sessionId = sessionRef.current?.id;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const mediaErr = video.error;
+        if (!mediaErr || attachBusyRef.current || errShownRef.current) return;
+        if (!sessionId || sessionRef.current?.id !== sessionId) return;
+        const code = `MEDIA_ERR_${mediaErr.code}`;
+        telemetry.record("error", { code });
+        failPlayback(mediaErrorMessage(mediaErr.code), code, "playback");
+      }, 1500);
+    };
+    video.addEventListener("error", onError);
+    return () => {
+      window.clearTimeout(timer);
+      video.removeEventListener("error", onError);
+    };
+  }, [failPlayback, telemetry]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1125,19 +1203,13 @@ export function Player({
       ) : null}
 
       {err ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
-          <p className="max-w-md text-center text-sm text-danger">{err}</p>
-          <div className="flex gap-3">
-            <button type="button" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white" onClick={() => void createAndAttach("START")}>
-              Retry
-            </button>
-            {onClose ? (
-              <button type="button" className="rounded-md border border-white/30 px-3 py-1.5 text-sm text-white" onClick={onClose}>
-                Exit
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <PlayerErrorPanel
+          message={err}
+          details={errDetails}
+          report={errReport}
+          onRetry={() => void createAndAttach("START")}
+          onClose={onClose}
+        />
       ) : null}
     </div>
   );

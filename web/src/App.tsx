@@ -19,6 +19,7 @@ import { RolesPage } from "@/features/admin/RolesPage";
 import { UpdatesPage } from "@/features/admin/UpdatesPage";
 import { APIKeysPage } from "@/features/admin/APIKeysPage";
 import { LogsPage } from "@/features/admin/LogsPage";
+import { AuditPage } from "@/features/admin/AuditPage";
 import { OfflineVaultPage } from "@/pages/OfflineVaultPage";
 import { DeviceTestPage } from "@/pages/DeviceTestPage";
 import { HouseholdsPage } from "@/features/admin/HouseholdsPage";
@@ -180,6 +181,7 @@ export function App() {
                   <Route path="settings/:section?" element={<SettingsPage />} />
                   <Route path="api-keys" element={<APIKeysPage />} />
                   <Route path="logs" element={<LogsPage />} />
+                  <Route path="audit" element={<AuditPage />} />
                   <Route path="discord/:section?" element={<DiscordPage />} />
                   <Route path="updates" element={<UpdatesPage />} />
                 </Route>

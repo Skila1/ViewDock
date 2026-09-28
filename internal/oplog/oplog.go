@@ -194,6 +194,8 @@ var (
 	reKVSecret = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|authorization|bearer|stoken|vd_[a-z0-9]+)\s*[=:]\s*([^\s,;]+)`)
 	reBearer   = regexp.MustCompile(`(?i)\bbearer\s+[a-z0-9._\-+/=]+`)
 	reStoken   = regexp.MustCompile(`(?i)stoken=[^&\s]+`)
+	// Media source stream URLs carry a grant token as a path segment.
+	reStreamGrant = regexp.MustCompile(`/media-sources/stream/[^/\s?#"]+`)
 )
 
 func Redact(s string) string {
@@ -202,6 +204,7 @@ func Redact(s string) string {
 	}
 	out := reBearer.ReplaceAllString(s, "Bearer [redacted]")
 	out = reStoken.ReplaceAllString(out, "stoken=[redacted]")
+	out = reStreamGrant.ReplaceAllString(out, "/media-sources/stream/[redacted]")
 	out = reKVSecret.ReplaceAllString(out, "${1}=[redacted]")
 	return out
 }

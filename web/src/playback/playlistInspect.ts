@@ -12,6 +12,17 @@ export type PlaylistSnap = {
   headerType?: string;
 };
 
+/**
+ * Reports whether a fetched playlist can be handed to the player: a media
+ * playlist once it lists segments, or a master playlist (such as Jellyfin's)
+ * that lists variant streams for the player to load itself.
+ */
+export function playlistReadiness(text: string): "media" | "master" | null {
+  if (text.includes("#EXTINF") || /seg\d+\.(m4s|ts)/.test(text)) return "media";
+  if (text.includes("#EXT-X-STREAM-INF")) return "master";
+  return null;
+}
+
 export function inspectPlaylistBody(text: string, when: string, headers?: Headers): PlaylistSnap {
   let type = "LIVE";
   let endlist = false;

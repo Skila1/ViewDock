@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
+import { CopyButton } from "@/components/CopyButton";
 import { Card, CardGrid, PageHeader, primaryBtn } from "./ui";
 
 export function APIKeysPage() {
@@ -38,7 +39,9 @@ export function APIKeysPage() {
         title="API keys"
         description={
           <>
-            Keys for agents and scripts. Send <code className="text-ink">Authorization: Bearer vd_…</code>. The secret is shown once.
+            Keys for agents and scripts. Send <code className="text-ink">Authorization: Bearer vd_…</code>. The secret is shown once. For
+            debugging access to logs, errors and the audit trail, pick only <code className="text-ink">logs.read</code> and{" "}
+            <code className="text-ink">streams.inspect</code>, and revoke the key when you are done.
           </>
         }
       />
@@ -66,9 +69,11 @@ export function APIKeysPage() {
             </button>
           </form>
           {secret ? (
-            <p className="break-all rounded-md border border-line bg-overlay px-3 py-2 text-sm">
-              Copy this key now: <code>{secret}</code>
-            </p>
+            <div className="space-y-2 rounded-md border border-line bg-overlay px-3 py-2 text-sm">
+              <p>Copy this key now. It is not shown again.</p>
+              <code className="block break-all">{secret}</code>
+              <CopyButton text={secret} label="Copy key" className="border-line" />
+            </div>
           ) : null}
         </Card>
         <Card id="api-keys-list" title="Keys">

@@ -4,7 +4,7 @@ import { disableRemotePlaybackForMms, stripAlternateSources } from "@/playback/a
 import { isFsWindow, noteAttach, noteCurrentTimeWrite, noteHlsError, setAttachMeta } from "@/playback/attachTrace";
 import { movieDurationSec, pinOpenMediaSource } from "@/playback/mediaDuration";
 import { selectEngine, type PlaybackEngine } from "@/playback/policy";
-import { inspectPlaylistBody } from "@/playback/playlistInspect";
+import { inspectPlaylistBody, playlistReadiness } from "@/playback/playlistInspect";
 import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
 import { captureSeekHold, seekHoldAction, shouldReplaceForGenerated } from "@/playback/seekHold";
 import { nativeGeneratedEndSec } from "./seekWindow";
@@ -29,6 +29,7 @@ export async function attachSession(
   onGone: () => void,
   onEngine?: (engine: PlaybackEngine) => void,
   onBeyondGenerated?: (movieMs: number) => void,
+  onFatal?: (detail: string) => void,
 ): Promise<AttachHandle> {
   let aborted = false;
   const gone = () => {
@@ -80,7 +81,7 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal);
   }
   return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs);
 }
@@ -100,6 +101,7 @@ async function attachWithHls(
   isAborted: () => boolean,
   gone: () => void,
   onBeyondGenerated?: (movieMs: number) => void,
+  onFatal?: (detail: string) => void,
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
   const hls = new Hls({
@@ -115,6 +117,8 @@ async function attachWithHls(
     },
   });
   let fatalErr: Error | null = null;
+  let attached = false;
+  let mediaRecovered = false;
   const onHlsError = (_e: unknown, data: import("hls.js").ErrorData) => {
     noteHlsError(video, {
       type: data.type,
@@ -133,10 +137,21 @@ async function attachWithHls(
           }
         : undefined,
     });
-    if (data.fatal && data.response?.code === 410) gone();
-    if (data.fatal) {
-      fatalErr = new Error(data.details || data.type || "hls error");
+    if (!data.fatal) return;
+    fatalErr = new Error(data.details || data.type || "hls error");
+    if (data.response?.code === 410) {
+      gone();
+      return;
     }
+    if (!attached || isAborted()) return;
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
+      mediaRecovered = true;
+      noteAttach(video, "hls:recoverMediaError", data.details);
+      hls.recoverMediaError();
+      return;
+    }
+    const code = data.response?.code ? ` (HTTP ${data.response.code})` : "";
+    onFatal?.(`${data.details || data.type || "hls error"}${code}`);
   };
   hls.on(Hls.Events.ERROR, onHlsError);
   hls.on(Hls.Events.MEDIA_ATTACHING, () => noteAttach(video, "hls:MEDIA_ATTACHING"));
@@ -205,7 +220,9 @@ async function attachWithHls(
     try {
       const res = await fetch(playlist, { credentials: "include", cache: "no-store" });
       if (!res.ok) return;
-      const snap = inspectPlaylistBody(await res.text(), "seek_hold_poll");
+      const text = await res.text();
+      if (playlistReadiness(text) === "master") return;
+      const snap = inspectPlaylistBody(text, "seek_hold_poll");
       playlistEdge = snap.sumExtinfSec;
       playlistEndlist = snap.endlist;
       if (snap.sumExtinfSec !== lastPollEdge) {
@@ -332,6 +349,7 @@ async function attachWithHls(
     if (fatalErr) throw fatalErr;
     throw err;
   }
+  attached = true;
   return {
     engine: "hlsjs",
     generatedEndSec: () => playlistEdge,
@@ -394,7 +412,11 @@ async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs
     }
     if (res.ok) {
       const text = await res.text();
-      if (text.includes("#EXTINF") || /seg\d+\.(m4s|ts)/.test(text)) {
+      const ready = playlistReadiness(text);
+      if (ready === "master") {
+        return { type: res.headers.get("X-VD-Playlist-Type") || undefined };
+      }
+      if (ready === "media") {
         const listed = Number(res.headers.get("X-VD-Playlist-Duration-Ms"));
         const snap = inspectPlaylistBody(text, "wait", res.headers);
         return {

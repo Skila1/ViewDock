@@ -92,6 +92,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LogsResponse"
+  /error-reports:
+    post:
+      operationId: reportClientError
+      summary: Browser error report (player startup or playback failure), stored as an error log in category client_error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ErrorReportRequest"
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorReportResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /admin/audit:
+    get:
+      operationId: listAudit
+      summary: Audit trail of administrative and security actions (requires logs.read)
+      parameters:
+        - name: action
+          in: query
+          description: Action prefix, for example api_key. or backup.
+          schema: { type: string }
+        - name: actor
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: before
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditResponse"
   /me:
     get:
       operationId: getMe
@@ -601,6 +649,43 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LogEntry"
+        next: { type: string }
+    ErrorReportRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, maxLength: 300 }
+        code: { type: string }
+        stage: { type: string }
+        context:
+          type: object
+          description: Scalar values only (string, number, boolean); at most 24 keys.
+          additionalProperties: true
+        trace: { type: string, description: Diagnostic text, capped at 24 KiB }
+    ErrorReportResponse:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, description: Report ID, matching the log entry id }
+    AuditEvent:
+      type: object
+      required: [id, at, action]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor_id: { type: string }
+        actor_username: { type: string }
+        action: { type: string }
+        target: { type: string }
+        ip: { type: string }
+        detail: { type: string }
+    AuditResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
         next: { type: string }
     SystemInfo:
       type: object

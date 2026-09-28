@@ -5,7 +5,7 @@ Create an API key in the admin UI, then call the JSON API with a bearer token. T
 ## Authentication
 
 1. Open **Admin → API keys** while signed in as an administrator.
-2. Create a key with a descriptive name, for example `monitoring`, and the narrowest scope that works: `admin` for full access, or `logs.read` if you only need logs.
+2. Create a key with a descriptive name, for example `monitoring`, and the narrowest scope that works: `admin` for full access, or `logs.read` if you only need logs, error reports and the audit trail. For debugging access, `logs.read` with `streams.inspect` is enough; revoke the key afterwards.
 3. Copy the `vd_…` secret. It is shown once.
 4. Call the API:
 
@@ -22,6 +22,7 @@ Cookie CSRF is not required when a `vd_` key is used.
 | GET | `/api/v1/system` | none |
 | GET | `/healthz` | none |
 | GET | `/api/v1/admin/logs?level=error&category=playback&limit=100` | `admin` or `logs.read` |
+| GET | `/api/v1/admin/audit?action=api_key.&limit=100` | `admin` or `logs.read` |
 | GET | `/api/v1/admin/api-keys` | `admin` |
 | GET | `/api/v1/admin/watch-parties` | `admin` or `users.manage` |
 | POST | `/api/v1/admin/watch-parties/{id}/members/{member}/kick` | `admin` or `users.manage` |
@@ -154,4 +155,15 @@ curl -s -H "Authorization: Bearer vd_YOUR_SECRET" \
   "https://viewdock.example.com/api/v1/admin/logs?category=playback&limit=50"
 ```
 
-Operational logs keep 14 days by default (the `logs.retention_days` setting, capped in size). Tokens, `stoken` query values, and secrets are redacted before storage.
+Operational logs keep 14 days by default (the `logs.retention_days` setting, capped in size). Tokens, `stoken` query values, media source stream grants, and secrets are redacted before storage.
+
+### Error reports and audit trail
+
+When the player fails to start or stops during playback, it shows the error with a **Details** dropdown and a copy button, and sends the same report to `POST /api/v1/error-reports`. Reports are stored as operational logs with level `error` and category `client_error`; the log entry `id` is the report ID the viewer sees. The body is `{"message", "code", "stage", "context", "trace"}`: `context` keeps at most 24 scalar values and `trace` is capped at 24 KiB. The endpoint is rate limited per client.
+
+`GET /api/v1/admin/audit` lists administrative and security actions newest first, with `action` (a prefix such as `backup.`), `actor`, `q`, `limit` (up to 200) and `before` (the `next` value of the previous page). **Admin → Audit** shows server and player errors together with the audit trail.
+
+```bash
+curl -s -H "Authorization: Bearer vd_YOUR_SECRET" \
+  "https://viewdock.example.com/api/v1/admin/logs?level=error&category=client_error&limit=50"
+```

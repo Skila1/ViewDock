@@ -407,6 +407,9 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 && s.Log != nil {
+		s.Log.Warn("media source proxy upstream error", "category", "media_sources", "id", g.sourceID, "status", resp.StatusCode, "path", clean)
+	}
 	for _, h := range proxyHeaders {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)

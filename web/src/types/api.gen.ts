@@ -716,3 +716,31 @@ export interface LogsResponse {
   items: LogEntry[];
   next?: string;
 }
+
+export interface ErrorReportRequest {
+  message: string;
+  code?: string;
+  stage?: string;
+  context?: Record<string, string | number | boolean>;
+  trace?: string;
+}
+
+export interface ErrorReportResponse {
+  id: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  at: string;
+  actor_id?: string;
+  actor_username?: string;
+  action: string;
+  target?: string;
+  ip?: string;
+  detail?: string;
+}
+
+export interface AuditResponse {
+  items: AuditEvent[];
+  next?: string;
+}

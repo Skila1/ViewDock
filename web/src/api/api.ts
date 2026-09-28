@@ -1,4 +1,7 @@
 import type {
+  AuditResponse,
+  ErrorReportRequest,
+  ErrorReportResponse,
   ClientProfile,
   ConfigHistoryEntry,
   ConfigState,
@@ -374,6 +377,17 @@ export const api = {
     if (q.after) p.set("after", q.after);
     return request<{ items: LogRow[]; next?: string }>(`/api/v1/admin/logs?${p.toString()}`);
   },
+  listAudit: (q: { action?: string; actor?: string; q?: string; limit?: number; before?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.action) p.set("action", q.action);
+    if (q.actor) p.set("actor", q.actor);
+    if (q.q) p.set("q", q.q);
+    if (q.limit) p.set("limit", String(q.limit));
+    if (q.before) p.set("before", q.before);
+    return request<AuditResponse>(`/api/v1/admin/audit?${p.toString()}`);
+  },
+  reportClientError: (body: ErrorReportRequest) =>
+    request<ErrorReportResponse>("/api/v1/error-reports", { method: "POST", body }),
 };
 
 export type APIKeyRow = {

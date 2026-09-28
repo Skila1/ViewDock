@@ -32,7 +32,7 @@ var apiKeyScopes = []struct {
 	Desc string `json:"description"`
 }{
 	{Name: "admin", Desc: "Full administration, including keys and settings"},
-	{Name: "logs.read", Desc: "Read operational logs"},
+	{Name: "logs.read", Desc: "Read operational logs, error reports and the audit trail"},
 	{Name: "streams.inspect", Desc: "Inspect live playback sessions"},
 }
 

@@ -33,12 +33,17 @@ type ingestBody struct {
 }
 
 type ingestLimiter struct {
-	mu   sync.Mutex
-	hits map[string][]time.Time
+	mu        sync.Mutex
+	hits      map[string][]time.Time
+	perMinute int
 }
 
 func newIngestLimiter() *ingestLimiter {
-	return &ingestLimiter{hits: map[string][]time.Time{}}
+	return newIngestLimiterWithCap(ingestPerMinute)
+}
+
+func newIngestLimiterWithCap(perMinute int) *ingestLimiter {
+	return &ingestLimiter{hits: map[string][]time.Time{}, perMinute: perMinute}
 }
 
 func (l *ingestLimiter) allow(key string) bool {
@@ -53,7 +58,7 @@ func (l *ingestLimiter) allow(key string) bool {
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) >= ingestPerMinute {
+	if len(kept) >= l.perMinute {
 		l.hits[key] = kept
 		return false
 	}
