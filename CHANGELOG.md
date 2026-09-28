@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5
 
 - Fixed Jellyfin titles playing at low quality. ViewDock now tells Jellyfin the video bitrate to use, so Auto keeps the original quality; before, Jellyfin's encoder fell back to its own low default. The Quality menu also offers 1080p, 720p and 480p for Jellyfin titles when the source allows transcoding.
 - The Server menu shows the Jellyfin server's name alone, without a "Jellyfin:" prefix.
