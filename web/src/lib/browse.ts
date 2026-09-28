@@ -136,6 +136,35 @@ function matchScore(it: BrowseItem, words: string[]): number {
   return score;
 }
 
+/**
+ * Titles most like the one with this key: shared genres count most, then
+ * anime versus not, kind, and release year. Titles sharing nothing are left out.
+ */
+export function relatedTitles(items: BrowseItem[], key: string, limit = 12): BrowseItem[] {
+  const self = items.find((it) => it.key === key);
+  if (!self) return [];
+  const genres = new Set(self.genres.map((g) => g.toLowerCase()));
+  const selfTitle = normal(self.title);
+  const scored: { it: BrowseItem; score: number }[] = [];
+  for (const it of items) {
+    if (it.key === key || (normal(it.title) === selfTitle && it.year === self.year)) continue;
+    const shared = it.genres.reduce((n, g) => n + (genres.has(g.toLowerCase()) ? 1 : 0), 0);
+    if (genres.size > 0 && shared === 0) continue;
+    let score = shared * 3;
+    if (it.anime === self.anime) score += 2;
+    else score -= 5;
+    if (it.kind === self.kind) score += 1;
+    if (self.year && it.year) {
+      const gap = Math.abs(self.year - it.year);
+      if (gap <= 3) score += 1.5;
+      else if (gap <= 10) score += 0.5;
+    }
+    if (score > 0) scored.push({ it, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.it.title.localeCompare(b.it.title, undefined, { sensitivity: "base" }));
+  return scored.slice(0, limit).map((s) => s.it);
+}
+
 export function applyBrowse(items: BrowseItem[], query: BrowseQuery, signals?: BrowseSignals): BrowseItem[] {
   const words = normal(query.q).split(/\s+/).filter(Boolean);
   const watched = new Set(signals?.watched ?? []);

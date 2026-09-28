@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Jellyfin titles playing at low quality. ViewDock now tells Jellyfin the video bitrate to use, so Auto keeps the original quality; before, Jellyfin's encoder fell back to its own low default. The Quality menu also offers 1080p, 720p and 480p for Jellyfin titles when the source allows transcoding.
+- The Server menu shows the Jellyfin server's name alone, without a "Jellyfin:" prefix.
+- Movie and TV pages have a Back button and a "More like this" row of related titles. Closing the player returns to the title page without leaving the player in the back history.
+- The header search and its filters only change the dropdown results. They no longer change the home page's filters or listing. Enter opens the top result, and long result lists can be expanded in the dropdown.
+
 ## 0.2.4
 
 - Redesigned player controls. The quality box is replaced by a settings cog that opens upward with Quality, Server, Subtitles and Playback speed (0.25x to 1.5x). Previous and Skip are now 10 seconds back and forward buttons, also on the arrow keys.

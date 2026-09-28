@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ func fakeJellyfinCalls(t *testing.T) (*httptest.Server, *fakeCalls) {
 		}
 		if r.URL.Query().Get("Ids") != "" {
 			_, _ = w.Write([]byte(`{"Items":[{"Id":"m1","Type":"Movie","RunTimeTicks":60000000000,
-				"MediaSources":[{"Id":"m1","Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"hevc"}]}]}]}`))
+				"MediaSources":[{"Id":"m1","Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"hevc","Height":2160}]}]}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"TotalRecordCount":4,"Items":[
@@ -165,7 +166,7 @@ func TestAPIKeySourceHonoursUsageRestrictions(t *testing.T) {
 
 	var remoteDune string
 	_ = sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune)
-	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", false); err == nil || calls.transcodes != 0 {
+	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", "", false); err == nil || calls.transcodes != 0 {
 		t.Fatalf("a file needing transcoding streamed with transcoding off: %v %+v", err, calls)
 	}
 
@@ -264,13 +265,35 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 		t.Fatalf("remote titles are searchable: %+v %v", hits, err)
 	}
 
-	stream, options, err := svc.Resolve(ctx, "movie", "dune", "", true)
+	stream, options, err := svc.Resolve(ctx, "movie", "dune", "", "", true)
 	if err != nil || stream != nil || len(options) != 2 {
 		t.Fatalf("local preferred: %v %v %v", stream, options, err)
 	}
-	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, true)
+	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true)
 	if err != nil || stream == nil || stream.Delivery != decision.DeliveryHLS || stream.DurationMS != 6_000_000 {
 		t.Fatalf("remote pick: %+v %v", stream, err)
+	}
+	if strings.Contains(options[1].Label, ":") || options[1].Label == "" {
+		t.Fatalf("source label should be the server name alone: %q", options[1].Label)
+	}
+	if u, _ := url.Parse(stream.URL); u.Query().Get("VideoBitrate") == "" || u.Query().Get("MaxHeight") != "" {
+		t.Fatalf("auto must name a video bitrate and keep the source size: %s", stream.URL)
+	}
+	if got := strings.Join(stream.Qualities, ","); got != "auto,1080,720,480" {
+		t.Fatalf("qualities for a 2160p source: %s", got)
+	}
+	stream.Stop()
+	capped, _, err := svc.Resolve(ctx, "movie", "dune", options[1].ID, "720", true)
+	if err != nil || capped == nil {
+		t.Fatalf("720 pick: %v", err)
+	}
+	if u, _ := url.Parse(capped.URL); u.Query().Get("MaxHeight") != "720" || u.Query().Get("VideoBitrate") != "5000000" {
+		t.Fatalf("720 preset: %s", capped.URL)
+	}
+	capped.Stop()
+	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true)
+	if err != nil || stream == nil {
+		t.Fatalf("remote pick again: %v", err)
 	}
 
 	r := chi.NewRouter()

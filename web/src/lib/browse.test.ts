@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Movie, Series } from "@/types/api.gen";
-import { applyBrowse, browseParams, genresOf, parseBrowse, toBrowseItems, type BrowseQuery } from "./browse";
+import { applyBrowse, browseParams, genresOf, parseBrowse, relatedTitles, toBrowseItems, type BrowseQuery } from "./browse";
 
 const movie = (id: string, title: string, extra: Partial<Movie> = {}): Movie => ({
   id,
@@ -70,5 +70,33 @@ describe("browse", () => {
 
   it("lists genres by popularity", () => {
     expect(genresOf(items).slice(0, 2)).toEqual(["Action", "Animation"]);
+  });
+});
+
+describe("relatedTitles", () => {
+  const pool = toBrowseItems(
+    [
+      movie("a", "Alien", { genres: ["Horror", "Science Fiction"], year: 1979 }),
+      movie("b", "Aliens", { genres: ["Horror", "Science Fiction", "Action"], year: 1986 }),
+      movie("c", "The Thing", { genres: ["Horror"], year: 1982 }),
+      movie("d", "Aladdin", { genres: ["Family"], year: 1992 }),
+      movie("e", "Akira", { genres: ["Science Fiction"], year: 1988, anime: true }),
+    ],
+    [show("s", "Stranger Things", { genres: ["Horror", "Drama"], year: 2016 })],
+  );
+
+  it("ranks shared genres first and leaves out unrelated titles", () => {
+    const ids = relatedTitles(pool, "movie:a").map((i) => i.id);
+    expect(ids[0]).toBe("b");
+    expect(ids).toContain("c");
+    expect(ids).not.toContain("a");
+    expect(ids).not.toContain("d");
+    expect(ids.indexOf("c")).toBeLessThan(ids.indexOf("s"));
+  });
+
+  it("keeps anime apart and handles unknown keys and limits", () => {
+    expect(relatedTitles(pool, "movie:a").map((i) => i.id)).not.toContain("e");
+    expect(relatedTitles(pool, "movie:missing")).toEqual([]);
+    expect(relatedTitles(pool, "movie:a", 1)).toHaveLength(1);
   });
 });

@@ -266,9 +266,12 @@ type mediaSource struct {
 	ID                 string `json:"Id"`
 	Container          string `json:"Container"`
 	SupportsDirectPlay bool   `json:"SupportsDirectPlay"`
+	Bitrate            int64  `json:"Bitrate"`
 	MediaStreams       []struct {
-		Type  string `json:"Type"`
-		Codec string `json:"Codec"`
+		Type    string `json:"Type"`
+		Codec   string `json:"Codec"`
+		BitRate int64  `json:"BitRate"`
+		Height  int    `json:"Height"`
 	} `json:"MediaStreams"`
 }
 

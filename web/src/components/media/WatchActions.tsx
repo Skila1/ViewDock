@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Play, RotateCcw } from "lucide-react";
 import { formatClock } from "@/lib/format";
 import { report } from "@/lib/journey";
@@ -12,11 +12,14 @@ type Props = {
 export function WatchActions({ kind, id, resumeMs }: Props) {
   const canResume = (resumeMs ?? 0) > 5000;
   const watch = `/watch/${kind}/${id}`;
+  const { pathname } = useLocation();
+  const from = { from: pathname };
   return (
     <div className="flex flex-wrap gap-2">
       {canResume ? (
         <>
           <Link
+            state={from}
             to={`${watch}?t=${Math.floor(resumeMs ?? 0)}`}
             onClick={() => report("play_click", { kind, id, resume: true, t: Math.floor(resumeMs ?? 0) })}
             className="tap inline-flex items-center gap-1 rounded-md bg-accent px-3 text-sm text-white"
@@ -24,6 +27,7 @@ export function WatchActions({ kind, id, resumeMs }: Props) {
             <Play size={14} /> Resume {formatClock(resumeMs ?? 0)}
           </Link>
           <Link
+            state={from}
             to={`${watch}?t=0`}
             onClick={() => report("play_click", { kind, id, resume: false, t: 0 })}
             className="tap inline-flex items-center gap-1 rounded-md border border-line px-3 text-sm"
@@ -33,6 +37,7 @@ export function WatchActions({ kind, id, resumeMs }: Props) {
         </>
       ) : (
         <Link
+          state={from}
           to={`${watch}?t=0`}
           onClick={() => report("play_click", { kind, id, resume: false, t: 0 })}
           className="tap inline-flex items-center gap-1 rounded-md bg-accent px-3 text-sm text-white"

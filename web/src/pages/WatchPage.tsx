@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/api";
@@ -13,6 +13,7 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const hasStart = params.has("t");
   const startMs = Number(params.get("t") || 0) || 0;
@@ -69,9 +70,12 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
 
   const close = () => {
     void queryClient.invalidateQueries({ queryKey: ["continue"] });
-    if (kind === "movie") navigate(`/movies/${id}`);
-    else if (episode.data?.series_id) navigate(`/tv/${episode.data.series_id}`);
-    else navigate(-1);
+    const detail = kind === "movie" ? `/movies/${id}` : episode.data?.series_id ? `/tv/${episode.data.series_id}` : "";
+    const from = (location.state as { from?: string } | null)?.from;
+    // Return to the title page entry the player was opened from, so Back
+    // there leads to where the viewer browsed instead of into the player.
+    if (!detail || from === detail) navigate(-1);
+    else navigate(detail, { replace: true });
   };
 
   if (!hasStart) {
@@ -105,7 +109,7 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
         if (kind === "episode" && episode.data?.series_id) {
           void api
             .nextEpisode(episode.data.series_id)
-            .then((next) => navigate(`/watch/episode/${next.id}?t=0`))
+            .then((next) => navigate(`/watch/episode/${next.id}?t=0`, { replace: true, state: location.state }))
             .catch(() => navigate(-1));
         }
       }}

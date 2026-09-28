@@ -540,6 +540,9 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 	if s.RemoteURL != "" {
 		// Remote streams always start at 0 and seek natively.
 		out["qualities"] = []string{"auto"}
+		if len(s.RemoteQualities) > 0 {
+			out["qualities"] = s.RemoteQualities
+		}
 		out["vod_ondemand"] = true
 		out["seekable_from_ms"] = 0
 		if s.Delivery == decision.DeliveryDirect {

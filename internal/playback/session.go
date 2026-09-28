@@ -77,7 +77,9 @@ type Session struct {
 	Source        string
 	SourceOptions []SourceOption
 	RemoteURL     string
-	remoteStop    func()
+	// RemoteQualities are the quality choices the external source offers.
+	RemoteQualities []string
+	remoteStop      func()
 
 	checkpoint checkpointState
 

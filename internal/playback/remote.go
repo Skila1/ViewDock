@@ -29,6 +29,8 @@ type RemoteStream struct {
 	Delivery   string // decision.DeliveryDirect or decision.DeliveryHLS
 	URL        string
 	DurationMS int64
+	// Qualities are the quality choices the source can serve, auto first.
+	Qualities []string
 	// Stop revokes the stream grant and ends any remote transcode.
 	Stop func()
 }
@@ -37,9 +39,10 @@ type RemoteStream struct {
 var ErrSourceUnavailable = errors.New("source_unavailable")
 
 // Sources resolves external media sources for catalogue items. pick is ""
-// (prefer local), SourceLocal, or an option id. A nil stream plays locally.
+// (prefer local), SourceLocal, or an option id. quality is a player quality
+// choice ("" or "auto" for the original). A nil stream plays locally.
 type Sources interface {
-	Resolve(ctx context.Context, itemKind, itemID, pick string, hasLocal bool) (*RemoteStream, []SourceOption, error)
+	Resolve(ctx context.Context, itemKind, itemID, pick, quality string, hasLocal bool) (*RemoteStream, []SourceOption, error)
 }
 
 // createRemote answers the request with an external source session when one
@@ -60,7 +63,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		writeHidden(w, errHidden)
 		return true, nil
 	}
-	stream, options, err := a.Sources.Resolve(r.Context(), body.ItemKind, body.ItemID, body.Source, hasLocal)
+	stream, options, err := a.Sources.Resolve(r.Context(), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal)
 	if err != nil {
 		if errors.Is(err, library.ErrNotFound) {
 			writeHidden(w, errHidden)
@@ -96,7 +99,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
 		Decision:    decision.Result{Delivery: stream.Delivery, Mode: "remote", Playback: "remote"},
-		Source:      stream.Source, SourceOptions: options, RemoteURL: stream.URL, remoteStop: stream.Stop,
+		Source:      stream.Source, SourceOptions: options, RemoteURL: stream.URL, RemoteQualities: stream.Qualities, remoteStop: stream.Stop,
 	}
 	a.Reg.Put(sess)
 	if a.Log != nil {

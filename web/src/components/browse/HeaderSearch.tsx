@@ -1,38 +1,40 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { filenameTitle } from "@/lib/format";
-import { applyBrowse } from "@/lib/browse";
+import { applyBrowse, type BrowseQuery } from "@/lib/browse";
 import { cn } from "@/lib/cn";
 import { BrowseFilterPanel } from "./BrowseFilters";
-import { useBrowseData, useBrowseQuery } from "./useBrowse";
+import { useBrowseData } from "./useBrowse";
 
 const SUGGESTIONS = 6;
+const EMPTY: BrowseQuery = { q: "", kind: "", genre: "", tag: "", sort: "" };
 
 /**
- * Searches every title the viewer can see, local and Jellyfin. On the home
- * page typing filters the results live; elsewhere it suggests titles and
- * Enter opens the full results on the home page.
+ * Searches every title the viewer can see, local and Jellyfin. The text and
+ * filters here only shape the dropdown results; they never change the home
+ * page's own filters or listing.
  */
 export function HeaderSearch() {
   const { pathname } = useLocation();
-  const onHome = pathname === "/";
-  const [query, setQuery] = useBrowseQuery();
+  const navigate = useNavigate();
   const { items, genres, signals } = useBrowseData();
-  const [text, setText] = useState(query.q);
+  const [query, setQuery] = useState<BrowseQuery>(EMPTY);
   const [focused, setFocused] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+
+  const patch = (next: Partial<BrowseQuery>) => {
+    setQuery((q) => ({ ...q, ...next }));
+    setShowAll(false);
+  };
 
   useEffect(() => {
-    if (onHome) setText(query.q);
-  }, [onHome, query.q]);
-
-  useEffect(() => {
-    if (!onHome || text === query.q) return;
-    const t = window.setTimeout(() => setQuery({ q: text }), 150);
-    return () => window.clearTimeout(t);
-  }, [onHome, text, query.q, setQuery]);
+    setFocused(false);
+    setFiltersOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!filtersOpen && !focused) return;
@@ -46,26 +48,32 @@ export function HeaderSearch() {
     return () => document.removeEventListener("pointerdown", close);
   }, [filtersOpen, focused]);
 
-  const suggestions = useMemo(
-    () => (!onHome && text.trim() ? applyBrowse(items, { ...query, q: text }, signals).slice(0, SUGGESTIONS) : []),
-    [onHome, text, items, query, signals],
-  );
+  const active = [query.kind, query.genre, query.tag, query.sort].filter(Boolean).length;
+  const searching = Boolean(query.q.trim()) || active > 0;
+  const results = useMemo(() => (searching ? applyBrowse(items, query, signals) : []), [searching, items, query, signals]);
+  const shown = showAll ? results : results.slice(0, SUGGESTIONS);
+  const open = searching && (focused || filtersOpen);
+
+  const pick = (href: string) => {
+    setFocused(false);
+    setFiltersOpen(false);
+    input.current?.blur();
+    navigate(href);
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    setFocused(false);
-    setQuery({ q: text });
+    if (results[0]) pick(results[0].href);
   };
-
-  const active = [query.kind, query.genre, query.tag].filter(Boolean).length;
 
   return (
     <div ref={root} className="relative min-w-0 flex-1 max-w-xl">
       <form onSubmit={submit} className="flex items-center gap-2 rounded-xl border border-line bg-raised/50 pl-3 pr-1 focus-within:border-accent/60">
         <Search size={16} className="shrink-0 text-dim" />
         <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          ref={input}
+          value={query.q}
+          onChange={(e) => patch({ q: e.target.value })}
           onFocus={() => setFocused(true)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -75,17 +83,19 @@ export function HeaderSearch() {
           }}
           placeholder="Search movies, TV and anime"
           aria-label="Search"
+          aria-expanded={open}
+          aria-controls="header-search-results"
           enterKeyHint="search"
           className="h-10 w-full min-w-0 border-0 bg-transparent px-0 focus:outline-none"
         />
-        {text ? (
+        {query.q ? (
           <button
             type="button"
             aria-label="Clear search"
             className="tap flex w-8 items-center justify-center text-dim hover:text-ink"
             onClick={() => {
-              setText("");
-              if (onHome) setQuery({ q: "" });
+              patch({ q: "" });
+              input.current?.focus();
             }}
           >
             <X className="h-4 w-4" />
@@ -103,40 +113,53 @@ export function HeaderSearch() {
         </button>
       </form>
 
-      {filtersOpen ? (
-        <div className="absolute right-0 top-full z-40 mt-2 w-[28rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-line bg-raised p-3 shadow-2xl">
-          <BrowseFilterPanel
-            query={query}
-            genres={genres}
-            onChange={(patch) => setQuery({ ...patch, q: text })}
-            onReset={() => setQuery({ q: text, kind: "", genre: "", tag: "", sort: "" })}
-          />
+      {filtersOpen || open ? (
+        <div className="absolute left-0 top-full z-40 mt-2 w-full min-w-[min(28rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-line bg-raised shadow-2xl">
+          {filtersOpen ? (
+            <div className={cn("p-3", open && "border-b border-line")}>
+              <BrowseFilterPanel query={query} genres={genres} onChange={patch} onReset={() => patch({ kind: "", genre: "", tag: "", sort: "" })} />
+            </div>
+          ) : null}
+          {open ? (
+            results.length ? (
+              <ul id="header-search-results" className={cn("py-1", showAll && "max-h-[60vh] overflow-y-auto")}>
+                {shown.map((it) => (
+                  <li key={it.key}>
+                    <Link
+                      to={it.href}
+                      className="flex items-center gap-3 px-3 py-2 hover:bg-overlay focus-visible:bg-overlay focus-visible:outline-none"
+                      onClick={() => {
+                        setFocused(false);
+                        setFiltersOpen(false);
+                      }}
+                    >
+                      <div className="h-12 w-8 shrink-0 overflow-hidden rounded bg-overlay">
+                        {it.posterUrl ? <img src={it.posterUrl} alt="" className="h-full w-full object-cover" /> : null}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-ink">{filenameTitle(it.title)}</p>
+                        <p className="text-xs text-dim">
+                          {[it.anime ? "Anime" : it.kind === "movie" ? "Movie" : "TV show", it.year].filter(Boolean).join(", ")}
+                        </p>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+                {results.length > SUGGESTIONS ? (
+                  <li>
+                    <button type="button" className="w-full px-3 py-2 text-left text-xs text-accent hover:bg-overlay" onClick={() => setShowAll((v) => !v)}>
+                      {showAll ? "Show fewer" : `Show all ${results.length} results`}
+                    </button>
+                  </li>
+                ) : null}
+              </ul>
+            ) : (
+              <p id="header-search-results" className="px-3 py-3 text-xs text-dim">
+                No titles match{query.q.trim() ? ` "${query.q.trim()}"` : ""}.
+              </p>
+            )
+          ) : null}
         </div>
-      ) : null}
-
-      {focused && !filtersOpen && suggestions.length ? (
-        <ul className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border border-line bg-raised shadow-xl">
-          {suggestions.map((it) => (
-            <li key={it.key}>
-              <Link to={it.href} className="flex items-center gap-3 px-3 py-2 hover:bg-overlay" onClick={() => setFocused(false)}>
-                <div className="h-12 w-8 shrink-0 overflow-hidden rounded bg-overlay">
-                  {it.posterUrl ? <img src={it.posterUrl} alt="" className="h-full w-full object-cover" /> : null}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm text-ink">{filenameTitle(it.title)}</p>
-                  <p className="text-xs text-dim">
-                    {[it.anime ? "Anime" : it.kind === "movie" ? "Movie" : "TV show", it.year].filter(Boolean).join(", ")}
-                  </p>
-                </div>
-              </Link>
-            </li>
-          ))}
-          <li>
-            <button type="button" className="w-full px-3 py-2 text-left text-xs text-accent hover:bg-overlay" onClick={() => setQuery({ q: text })}>
-              See all results
-            </button>
-          </li>
-        </ul>
       ) : null}
     </div>
   );

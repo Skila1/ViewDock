@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Radio, Share2 } from "lucide-react";
 import { api } from "@/api/api";
 import { ContentRatingControl } from "@/features/admin/ContentRatingControl";
+import { BackButton } from "@/components/media/BackButton";
+import { RelatedTitles } from "@/components/media/RelatedTitles";
 import { WatchActions } from "@/components/media/WatchActions";
 import { SaveOfflineButton } from "@/components/offline/SaveOfflineButton";
 import { ShareModal } from "@/components/share/ShareModal";
@@ -49,6 +51,7 @@ export function SeriesDetailPage() {
 
   return (
     <div>
+      <BackButton />
       <div className="mb-5 flex flex-col gap-5 sm:flex-row">
         <div className="poster-tile mx-auto w-[42%] max-w-[180px] shrink-0 overflow-hidden rounded-md bg-raised sm:mx-0 sm:w-[160px]">
           {series.poster_url ? (
@@ -115,7 +118,7 @@ export function SeriesDetailPage() {
           const to = epResume > 5000 ? `/watch/episode/${ep.id}?t=${Math.floor(epResume)}` : `/watch/episode/${ep.id}?t=0`;
           return (
             <li key={ep.id} className="flex items-center pr-1 hover:bg-raised">
-              <Link to={to} className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-3">
+              <Link to={to} state={{ from: `/tv/${series.id}` }} className="flex min-h-12 min-w-0 flex-1 items-center gap-3 px-3 py-3">
                 <span className="w-12 shrink-0 text-xs text-dim">
                   S{ep.season}E{ep.number}
                 </span>
@@ -140,6 +143,7 @@ export function SeriesDetailPage() {
           );
         })}
       </ul>
+      <RelatedTitles kind="series" id={series.id} />
       <ShareModal open={share} onOpenChange={setShare} itemKind="episode" itemId={playEp?.id ?? series.id} />
     </div>
   );
