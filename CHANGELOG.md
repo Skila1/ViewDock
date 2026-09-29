@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6
 
 - When a Jellyfin title fails to start, the player says why (the server could not be reached, it refused the stream, streaming or transcoding is off, or the stream limit is full) instead of only "the media source is unavailable". That reason is also written to the server log.
 - Auto quality for Jellyfin now asks for the file's own bitrate. The previous request asked for up to 80 Mbps even when the file was much smaller, which can overload Jellyfin.
