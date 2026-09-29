@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.7
 
 - A Jellyfin server limited to one stream no longer blocks you with your own playback. Starting again replaces that stream, and a stream the player has not read for 20 seconds stops counting. Someone else's active stream still uses the slot.
 - When that replacement stops the previous player, it stays stopped instead of opening the stream again.
