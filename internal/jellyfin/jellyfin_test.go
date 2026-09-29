@@ -15,6 +15,7 @@ import (
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/playback"
 	"github.com/viewdock/viewdock/internal/search"
 	"github.com/viewdock/viewdock/internal/secrets"
 )
@@ -321,4 +322,60 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 	if rec := get("/api/v1/admin/media-sources"); rec.Code == 200 {
 		t.Fatalf("admin list without admin: %d", rec.Code)
 	}
+}
+
+func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
+	sqlDB := testDB(t)
+	ctx := context.Background()
+	cipher, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jf := fakeJellyfin(t)
+	svc := New(sqlDB, func() *secrets.Cipher { return cipher }, t.TempDir(), nil)
+	rec := httptest.NewRecorder()
+	body := `{"url":"` + jf.URL + `","username":"viewdock","password":"pw","policy":{"images":true,"stream":true,"transcode":true,"max_streams":1}}`
+	svc.handleCreate(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = waitSynced(t, svc)
+	var remoteDune string
+	if err := sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune); err != nil {
+		t.Fatal(err)
+	}
+	mine := playback.WithStreamOwner(ctx, "viewer-a")
+	theirs := playback.WithStreamOwner(ctx, "viewer-b")
+	first, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false)
+	if err != nil || first == nil {
+		t.Fatalf("first stream: %v", err)
+	}
+	second, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false)
+	if err != nil || second == nil {
+		t.Fatalf("same viewer should replace their own stream: %v", err)
+	}
+	r := chi.NewRouter()
+	r.Route("/api/v1", svc.Routes)
+	get := func(u string) int {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, u, nil))
+		return rec.Code
+	}
+	if get(first.URL) != http.StatusGone {
+		t.Fatalf("replaced stream still open")
+	}
+	if _, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false); err == nil || !strings.Contains(err.Error(), "1 playback") {
+		t.Fatalf("another viewer should still hit the limit: %v", err)
+	}
+	svc.mu.Lock()
+	for _, g := range svc.grants {
+		g.created = time.Now().Add(-time.Minute)
+		g.lastHit = time.Time{}
+	}
+	svc.mu.Unlock()
+	taken, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false)
+	if err != nil || taken == nil {
+		t.Fatalf("an unread stream should free the slot: %v", err)
+	}
+	taken.Stop()
 }

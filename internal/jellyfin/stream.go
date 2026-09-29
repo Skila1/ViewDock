@@ -32,6 +32,8 @@ type grant struct {
 	// direct grants reach only the static file; HLS grants the item's playlists.
 	direct           bool
 	deviceID, playID string
+	owner            string
+	created, lastHit time.Time
 	expires          time.Time
 }
 
@@ -192,14 +194,6 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		s.event(ctx, src.ID, "blocked", false, blockedDetail(opStream))
 		return nil, &playback.SourceUnavailable{Reason: "Streaming is turned off for this Jellyfin server."}
 	}
-	if max := src.Policy.MaxStreams; max > 0 && s.activeStreams(src.ID) >= max {
-		msg := fmt.Sprintf("This Jellyfin server allows %d playback at once, and that is already in use. Stop the other one and try again.", max)
-		if max != 1 {
-			msg = fmt.Sprintf("This Jellyfin server allows %d playbacks at once, and they are all in use. Stop another one and try again.", max)
-		}
-		s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
-		return nil, &playback.SourceUnavailable{Reason: msg}
-	}
 	var it item
 	var cl *client
 	err = s.withClient(ctx, src, func(client *client, userID string) error {
@@ -238,16 +232,24 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 	if capped {
 		direct = false
 	}
+	if err := s.ensureStreamSlot(ctx, src, playback.StreamOwner(ctx)); err != nil {
+		return nil, err
+	}
 	tok, err := auth.RandomToken(24)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	g := &grant{
 		sourceID: src.ID, remoteID: c.remoteID, base: src.URL, token: cl.token, direct: direct,
 		deviceID: "viewdock-" + uuid.NewString(), playID: strings.ReplaceAll(uuid.NewString(), "-", ""),
-		expires: time.Now().Add(grantTTL),
+		owner: playback.StreamOwner(ctx), created: now, expires: now.Add(grantTTL),
 	}
 	s.mu.Lock()
+	if max := src.Policy.MaxStreams; max > 0 && s.activeStreamsLocked(src.ID) >= max {
+		s.mu.Unlock()
+		return nil, s.streamLimit(ctx, src)
+	}
 	s.grants[tok] = g
 	s.mu.Unlock()
 	mode := "hls"
@@ -407,6 +409,10 @@ func (s *Service) revoke(tok string) {
 	if g == nil {
 		return
 	}
+	go s.finishRevoke(g)
+}
+
+func (s *Service) finishRevoke(g *grant) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	s.event(ctx, g.sourceID, "stream_end", true, "item "+g.remoteID)
@@ -420,6 +426,10 @@ func (s *Service) revoke(tok string) {
 func (s *Service) activeStreams(sourceID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.activeStreamsLocked(sourceID)
+}
+
+func (s *Service) activeStreamsLocked(sourceID string) int {
 	n := 0
 	for _, g := range s.grants {
 		if g.sourceID == sourceID {
@@ -427,6 +437,89 @@ func (s *Service) activeStreams(sourceID string) int {
 		}
 	}
 	return n
+}
+
+// grantIdle is how long a stream can go without the player reading it
+// before it stops occupying a stream slot.
+const grantIdle = 20 * time.Second
+
+// ensureStreamSlot frees this viewer's own streams when keeping them would
+// pass the limit, and refuses when other viewers already fill it.
+func (s *Service) ensureStreamSlot(ctx context.Context, src Source, owner string) error {
+	max := src.Policy.MaxStreams
+	if max <= 0 {
+		return nil
+	}
+	s.dropIdle(src.ID)
+	s.reclaimOwner(src.ID, owner, max)
+	if s.activeStreams(src.ID) >= max {
+		return s.streamLimit(ctx, src)
+	}
+	return nil
+}
+
+func (s *Service) streamLimit(ctx context.Context, src Source) error {
+	max := src.Policy.MaxStreams
+	msg := fmt.Sprintf("This Jellyfin server allows %d playback at once, and that is already in use. Stop the other one and try again.", max)
+	if max != 1 {
+		msg = fmt.Sprintf("This Jellyfin server allows %d playbacks at once, and they are all in use. Stop another one and try again.", max)
+	}
+	s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
+	return &playback.SourceUnavailable{Reason: msg}
+}
+
+// dropIdle revokes streams the player has not read recently.
+func (s *Service) dropIdle(sourceID string) {
+	now := time.Now()
+	s.mu.Lock()
+	var toks []string
+	for tok, g := range s.grants {
+		if g.sourceID != sourceID {
+			continue
+		}
+		seen := g.created
+		if !g.lastHit.IsZero() {
+			seen = g.lastHit
+		}
+		if seen.IsZero() || now.Sub(seen) > grantIdle {
+			toks = append(toks, tok)
+		}
+	}
+	s.mu.Unlock()
+	for _, tok := range toks {
+		s.revoke(tok)
+	}
+}
+
+// reclaimOwner stops this viewer's streams when one more would pass the limit.
+func (s *Service) reclaimOwner(sourceID, owner string, max int) {
+	if owner == "" || max <= 0 {
+		return
+	}
+	s.mu.Lock()
+	var own []string
+	others := 0
+	for tok, g := range s.grants {
+		if g.sourceID != sourceID {
+			continue
+		}
+		if g.owner == owner {
+			own = append(own, tok)
+		} else {
+			others++
+		}
+	}
+	s.mu.Unlock()
+	excess := others + len(own) + 1 - max
+	if excess <= 0 {
+		return
+	}
+	if excess > len(own) {
+		excess = len(own)
+	}
+	for _, tok := range own[:excess] {
+		s.revoke(tok)
+	}
 }
 
 // revokeSource ends every active stream of a source.
@@ -475,6 +568,9 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 	tok := chi.URLParam(r, "grant")
 	s.mu.Lock()
 	g := s.grants[tok]
+	if g != nil {
+		g.lastHit = time.Now()
+	}
 	s.mu.Unlock()
 	if g == nil || time.Now().After(g.expires) {
 		httpapi.WriteErr(w, http.StatusGone, "gone", "stream ended")

@@ -56,7 +56,8 @@ export async function attachSession(
 
   const playlist = sessionUrl(session.urls, "hls", "playlist", "index", "master");
   if (!playlist) throw new Error("session missing HLS url");
-  const playlistMeta = await waitForPlaylist(playlist);
+  const remote = session.decision?.mode === "remote";
+  const playlistMeta = await waitForPlaylist(playlist, remote);
   const vodOnDemand = Boolean(session.vod_ondemand);
   setAttachMeta(video, {
     playlistUrl: playlist,
@@ -81,9 +82,9 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal, remote);
   }
-  return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs);
+  return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs, remote, onFatal);
 }
 
 function prepareVideo(video: HTMLVideoElement) {
@@ -102,6 +103,7 @@ async function attachWithHls(
   gone: () => void,
   onBeyondGenerated?: (movieMs: number) => void,
   onFatal?: (detail: string) => void,
+  remote?: boolean,
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
   const hls = new Hls({
@@ -140,6 +142,10 @@ async function attachWithHls(
     if (!data.fatal) return;
     fatalErr = new Error(data.details || data.type || "hls error");
     if (data.response?.code === 410) {
+      if (remote) {
+        onFatal?.("This playback stopped because it started somewhere else.");
+        return;
+      }
       gone();
       return;
     }
@@ -371,6 +377,8 @@ async function attachNativeHls(
   isAborted: () => boolean,
   gone: () => void,
   listedDurationMs?: number,
+  remote?: boolean,
+  onFatal?: (detail: string) => void,
 ): Promise<AttachHandle> {
   video.disableRemotePlayback = false;
   video.removeAttribute("disableremoteplayback");
@@ -382,7 +390,10 @@ async function attachNativeHls(
   const generatedEndSec = () => nativeGeneratedEndSec(video, listedSec);
   const onError = () => {
     void fetch(playlist, { credentials: "include" }).then((res) => {
-      if (res.status === 410) gone();
+      if (res.status === 410) {
+        if (remote) onFatal?.("This playback stopped because it started somewhere else.");
+        else gone();
+      }
     }).catch(() => undefined);
   };
   video.addEventListener("error", onError);
@@ -403,11 +414,12 @@ async function attachNativeHls(
   };
 }
 
-async function waitForPlaylist(url: string): Promise<{ type?: string; durationMs?: number; endlist?: boolean }> {
+async function waitForPlaylist(url: string, remote = false): Promise<{ type?: string; durationMs?: number; endlist?: boolean }> {
   const deadline = Date.now() + 50_000;
   while (Date.now() < deadline) {
     const res = await fetch(url, { credentials: "include" });
     if (res.status === 410) {
+      if (remote) throw new Error("This playback stopped because it started somewhere else.");
       throw new SessionGoneError();
     }
     if (res.ok) {

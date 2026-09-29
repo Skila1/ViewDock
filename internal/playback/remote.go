@@ -50,6 +50,24 @@ func (e *SourceUnavailable) Error() string {
 
 func (e *SourceUnavailable) Unwrap() error { return ErrSourceUnavailable }
 
+type streamOwnerKey struct{}
+
+// WithStreamOwner marks the viewer a remote stream is opened for. A source
+// with a stream limit can then replace that viewer's own stream instead of
+// counting it against them.
+func WithStreamOwner(ctx context.Context, owner string) context.Context {
+	if owner == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, streamOwnerKey{}, owner)
+}
+
+// StreamOwner is the viewer WithStreamOwner stored, or "" when unset.
+func StreamOwner(ctx context.Context) string {
+	v, _ := ctx.Value(streamOwnerKey{}).(string)
+	return v
+}
+
 // Sources resolves external media sources for catalogue items. pick is ""
 // (prefer local), SourceLocal, or an option id. quality is a player quality
 // choice ("" or "auto" for the original). A nil stream plays locally.
@@ -75,7 +93,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		writeHidden(w, errHidden)
 		return true, nil
 	}
-	stream, options, err := a.Sources.Resolve(r.Context(), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal)
+	stream, options, err := a.Sources.Resolve(WithStreamOwner(r.Context(), p.ID()), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal)
 	if err != nil {
 		if errors.Is(err, library.ErrNotFound) {
 			writeHidden(w, errHidden)
