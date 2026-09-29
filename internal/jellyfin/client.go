@@ -263,16 +263,18 @@ type item struct {
 }
 
 type mediaSource struct {
-	ID                 string `json:"Id"`
-	Container          string `json:"Container"`
-	SupportsDirectPlay bool   `json:"SupportsDirectPlay"`
-	Bitrate            int64  `json:"Bitrate"`
-	MediaStreams       []struct {
-		Type    string `json:"Type"`
-		Codec   string `json:"Codec"`
-		BitRate int64  `json:"BitRate"`
-		Height  int    `json:"Height"`
-	} `json:"MediaStreams"`
+	ID                 string        `json:"Id"`
+	Container          string        `json:"Container"`
+	SupportsDirectPlay bool          `json:"SupportsDirectPlay"`
+	Bitrate            int64         `json:"Bitrate"`
+	MediaStreams       []mediaStream `json:"MediaStreams"`
+}
+
+type mediaStream struct {
+	Type    string `json:"Type"`
+	Codec   string `json:"Codec"`
+	BitRate int64  `json:"BitRate"`
+	Height  int    `json:"Height"`
 }
 
 func (it item) durationMS() int64 { return it.RunTimeTicks / 10_000 }

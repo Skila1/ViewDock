@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- When a Jellyfin title fails to start, the player says why (the server could not be reached, it refused the stream, streaming or transcoding is off, or the stream limit is full) instead of only "the media source is unavailable". That reason is also written to the server log.
+- Auto quality for Jellyfin now asks for the file's own bitrate. The previous request asked for up to 80 Mbps even when the file was much smaller, which can overload Jellyfin.
+- A failed playback no longer starts again on its own. Pressing Retry repeatedly is ignored for a short moment, so a failure cannot hammer the media server.
+
 ## 0.2.5
 
 - Fixed Jellyfin titles playing at low quality. ViewDock now tells Jellyfin the video bitrate to use, so Auto keeps the original quality; before, Jellyfin's encoder fell back to its own low default. The Quality menu also offers 1080p, 720p and 480p for Jellyfin titles when the source allows transcoding.

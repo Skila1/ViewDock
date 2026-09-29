@@ -17,6 +17,7 @@ import (
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/discordbot/interactions"
 	"github.com/viewdock/viewdock/internal/httpapi"
+	"github.com/viewdock/viewdock/internal/jellyfin"
 	"github.com/viewdock/viewdock/internal/log"
 	"github.com/viewdock/viewdock/internal/nodeauth"
 	"github.com/viewdock/viewdock/internal/secrets"
@@ -110,6 +111,9 @@ func main() {
 	logger = log.Tee(logger, app.Logs, cfg.LogLevel)
 	slog.SetDefault(logger)
 	app.Playback.Log = logger
+	if src, ok := app.Playback.Sources.(*jellyfin.Service); ok {
+		src.Log = logger
+	}
 	srv.Log = logger
 	if controlPlane {
 		app.Auth.SyncDiscordEnv()

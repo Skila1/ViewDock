@@ -166,7 +166,7 @@ func TestAPIKeySourceHonoursUsageRestrictions(t *testing.T) {
 
 	var remoteDune string
 	_ = sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune)
-	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", "", false); err == nil || calls.transcodes != 0 {
+	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", "", false); err == nil || calls.transcodes != 0 || !strings.Contains(err.Error(), "transcoding is turned off") {
 		t.Fatalf("a file needing transcoding streamed with transcoding off: %v %+v", err, calls)
 	}
 
@@ -276,8 +276,8 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 	if strings.Contains(options[1].Label, ":") || options[1].Label == "" {
 		t.Fatalf("source label should be the server name alone: %q", options[1].Label)
 	}
-	if u, _ := url.Parse(stream.URL); u.Query().Get("VideoBitrate") == "" || u.Query().Get("MaxHeight") != "" {
-		t.Fatalf("auto must name a video bitrate and keep the source size: %s", stream.URL)
+	if u, _ := url.Parse(stream.URL); u.Query().Get("VideoBitrate") != "20000000" || u.Query().Get("MaxHeight") != "" {
+		t.Fatalf("auto with no known bitrate must ask for 20 Mbps and keep the source size: %s", stream.URL)
 	}
 	if got := strings.Join(stream.Qualities, ","); got != "auto,1080,720,480" {
 		t.Fatalf("qualities for a 2160p source: %s", got)
@@ -312,6 +312,9 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 		}
 	}
 	stream.Stop()
+	if got := autoVideoBitrate(mediaSource{Bitrate: 12_000_000, MediaStreams: []mediaStream{{Type: "Video", BitRate: 8_000_000}}}); got != 8_000_000 {
+		t.Fatalf("auto bitrate %d, want the video stream bitrate", got)
+	}
 	if rec := get(stream.URL); rec.Code != http.StatusGone {
 		t.Fatalf("revoked grant: %d", rec.Code)
 	}

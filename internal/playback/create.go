@@ -118,7 +118,10 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if loc.AbsPath == "" {
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, "source_unavailable", "the media source is unavailable right now")
+		if a.Log != nil {
+			a.Log.Warn("playback has no file", "category", "playback", "item", body.ItemKind+"/"+body.ItemID, "source", body.Source)
+		}
+		httpapi.WriteErr(w, http.StatusServiceUnavailable, "source_unavailable", "This title has no playable file right now.")
 		return
 	}
 	var standby *library.LocatedFile

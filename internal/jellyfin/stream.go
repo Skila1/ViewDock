@@ -186,15 +186,19 @@ func (s *Service) twinTitles(ctx context.Context, table, title string, year, tmd
 func (s *Service) openStream(ctx context.Context, c candidate, quality string) (*playback.RemoteStream, error) {
 	src, err := s.get(ctx, c.sourceID)
 	if err != nil {
-		return nil, playback.ErrSourceUnavailable
+		return nil, &playback.SourceUnavailable{Reason: "The Jellyfin server is not available right now."}
 	}
 	if !src.Policy.allows(opStream) {
 		s.event(ctx, src.ID, "blocked", false, blockedDetail(opStream))
-		return nil, playback.ErrSourceUnavailable
+		return nil, &playback.SourceUnavailable{Reason: "Streaming is turned off for this Jellyfin server."}
 	}
 	if max := src.Policy.MaxStreams; max > 0 && s.activeStreams(src.ID) >= max {
+		msg := fmt.Sprintf("This Jellyfin server allows %d playback at once, and that is already in use. Stop the other one and try again.", max)
+		if max != 1 {
+			msg = fmt.Sprintf("This Jellyfin server allows %d playbacks at once, and they are all in use. Stop another one and try again.", max)
+		}
 		s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
-		return nil, playback.ErrSourceUnavailable
+		return nil, &playback.SourceUnavailable{Reason: msg}
 	}
 	var it item
 	var cl *client
@@ -211,7 +215,7 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		if s.Log != nil {
 			s.Log.Warn("media source stream", "category", "media_sources", "id", src.ID, "err", err.Error())
 		}
-		return nil, playback.ErrSourceUnavailable
+		return nil, &playback.SourceUnavailable{Reason: publicJellyfinError(err)}
 	}
 	mediaSourceID := c.remoteID
 	direct := false
@@ -229,7 +233,7 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 	}
 	if !direct && !src.Policy.allows(opTranscode) {
 		s.event(ctx, src.ID, "blocked", false, "refused stream: the file needs Jellyfin transcoding, which is not allowed")
-		return nil, playback.ErrSourceUnavailable
+		return nil, &playback.SourceUnavailable{Reason: "This file needs transcoding, and transcoding is turned off for this Jellyfin server."}
 	}
 	if capped {
 		direct = false
@@ -264,17 +268,22 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		return out, nil
 	}
 	out.Delivery = decision.DeliveryHLS
-	out.URL = prefix + "master.m3u8?" + hlsQuery(mediaSourceID, g.playID, g.deviceID, preset, capped).Encode()
+	videoRate := autoVideoBitrate(ms)
+	if capped {
+		videoRate = preset.videoBitrate
+	}
+	out.URL = prefix + "master.m3u8?" + hlsQuery(mediaSourceID, g.playID, g.deviceID, preset, capped, videoRate).Encode()
 	return out, nil
 }
 
-// Jellyfin sizes its encoder from VideoBitrate. Without it the encoder falls
-// back to its own default rate, which for hardware encoders is far below the
-// source, so every request names a video bitrate. Jellyfin lowers it to the
-// source bitrate when the file is smaller, so auto keeps the original quality.
+// Jellyfin sizes its encoder from VideoBitrate. Without one, hardware encoders
+// fall back to a low default. Auto asks for the file's own video bitrate, so a
+// transcode stays at the original quality and a compatible stream can be copied.
+// Asking far above the file makes Jellyfin encode a much larger stream.
 const (
-	autoMaxBitrate = 80_000_000
-	audioBitrate   = 320_000
+	autoMaxBitrate     = 80_000_000
+	autoUnknownBitrate = 20_000_000
+	audioBitrate       = 320_000
 )
 
 type qualityPreset struct {
@@ -289,11 +298,44 @@ var qualityPresets = map[string]qualityPreset{
 	"480":  {maxHeight: 480, maxWidth: 854, videoBitrate: 2_000_000},
 }
 
-func hlsQuery(mediaSourceID, playID, deviceID string, preset qualityPreset, capped bool) url.Values {
-	video := int64(autoMaxBitrate - audioBitrate)
-	if capped {
-		video = preset.videoBitrate
+func autoVideoBitrate(ms mediaSource) int64 {
+	var rate int64
+	for _, st := range ms.MediaStreams {
+		if st.Type == "Video" && st.BitRate > rate {
+			rate = st.BitRate
+		}
 	}
+	if rate <= 0 && ms.Bitrate > audioBitrate {
+		rate = ms.Bitrate - audioBitrate
+	}
+	if rate <= 0 {
+		rate = autoUnknownBitrate
+	}
+	if rate > autoMaxBitrate-audioBitrate {
+		rate = autoMaxBitrate - audioBitrate
+	}
+	return rate
+}
+
+func publicJellyfinError(err error) string {
+	if errors.Is(err, errUnauthorized) {
+		return "Jellyfin rejected the saved sign-in for this server."
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "server unreachable") {
+		return "ViewDock could not reach the Jellyfin server."
+	}
+	const prefix = "jellyfin answered "
+	if rest, ok := strings.CutPrefix(msg, prefix); ok {
+		code, _, _ := strings.Cut(rest, " ")
+		if code != "" {
+			return "Jellyfin refused the stream (HTTP " + code + ")."
+		}
+	}
+	return "The media source is unavailable right now."
+}
+
+func hlsQuery(mediaSourceID, playID, deviceID string, preset qualityPreset, capped bool, video int64) url.Values {
 	q := url.Values{
 		"MediaSourceId": {mediaSourceID}, "PlaySessionId": {playID}, "DeviceId": {deviceID},
 		"VideoCodec": {"h264"}, "AudioCodec": {"aac"},

@@ -111,6 +111,8 @@ export function Player({
   const [settingsOpen, setSettingsOpenState] = useState(false);
   const settingsOpenRef = useRef(false);
   const menuClosedAtRef = useRef(0);
+  const lastFailAtRef = useRef(0);
+  const retryGateRef = useRef(0);
   const [idlePaused, setIdlePaused] = useState(false);
   const idleTimer = useRef<number>(0);
   const [bufferedMs, setBufferedMs] = useState(0);
@@ -224,6 +226,7 @@ export function Player({
         nativeHls: nativeHlsSupported(),
       });
       errShownRef.current = true;
+      lastFailAtRef.current = Date.now();
       setBuffering(false);
       setErr(message);
       setErrDetails(built.text);
@@ -239,9 +242,19 @@ export function Player({
   );
 
   const createAndAttach = useCallback(
-    async (reason: "START" | "QUALITY" | "GONE") => {
+    async (reason: "START" | "RETRY" | "QUALITY" | "GONE") => {
       const video = videoRef.current;
       if (!video) return;
+      // A failed start used to be entered again immediately, which hammered the
+      // media source. Automatic starts wait, and Retry itself cannot repeat
+      // faster than once every 1.5s.
+      if (reason === "START" && Date.now() - lastFailAtRef.current < 1500) return;
+      if (reason === "RETRY") {
+        const now = Date.now();
+        if (now < retryGateRef.current) return;
+        retryGateRef.current = now + 1500;
+      }
+      if (attachBusyRef.current && reason !== "QUALITY") return;
       if (reason === "GONE") {
         const now = Date.now();
         if (now - goneAt.current < 2500) return;
@@ -267,9 +280,10 @@ export function Player({
         pendingSeekRef.current = null;
         resumeRef.current = startAt;
         const replaceId = sessionRef.current?.id;
-        noteAttach(video, "session_replace_begin", `reason=${reason} outgoing=${replaceId ?? ""} start_ms=${startAt}`);
+        const attempt = reason === "RETRY" ? "START" : reason;
+        noteAttach(video, "session_replace_begin", `reason=${attempt} outgoing=${replaceId ?? ""} start_ms=${startAt}`);
         if (reason !== "GONE" || attemptReasonRef.current !== "GONE") attemptAtRef.current = Date.now();
-        attemptReasonRef.current = reason;
+        attemptReasonRef.current = attempt;
         await telemetry.flush();
         await endRemote();
         teardownAttach();
@@ -426,6 +440,8 @@ export function Player({
 
   useEffect(() => {
     genRef.current += 1;
+    lastFailAtRef.current = 0;
+    retryGateRef.current = 0;
     phaseRef.current = "idle";
     resumeRef.current = startMs;
     setResumeMs(startMs);
@@ -1466,7 +1482,10 @@ export function Player({
           message={err}
           details={errDetails}
           report={errReport}
-          onRetry={() => void createAndAttach("START")}
+          onRetry={() => {
+            errShownRef.current = false;
+            void createAndAttach("RETRY");
+          }}
           onClose={onClose}
         />
       ) : null}

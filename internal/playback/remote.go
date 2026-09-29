@@ -38,6 +38,18 @@ type RemoteStream struct {
 // ErrSourceUnavailable means the chosen external source cannot play now.
 var ErrSourceUnavailable = errors.New("source_unavailable")
 
+// SourceUnavailable is a source failure whose Reason is safe to show to the viewer.
+type SourceUnavailable struct{ Reason string }
+
+func (e *SourceUnavailable) Error() string {
+	if e != nil && e.Reason != "" {
+		return e.Reason
+	}
+	return ErrSourceUnavailable.Error()
+}
+
+func (e *SourceUnavailable) Unwrap() error { return ErrSourceUnavailable }
+
 // Sources resolves external media sources for catalogue items. pick is ""
 // (prefer local), SourceLocal, or an option id. quality is a player quality
 // choice ("" or "auto" for the original). A nil stream plays locally.
@@ -68,7 +80,15 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		if errors.Is(err, library.ErrNotFound) {
 			writeHidden(w, errHidden)
 		} else {
-			httpapi.WriteErr(w, http.StatusServiceUnavailable, "source_unavailable", "the media source is unavailable right now")
+			msg := "The media source is unavailable right now."
+			var why *SourceUnavailable
+			if errors.As(err, &why) && why.Reason != "" {
+				msg = why.Reason
+			}
+			if a.Log != nil {
+				a.Log.Warn("remote playback unavailable", "category", "playback", "item", body.ItemKind+"/"+body.ItemID, "source", body.Source, "err", err.Error())
+			}
+			httpapi.WriteErr(w, http.StatusServiceUnavailable, "source_unavailable", msg)
 		}
 		return true, nil
 	}
