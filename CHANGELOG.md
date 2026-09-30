@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.8
 
 - Joining a watch party on a Jellyfin server limited to one stream could refuse your own playback with "allows 1 playback at once". When a party seek and a quality change started at the same moment, one of your streams blocked the other. Your overlapping starts now replace each other.
 - After a failed start in a watch party, the party's position updates no longer keep reopening the stream. The player waits for Retry and resumes at the party's position.
