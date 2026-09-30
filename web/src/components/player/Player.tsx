@@ -132,6 +132,7 @@ export function Player({
   const seekTimer = useRef<number>(0);
   const pendingSeekRef = useRef<number | null>(null);
   const attachBusyRef = useRef(false);
+  const attachRunRef = useRef(0);
   const originRef = useRef(startMs);
   const [buffering, setBuffering] = useState(true);
   const bufferingRef = useRef(true);
@@ -272,6 +273,9 @@ export function Player({
       else bump("START");
       attachBusyRef.current = true;
       const gen = genRef.current;
+      // A nested follow-up call (pending seek, GONE) owns the busy flag from
+      // here on, so this call must not clear it when it unwinds.
+      const run = ++attachRunRef.current;
       setBuffering(true);
       setErr(null);
       errShownRef.current = false;
@@ -432,7 +436,7 @@ export function Player({
         telemetry.record("startup_failed", { code });
         failPlayback(e instanceof Error ? e.message : "playback failed", code, "startup");
       } finally {
-        if (genRef.current === gen) attachBusyRef.current = false;
+        if (genRef.current === gen && attachRunRef.current === run) attachBusyRef.current = false;
       }
     },
     [bump, failPlayback, itemId, itemKind, setPhase, setResumeMs, setSession, telemetry],
@@ -440,6 +444,9 @@ export function Player({
 
   useEffect(() => {
     genRef.current += 1;
+    // A create still running for the previous item is abandoned by the new
+    // generation and never clears the flag itself.
+    attachBusyRef.current = false;
     lastFailAtRef.current = 0;
     retryGateRef.current = 0;
     phaseRef.current = "idle";
@@ -921,6 +928,13 @@ export function Player({
     setPos(target);
     resumeRef.current = target;
     lastStablePosRef.current = target;
+    // After a failed start, party timeline updates kept opening new sessions,
+    // hammering the source and replacing the error. Remember the position for
+    // Retry instead.
+    if (errShownRef.current && !sessionRef.current) {
+      pendingSeekRef.current = target;
+      return;
+    }
     const bounds = !attachBusyRef.current ? seekableBounds(video) : {};
     const generatedEnd = attachRef.current?.generatedEndSec?.() ?? generatedMediaEndSec(video);
     const vod = isVodOnDemand(sessionRef.current);

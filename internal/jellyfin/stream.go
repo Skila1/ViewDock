@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -232,9 +233,6 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 	if capped {
 		direct = false
 	}
-	if err := s.ensureStreamSlot(ctx, src, playback.StreamOwner(ctx)); err != nil {
-		return nil, err
-	}
 	tok, err := auth.RandomToken(24)
 	if err != nil {
 		return nil, err
@@ -245,13 +243,9 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		deviceID: "viewdock-" + uuid.NewString(), playID: strings.ReplaceAll(uuid.NewString(), "-", ""),
 		owner: playback.StreamOwner(ctx), created: now, expires: now.Add(grantTTL),
 	}
-	s.mu.Lock()
-	if max := src.Policy.MaxStreams; max > 0 && s.activeStreamsLocked(src.ID) >= max {
-		s.mu.Unlock()
-		return nil, s.streamLimit(ctx, src)
+	if err := s.claimSlot(ctx, src, tok, g); err != nil {
+		return nil, err
 	}
-	s.grants[tok] = g
-	s.mu.Unlock()
 	mode := "hls"
 	if direct {
 		mode = "direct play"
@@ -423,12 +417,6 @@ func (s *Service) finishRevoke(g *grant) {
 	c.stopEncoding(ctx, g.deviceID, g.playID)
 }
 
-func (s *Service) activeStreams(sourceID string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activeStreamsLocked(sourceID)
-}
-
 func (s *Service) activeStreamsLocked(sourceID string) int {
 	n := 0
 	for _, g := range s.grants {
@@ -443,19 +431,59 @@ func (s *Service) activeStreamsLocked(sourceID string) int {
 // before it stops occupying a stream slot.
 const grantIdle = 20 * time.Second
 
-// ensureStreamSlot frees this viewer's own streams when keeping them would
-// pass the limit, and refuses when other viewers already fill it.
-func (s *Service) ensureStreamSlot(ctx context.Context, src Source, owner string) error {
+// claimSlot adds g under tok when the source's stream limit allows it. Streams
+// the player stopped reading are released first, then this viewer's own
+// oldest streams when keeping them would pass the limit; other viewers'
+// active streams still count. Everything happens under one lock so a viewer's
+// overlapping starts (a seek racing a quality change) replace each other
+// instead of one refusing the next.
+func (s *Service) claimSlot(ctx context.Context, src Source, tok string, g *grant) error {
 	max := src.Policy.MaxStreams
-	if max <= 0 {
-		return nil
+	now := time.Now()
+	var freed []*grant
+	s.mu.Lock()
+	if max > 0 {
+		var own []string
+		for t, o := range s.grants {
+			if o.sourceID != src.ID {
+				continue
+			}
+			if grantIsIdle(o, now) {
+				delete(s.grants, t)
+				freed = append(freed, o)
+			} else if g.owner != "" && o.owner == g.owner {
+				own = append(own, t)
+			}
+		}
+		sort.Slice(own, func(i, j int) bool { return s.grants[own[i]].created.Before(s.grants[own[j]].created) })
+		for _, t := range own {
+			if s.activeStreamsLocked(src.ID) < max {
+				break
+			}
+			freed = append(freed, s.grants[t])
+			delete(s.grants, t)
+		}
 	}
-	s.dropIdle(src.ID)
-	s.reclaimOwner(src.ID, owner, max)
-	if s.activeStreams(src.ID) >= max {
+	full := max > 0 && s.activeStreamsLocked(src.ID) >= max
+	if !full {
+		s.grants[tok] = g
+	}
+	s.mu.Unlock()
+	for _, f := range freed {
+		go s.finishRevoke(f)
+	}
+	if full {
 		return s.streamLimit(ctx, src)
 	}
 	return nil
+}
+
+func grantIsIdle(g *grant, now time.Time) bool {
+	seen := g.created
+	if !g.lastHit.IsZero() {
+		seen = g.lastHit
+	}
+	return seen.IsZero() || now.Sub(seen) > grantIdle
 }
 
 func (s *Service) streamLimit(ctx context.Context, src Source) error {
@@ -466,60 +494,6 @@ func (s *Service) streamLimit(ctx context.Context, src Source) error {
 	}
 	s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
 	return &playback.SourceUnavailable{Reason: msg}
-}
-
-// dropIdle revokes streams the player has not read recently.
-func (s *Service) dropIdle(sourceID string) {
-	now := time.Now()
-	s.mu.Lock()
-	var toks []string
-	for tok, g := range s.grants {
-		if g.sourceID != sourceID {
-			continue
-		}
-		seen := g.created
-		if !g.lastHit.IsZero() {
-			seen = g.lastHit
-		}
-		if seen.IsZero() || now.Sub(seen) > grantIdle {
-			toks = append(toks, tok)
-		}
-	}
-	s.mu.Unlock()
-	for _, tok := range toks {
-		s.revoke(tok)
-	}
-}
-
-// reclaimOwner stops this viewer's streams when one more would pass the limit.
-func (s *Service) reclaimOwner(sourceID, owner string, max int) {
-	if owner == "" || max <= 0 {
-		return
-	}
-	s.mu.Lock()
-	var own []string
-	others := 0
-	for tok, g := range s.grants {
-		if g.sourceID != sourceID {
-			continue
-		}
-		if g.owner == owner {
-			own = append(own, tok)
-		} else {
-			others++
-		}
-	}
-	s.mu.Unlock()
-	excess := others + len(own) + 1 - max
-	if excess <= 0 {
-		return
-	}
-	if excess > len(own) {
-		excess = len(own)
-	}
-	for _, tok := range own[:excess] {
-		s.revoke(tok)
-	}
 }
 
 // revokeSource ends every active stream of a source.

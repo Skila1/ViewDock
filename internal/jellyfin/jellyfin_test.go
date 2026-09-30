@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -378,4 +379,29 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 		t.Fatalf("an unread stream should free the slot: %v", err)
 	}
 	taken.Stop()
+
+	// A viewer's overlapping starts (a party seek racing a quality change)
+	// replace each other rather than one refusing the next.
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("overlapping starts by one viewer: %v", err)
+	}
+	svc.mu.Lock()
+	n := len(svc.grants)
+	svc.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("viewer holds %d streams, want 1", n)
+	}
 }
