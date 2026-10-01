@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Discord Activity: the first person in the voice channel to open it hosts and picks what everyone watches; the rest join that party automatically. An administrator who joins later takes over as host. The party panel has a Leave party button: after leaving you can watch on your own inside the Activity and Rejoin the channel's party from its start page.
 
