@@ -53,6 +53,8 @@ type Props = {
   guestItem?: { kind: string; id: string };
   onEnded?: () => void;
   onClose?: () => void;
+  /** Leaves the watch party; when set, the party panel offers "Leave party". */
+  onLeaveParty?: () => void;
 };
 
 const SPEEDS: MenuOption<number>[] = [
@@ -89,6 +91,7 @@ export function Player({
   guestItem,
   onEnded,
   onClose,
+  onLeaveParty,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const attachRef = useRef<AttachHandle | null>(null);
@@ -1240,6 +1243,7 @@ export function Player({
           panel={wt.panel}
           onPanel={wt.setPanel}
           onClose={canTogglePanel ? () => setPanelLocal("closed") : undefined}
+          onLeave={togetherCode ? onLeaveParty : undefined}
           error={wt.error}
           guest={Boolean(shareToken)}
           invitePath={wt.sharePath}

@@ -320,6 +320,42 @@ func (h *Hub) ReclaimOwner(ctx context.Context, p *auth.Principal, roomID string
 	return true
 }
 
+// HandOver makes p the room's owner and, once p is in the room, its host.
+// The Discord Activity uses it when an administrator joins a voice
+// channel's party: they take over from whoever started it. p must be
+// allowed to play the room's title and must not be banned from it.
+func (h *Hub) HandOver(ctx context.Context, p *auth.Principal, roomID string) error {
+	if p == nil || !p.IsUser() || p.PartyOnly {
+		return errDenied
+	}
+	h.mu.Lock()
+	room := h.rooms[roomID]
+	if room == nil || room.Banned[p.ID()] {
+		h.mu.Unlock()
+		return errDenied
+	}
+	kind, id := room.ItemKind, room.ItemID
+	h.mu.Unlock()
+	if err := h.authorize(ctx, p, kind, id); err != nil {
+		return errDenied
+	}
+	h.mu.Lock()
+	if h.rooms[roomID] != room {
+		h.mu.Unlock()
+		return errDenied
+	}
+	room.OwnerID = p.ID()
+	var st map[string]any
+	if room.Members[p.ID()] != nil && room.HostID != p.ID() {
+		room.HostID = p.ID()
+		st = h.stateLocked(room, time.Now())
+	}
+	h.mu.Unlock()
+	h.persistRoom(ctx, room)
+	h.broadcast(roomID, st)
+	return nil
+}
+
 func (h *Hub) Join(ctx context.Context, p *auth.Principal, code string) (*Room, error) {
 	h.mu.Lock()
 	id := h.invites[code]

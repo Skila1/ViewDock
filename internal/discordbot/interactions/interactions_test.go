@@ -51,9 +51,10 @@ type fakeRoom struct {
 }
 
 type fakeParties struct {
-	rooms    map[string]*fakeRoom
-	controls []string
-	n        int
+	rooms     map[string]*fakeRoom
+	controls  []string
+	handovers []string
+	n         int
 }
 
 func (f *fakeParties) Create(_ context.Context, p *auth.Principal, kind, id string) (string, string, error) {
@@ -90,6 +91,16 @@ func (f *fakeParties) Control(_ context.Context, p *auth.Principal, roomID, acti
 	}
 	f.controls = append(f.controls, action+":"+roomID)
 	r.playing = action == ActionResume
+	return nil
+}
+
+func (f *fakeParties) HandOver(_ context.Context, p *auth.Principal, roomID string) error {
+	r := f.rooms[roomID]
+	if r == nil {
+		return ErrRoomNotFound
+	}
+	r.host = p.ID()
+	f.handovers = append(f.handovers, p.ID()+":"+roomID)
 	return nil
 }
 

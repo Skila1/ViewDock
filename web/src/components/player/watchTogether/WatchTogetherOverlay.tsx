@@ -1,4 +1,4 @@
-import { Copy, Radio, Users, X } from "lucide-react";
+import { Copy, LogOut, Radio, Users, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { PartyMember, PartyPanel, PartySyncInfo } from "./partySync";
 import type { PartyStatus, WTSync } from "./useWatchTogether";
@@ -17,6 +17,8 @@ type Props = {
   panel?: PartyPanel;
   onPanel?: (panel: PartyPanel) => void;
   onClose?: () => void;
+  /** Leaves the party (the player closes); shown as a "Leave party" button. */
+  onLeave?: () => void;
   error?: string | null;
   guest?: boolean;
   invitePath?: string;
@@ -53,6 +55,7 @@ export function WatchTogetherOverlay({
   panel = "everyone",
   onPanel,
   onClose,
+  onLeave,
   error,
   guest,
   invitePath,
@@ -146,6 +149,16 @@ export function WatchTogetherOverlay({
       ) : null}
       {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
       {guest ? <p className="mt-2 text-[11px] text-dim">Guest session: no library access.</p> : null}
+      {onLeave ? (
+        <button
+          type="button"
+          onClick={onLeave}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-line py-1.5 text-xs text-ink hover:border-danger hover:text-danger"
+        >
+          <LogOut size={13} aria-hidden />
+          Leave party
+        </button>
+      ) : null}
     </aside>
   );
 }

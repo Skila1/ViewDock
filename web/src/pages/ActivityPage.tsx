@@ -5,9 +5,12 @@ import { api, ApiError } from "@/api/api";
 import { Logo } from "@/components/brand/Logo";
 import { PosterCard } from "@/components/layout/PosterCard";
 import { PosterGrid } from "@/components/layout/PosterGrid";
-import { activityInstanceId } from "@/lib/discordActivity";
+import { activityInstanceId, forgetLeftParty, leftPartyCode } from "@/lib/discordActivity";
 
 const WAIT_POLL_MS = 5_000;
+// While someone watches on their own after leaving, the page still checks
+// now and then whether the channel's party is running, for the Rejoin bar.
+const LEFT_POLL_MS = 15_000;
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Something went wrong";
@@ -22,35 +25,52 @@ function useDebounced(value: string, ms: number): string {
   return out;
 }
 
-// ActivityPage runs inside the Discord Activity. Everyone in the voice
-// channel lands in the same watch party; the first person who can start one
-// picks the title.
+// ActivityPage runs inside the Discord Activity. The first person in the
+// voice channel to open it hosts (an administrator who joins later takes
+// over) and picks the title; everyone else in the channel is sent into that
+// party. Someone who leaves the party watches on their own from here and can
+// rejoin it at any time.
 export function ActivityPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const instanceId = activityInstanceId();
+  const [left, setLeft] = useState(() => leftPartyCode() || ((location.state as { left?: string } | null)?.left ?? ""));
   const room = useQuery({
     queryKey: ["activity-room", instanceId],
     queryFn: () => api.activityRoom({ instance_id: instanceId }),
     enabled: Boolean(instanceId),
     retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
-    refetchInterval: (q) => (q.state.data && !q.state.data.room ? WAIT_POLL_MS : false),
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (!d) return false;
+      if (!d.room) return WAIT_POLL_MS;
+      return left && d.room.invite_code === left ? LEFT_POLL_MS : false;
+    },
   });
   const create = useMutation({
-    mutationFn: (item: { item_kind: "movie" | "episode"; item_id: string }) =>
-      api.activityRoom({ instance_id: instanceId, ...item }),
+    mutationFn: (item: Item) => api.activityRoom({ instance_id: instanceId, ...item }),
   });
 
-  // After leaving a party with the close button, the page offers to rejoin
-  // it instead of sending the viewer straight back in.
-  const left = (location.state as { left?: string } | null)?.left ?? "";
   const existing = room.data?.room ?? null;
   const skipped = Boolean(existing && left && existing.invite_code === left);
   const code = create.data?.room?.invite_code ?? (skipped ? undefined : existing?.invite_code);
   useEffect(() => {
-    if (code) navigate(`/together/${encodeURIComponent(code)}`, { replace: true });
+    if (!code) return;
+    // A different party than the one left (it ended and a new one started)
+    // is joined as usual.
+    forgetLeftParty();
+    navigate(`/together/${encodeURIComponent(code)}`, { replace: true });
   }, [code, navigate]);
 
+  const rejoin = (invite: string) => {
+    forgetLeftParty();
+    setLeft("");
+    navigate(`/together/${encodeURIComponent(invite)}`, { replace: true });
+  };
+  const watchAlone = (item: Item) =>
+    navigate(`/watch/${item.item_kind}/${encodeURIComponent(item.item_id)}`, { state: { from: "/activity" } });
+
+  const host = room.data?.host ?? null;
   let body;
   if (!instanceId) {
     body = <p className="text-sm text-danger">Discord did not pass the Activity details. Close the Activity and start it again.</p>;
@@ -70,29 +90,25 @@ export function ActivityPage() {
       <>
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-raised p-4">
           <p className="min-w-0 flex-1 text-sm">
-            <span className="text-dim">Still playing in this channel: </span>
+            <span className="text-dim">The channel's party is still playing: </span>
             <span className="font-medium">{existing.title || "Watch party"}</span>
           </p>
-          <button
-            type="button"
-            className="btn-green rounded-full px-4 py-1.5 text-sm"
-            onClick={() => navigate(`/together/${encodeURIComponent(existing.invite_code)}`, { replace: true })}
-          >
+          <button type="button" className="btn-green rounded-full px-4 py-1.5 text-sm" onClick={() => rejoin(existing.invite_code)}>
             Rejoin
           </button>
         </div>
-        {room.data?.can_create ? (
-          <TitlePicker
-            busy={create.isPending}
-            error={create.isError ? errMessage(create.error) : ""}
-            onPick={(item) => create.mutate(item)}
-          />
-        ) : null}
+        <TitlePicker
+          intro="You left the party. Pick something to watch on your own; you can rejoin the party any time."
+          busy={false}
+          error=""
+          onPick={watchAlone}
+        />
       </>
     );
   } else if (room.data?.can_create) {
     body = (
       <TitlePicker
+        intro={host?.you ? "You're hosting. Pick something for everyone in this channel to watch." : undefined}
         busy={create.isPending}
         error={create.isError ? errMessage(create.error) : ""}
         onPick={(item) => create.mutate(item)}
@@ -100,8 +116,10 @@ export function ActivityPage() {
     );
   } else {
     body = (
-      <p className="text-sm text-dim">
-        Nobody has started a watch party in this channel yet. It opens here as soon as someone picks a title.
+      <p className="text-sm text-dim" role="status">
+        {host
+          ? `${host.name} is hosting this channel. The party opens here as soon as they pick something to watch.`
+          : "Nobody has started a watch party in this channel yet. It opens here as soon as someone picks a title."}
       </p>
     );
   }
@@ -122,7 +140,7 @@ export function ActivityPage() {
 type Item = { item_kind: "movie" | "episode"; item_id: string };
 type Picked = { id: string; title: string };
 
-function TitlePicker({ busy, error, onPick }: { busy: boolean; error: string; onPick: (item: Item) => void }) {
+function TitlePicker({ intro, busy, error, onPick }: { intro?: string; busy: boolean; error: string; onPick: (item: Item) => void }) {
   const [q, setQ] = useState("");
   const [series, setSeries] = useState<Picked | null>(null);
   const term = useDebounced(q.trim(), 300);
@@ -182,7 +200,7 @@ function TitlePicker({ busy, error, onPick }: { busy: boolean; error: string; on
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <p className="text-sm text-dim">Pick something for everyone in this channel to watch.</p>
+        <p className="text-sm text-dim">{intro ?? "Pick something for everyone in this channel to watch."}</p>
         <input
           type="search"
           className="w-full max-w-md"

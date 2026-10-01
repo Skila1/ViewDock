@@ -73,6 +73,12 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
     void queryClient.invalidateQueries({ queryKey: ["next-up"] });
     const detail = kind === "movie" ? `/movies/${id}` : episode.data?.series_id ? `/tv/${episode.data.series_id}` : "";
     const from = (location.state as { from?: string } | null)?.from;
+    // Inside the Discord Activity, solo playback returns to the Activity's
+    // start page, where the viewer can rejoin the channel's party.
+    if (from === "/activity") {
+      navigate("/activity", { replace: true });
+      return;
+    }
     // Return to the title page entry the player was opened from, so Back
     // there leads to where the viewer browsed instead of into the player.
     if (!detail || from === detail) navigate(-1);

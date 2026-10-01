@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -77,6 +78,72 @@ func connectedMembers(st map[string]any) int {
 	return n
 }
 
+// channelHost is who leads a voice channel's Activity: the first person to
+// open it, or an administrator who joined after them. Only the host picks
+// the title, so everyone in the channel ends up in one party.
+type channelHost struct {
+	instanceID string
+	userID     string
+	discordID  string
+	name       string
+	admin      bool
+}
+
+// activityHosts tracks the host of each voice channel's Activity session.
+type activityHosts struct {
+	mu        sync.Mutex
+	byChannel map[string]channelHost
+}
+
+func principalName(p *auth.Principal) string {
+	if n := strings.TrimSpace(p.DisplayName); n != "" {
+		return n
+	}
+	if n := strings.TrimSpace(p.Username); n != "" {
+		return n
+	}
+	return "Someone"
+}
+
+// claim returns the channel's host after p opened the Activity, and whether
+// p just became host. p becomes host when the channel has none, the Activity
+// was relaunched (a new instance), the host left the call (present reports
+// who is still in it), or p is an administrator and the host is not.
+// Party-only accounts never host: they cannot start a party.
+func (a *activityHosts) claim(channelID, instanceID, discordID string, p *auth.Principal, present func(string) bool) (channelHost, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.byChannel == nil {
+		a.byChannel = map[string]channelHost{}
+	}
+	me := channelHost{instanceID: instanceID, userID: p.UserID, discordID: discordID, name: principalName(p), admin: p.IsAdmin}
+	cur, ok := a.byChannel[channelID]
+	vacant := !ok || cur.instanceID != instanceID || !present(cur.discordID)
+	switch {
+	case ok && !vacant && cur.userID == p.UserID:
+		cur.name, cur.admin = me.name, me.admin
+		a.byChannel[channelID] = cur
+		return cur, false
+	case p.PartyOnly:
+		if vacant {
+			delete(a.byChannel, channelID)
+			return channelHost{}, false
+		}
+		return cur, false
+	case vacant, p.IsAdmin && !cur.admin:
+		a.byChannel[channelID] = me
+		return me, true
+	}
+	return cur, false
+}
+
+func hostJSON(h channelHost, p *auth.Principal) map[string]any {
+	if h.userID == "" {
+		return nil
+	}
+	return map[string]any{"name": h.name, "you": h.userID == p.UserID}
+}
+
 type activityRoom struct {
 	RoomID     string `json:"room_id"`
 	InviteCode string `json:"invite_code"`
@@ -148,21 +215,36 @@ func (s *Service) handleActivityRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	kind, id := strings.TrimSpace(body.ItemKind), strings.TrimSpace(body.ItemID)
+	host, took := s.hosts.claim(channelID, body.InstanceID, discordID, p, inst.Has)
+	isHost := host.userID != "" && host.userID == p.UserID
 	// A party nobody is watching any more is not resumed; the channel picks
 	// a new title instead and the new party replaces the link.
 	if link, st, err := s.linkedRoom(ctx, channelID); err == nil && connectedMembers(st) > 0 {
+		// An administrator joining the call takes the running party over.
+		if took && p.IsAdmin {
+			if err := s.Parties.HandOver(ctx, p, link.RoomID); err != nil {
+				s.Log.Warn("discord activity host takeover failed", "category", "discord", "room", link.RoomID, "err", err)
+			} else {
+				s.audit(ctx, p.UserID, "discord.activity_party_takeover", link.RoomID, "channel="+channelID)
+			}
+		}
 		httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 			"room":       activityRoom{RoomID: link.RoomID, InviteCode: link.InviteCode, Title: link.Title},
-			"can_create": !p.PartyOnly,
+			"can_create": isHost && !p.PartyOnly,
+			"host":       hostJSON(host, p),
 		})
 		return
 	}
 	if kind == "" && id == "" {
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"room": nil, "can_create": !p.PartyOnly})
+		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"room": nil, "can_create": isHost && !p.PartyOnly, "host": hostJSON(host, p)})
 		return
 	}
 	if p.PartyOnly {
 		httpapi.WriteErr(w, http.StatusForbidden, "party_only", "your account can join parties but cannot start them")
+		return
+	}
+	if !isHost {
+		httpapi.WriteErr(w, http.StatusForbidden, "not_host", host.name+" is hosting this channel and picks what everyone watches")
 		return
 	}
 	if (kind != "movie" && kind != "episode") || id == "" || len(id) > 80 {

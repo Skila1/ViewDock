@@ -55,7 +55,7 @@ func TestNextUp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	watch(ep("Lost", 1, 1), true, 3600000, 3*time.Hour)  // finished E1: E2 is next up
+	watch(ep("Lost", 1, 1), true, 3600000, 3*time.Hour)   // finished E1: E2 is next up
 	watch(ep("Dark", 1, 1), false, 600000, time.Hour)     // E1 under way: Continue Watching, not Next Up
 	watch(ep("Done", 1, 1), true, 3600000, 2*time.Hour)   // nothing left
 	watch(ep("Fresh", 1, 1), false, 2000, 30*time.Minute) // barely started: still next up

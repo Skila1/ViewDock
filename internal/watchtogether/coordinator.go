@@ -27,6 +27,7 @@ type Coordinator interface {
 	PartyAccess(principalID, itemKind, itemID string) bool
 	Create(ctx context.Context, p *auth.Principal, itemKind, itemID string) (*Room, error)
 	ReclaimOwner(ctx context.Context, p *auth.Principal, roomID string) bool
+	HandOver(ctx context.Context, p *auth.Principal, roomID string) error
 	Control(roomID, principalID, action string) error
 	Invite(code string) *Room
 	State(roomID string) map[string]any
@@ -110,6 +111,7 @@ func (h *Hub) InternalRoutes(r chi.Router) {
 	r.Get("/rooms", h.handleInternalRooms)
 	r.Get("/rooms/{id}/state", h.handleInternalState)
 	r.Post("/rooms/{id}/reclaim", h.handleInternalReclaim)
+	r.Post("/rooms/{id}/handover", h.handleInternalHandOver)
 	r.Post("/rooms/{id}/control", h.handleInternalControl)
 	r.Get("/invites/{code}", h.handleInternalInvite)
 	r.Get("/snapshot", h.handleInternalSnapshot)
@@ -179,6 +181,18 @@ func (h *Hub) handleInternalReclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": h.ReclaimOwner(r.Context(), in.Principal, chi.URLParam(r, "id"))})
+}
+
+func (h *Hub) handleInternalHandOver(w http.ResponseWriter, r *http.Request) {
+	in, ok := decodeCoord(w, r)
+	if !ok {
+		return
+	}
+	if err := h.HandOver(r.Context(), in.Principal, chi.URLParam(r, "id")); err != nil {
+		httpapi.WriteErr(w, http.StatusForbidden, "forbidden", "not allowed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Hub) handleInternalControl(w http.ResponseWriter, r *http.Request) {
@@ -320,6 +334,17 @@ func (c *Remote) ReclaimOwner(ctx context.Context, p *auth.Principal, roomID str
 	}
 	st, err := c.call(ctx, http.MethodPost, "/rooms/"+url.PathEscape(roomID)+"/reclaim", coordRequest{Principal: p}, &out)
 	return err == nil && st == http.StatusOK && out.OK
+}
+
+func (c *Remote) HandOver(ctx context.Context, p *auth.Principal, roomID string) error {
+	st, err := c.call(ctx, http.MethodPost, "/rooms/"+url.PathEscape(roomID)+"/handover", coordRequest{Principal: p}, nil)
+	if err != nil {
+		return err
+	}
+	if st != http.StatusNoContent {
+		return errDenied
+	}
+	return nil
 }
 
 func (c *Remote) Control(roomID, principalID, action string) error {

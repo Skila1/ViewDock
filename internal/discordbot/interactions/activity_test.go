@@ -16,6 +16,7 @@ import (
 const (
 	activityApp      = "400000000000000001"
 	activityInstance = "i-1234-gc-5678"
+	adminDiscord     = "100000000000000009"
 )
 
 func TestWithEntryPointsKeepsOnlyEntryPoints(t *testing.T) {
@@ -35,10 +36,12 @@ type activityHarness struct {
 	enabled  bool
 	separate bool
 	calls    int
+	// users is who Discord reports in the Activity instance.
+	users []string
 }
 
 func newActivityHarness(t *testing.T) *activityHarness {
-	h := &activityHarness{harness: newHarness(t), enabled: true}
+	h := &activityHarness{harness: newHarness(t), enabled: true, users: []string{hostDiscord, guestDiscord, partyOnlyID, adminDiscord}}
 	discord := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.calls++
 		if r.Header.Get("Authorization") != "Bot test-token" {
@@ -53,13 +56,13 @@ func newActivityHarness(t *testing.T) *activityHarness {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"instance_id": activityInstance,
 			"location":    map[string]any{"kind": "gc", "channel_id": voiceChannel, "guild_id": guildID},
-			"users":       []string{hostDiscord, guestDiscord, partyOnlyID},
+			"users":       h.users,
 		})
 	}))
 	t.Cleanup(discord.Close)
 	bot := discordbot.New("test-token")
 	bot.BaseURL = discord.URL
-	links := map[string]string{"u-host": hostDiscord, "u-guest": guestDiscord, "u-po": partyOnlyID, "u-stranger": strangerID}
+	links := map[string]string{"u-host": hostDiscord, "u-guest": guestDiscord, "u-po": partyOnlyID, "u-stranger": strangerID, "u-admin": adminDiscord}
 	h.svc.Bot = func() *discordbot.Client { return bot }
 	h.svc.OAuth = func(context.Context) auth.DiscordOAuthConfig { return auth.DiscordOAuthConfig{ClientID: activityApp} }
 	h.svc.ActivityEnabled = func() bool { return h.enabled }
@@ -207,5 +210,113 @@ func TestActivityDiagnostics(t *testing.T) {
 	}
 	if c := activityAppCheck(discordbot.Application{Name: "VD"}); c.Status != CheckWarn {
 		t.Fatalf("not embedded = %+v", c)
+	}
+}
+
+func named(id, name string, admin bool) *auth.Principal {
+	return &auth.Principal{Kind: auth.KindUser, UserID: id, DisplayName: name, IsAdmin: admin}
+}
+
+func hostOf(out map[string]any) (string, bool) {
+	h, _ := out["host"].(map[string]any)
+	name, _ := h["name"].(string)
+	you, _ := h["you"].(bool)
+	return name, you
+}
+
+func TestActivityFirstLauncherHostsAndPicks(t *testing.T) {
+	h := newActivityHarness(t)
+	host, guest := named("u-host", "Hosty", false), named("u-guest", "Guesty", false)
+
+	_, out := h.room(host, map[string]any{"instance_id": activityInstance})
+	if name, you := hostOf(out); name != "Hosty" || !you || out["can_create"] != true {
+		t.Fatalf("first launcher: %v", out)
+	}
+	_, out = h.room(guest, map[string]any{"instance_id": activityInstance})
+	if name, you := hostOf(out); name != "Hosty" || you || out["can_create"] != false || out["room"] != nil {
+		t.Fatalf("second launcher must wait for the host: %v", out)
+	}
+	if code, out := h.room(guest, map[string]any{"instance_id": activityInstance, "item_kind": "movie", "item_id": "m1"}); code != http.StatusForbidden || out["code"] != "not_host" {
+		t.Fatalf("a guest must not start the channel's party: %d %v", code, out)
+	}
+	if len(h.parties.rooms) != 0 {
+		t.Fatal("no party yet")
+	}
+	_, out = h.room(host, map[string]any{"instance_id": activityInstance, "item_kind": "movie", "item_id": "m1"})
+	room, _ := out["room"].(map[string]any)
+	_, out = h.room(guest, map[string]any{"instance_id": activityInstance})
+	joined, _ := out["room"].(map[string]any)
+	if joined["invite_code"] != room["invite_code"] {
+		t.Fatalf("guest must join the host's party: %v", out)
+	}
+}
+
+func TestActivityHostLeavingTheCallHandsHostingOn(t *testing.T) {
+	h := newActivityHarness(t)
+	h.room(named("u-host", "Hosty", false), map[string]any{"instance_id": activityInstance})
+	h.users = []string{guestDiscord}
+	_, out := h.room(named("u-guest", "Guesty", false), map[string]any{"instance_id": activityInstance})
+	if name, you := hostOf(out); name != "Guesty" || !you || out["can_create"] != true {
+		t.Fatalf("host left the call, the next launcher hosts: %v", out)
+	}
+}
+
+func TestActivityPartyOnlyLauncherDoesNotHost(t *testing.T) {
+	h := newActivityHarness(t)
+	_, out := h.room(user("u-po", true), map[string]any{"instance_id": activityInstance})
+	if out["host"] != nil || out["can_create"] != false {
+		t.Fatalf("party-only launcher: %v", out)
+	}
+	_, out = h.room(named("u-guest", "Guesty", false), map[string]any{"instance_id": activityInstance})
+	if _, you := hostOf(out); !you {
+		t.Fatalf("the first launcher who can start a party hosts: %v", out)
+	}
+}
+
+func TestActivityAdminTakesOverBeforeAPartyStarts(t *testing.T) {
+	h := newActivityHarness(t)
+	host, admin := named("u-host", "Hosty", false), named("u-admin", "Boss", true)
+	h.room(host, map[string]any{"instance_id": activityInstance})
+	_, out := h.room(admin, map[string]any{"instance_id": activityInstance})
+	if name, you := hostOf(out); name != "Boss" || !you || out["can_create"] != true {
+		t.Fatalf("admin joining later must host: %v", out)
+	}
+	_, out = h.room(host, map[string]any{"instance_id": activityInstance})
+	if name, you := hostOf(out); name != "Boss" || you || out["can_create"] != false {
+		t.Fatalf("the first launcher now waits for the admin: %v", out)
+	}
+	// A second administrator does not take over from the first.
+	h.svc.DiscordUserID = func(_ context.Context, userID string) string {
+		return map[string]string{"u-admin": adminDiscord, "u-admin2": guestDiscord}[userID]
+	}
+	_, out = h.room(named("u-admin2", "Other admin", true), map[string]any{"instance_id": activityInstance})
+	if name, _ := hostOf(out); name != "Boss" {
+		t.Fatalf("an administrator must not take over from another: %v", out)
+	}
+}
+
+func TestActivityAdminTakesOverARunningParty(t *testing.T) {
+	h := newActivityHarness(t)
+	host, admin := named("u-host", "Hosty", false), named("u-admin", "Boss", true)
+	_, out := h.room(host, map[string]any{"instance_id": activityInstance, "item_kind": "movie", "item_id": "m1"})
+	room, _ := out["room"].(map[string]any)
+	roomID := room["room_id"].(string)
+
+	_, out = h.room(admin, map[string]any{"instance_id": activityInstance})
+	joined, _ := out["room"].(map[string]any)
+	if joined["room_id"] != roomID {
+		t.Fatalf("admin joins the running party: %v", out)
+	}
+	if len(h.parties.handovers) != 1 || h.parties.handovers[0] != admin.ID()+":"+roomID || h.parties.rooms[roomID].host != admin.ID() {
+		t.Fatalf("handovers = %v", h.parties.handovers)
+	}
+	if h.audit.actions[len(h.audit.actions)-1] != "discord.activity_party_takeover" {
+		t.Fatalf("audit = %v", h.audit.actions)
+	}
+	// Opening the Activity again does not hand over again.
+	h.room(admin, map[string]any{"instance_id": activityInstance})
+	h.room(host, map[string]any{"instance_id": activityInstance})
+	if len(h.parties.handovers) != 1 {
+		t.Fatalf("handovers = %v", h.parties.handovers)
 	}
 }

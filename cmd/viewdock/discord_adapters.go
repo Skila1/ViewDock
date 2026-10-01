@@ -51,6 +51,16 @@ func (d discordParties) Control(ctx context.Context, p *auth.Principal, roomID, 
 	return nil
 }
 
+func (d discordParties) HandOver(ctx context.Context, p *auth.Principal, roomID string) error {
+	if d.hub == nil || d.hub.State(roomID) == nil {
+		return interactions.ErrRoomNotFound
+	}
+	if err := d.hub.HandOver(ctx, p, roomID); err != nil {
+		return interactions.ErrForbidden
+	}
+	return nil
+}
+
 func (d discordParties) Resolve(code string) (string, bool) {
 	if d.hub == nil {
 		return "", false

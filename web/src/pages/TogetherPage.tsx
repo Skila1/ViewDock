@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "@/api/api";
 import { Player } from "@/components/player/Player";
-import { isDiscordActivity } from "@/lib/discordActivity";
+import { isDiscordActivity, rememberLeftParty } from "@/lib/discordActivity";
 import { useAuth } from "@/store/auth";
 import type { ItemKind, ShareMeta, WTInvite } from "@/types/api.gen";
 
@@ -105,6 +105,20 @@ export function TogetherPage({ guest }: Props) {
 
   const kind = (invite.item_kind === "episode" ? "episode" : "movie") as ItemKind;
 
+  // Closing the player or "Leave party" leaves the party. Inside the Discord
+  // Activity the viewer then has their own session and can rejoin from the
+  // Activity's start page.
+  const leave = () => {
+    if (isDiscordActivity()) {
+      rememberLeftParty(code);
+      navigate("/activity", { replace: true, state: { left: code } });
+    } else if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) {
+      navigate(-1);
+    } else {
+      navigate(guest ? `/s/${token}` : "/", { replace: true });
+    }
+  };
+
   return (
     <Player
       itemKind={kind}
@@ -113,15 +127,8 @@ export function TogetherPage({ guest }: Props) {
       togetherCode={code}
       shareToken={guest ? token : undefined}
       guestItem={guest ? guestItem : undefined}
-      onClose={() => {
-        if (isDiscordActivity()) {
-          navigate("/activity", { replace: true, state: { left: code } });
-        } else if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) {
-          navigate(-1);
-        } else {
-          navigate(guest ? `/s/${token}` : "/", { replace: true });
-        }
-      }}
+      onClose={leave}
+      onLeaveParty={leave}
     />
   );
 }

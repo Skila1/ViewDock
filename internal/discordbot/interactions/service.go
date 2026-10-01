@@ -62,6 +62,10 @@ type Parties interface {
 	Control(ctx context.Context, p *auth.Principal, roomID, action string) error
 	// Resolve maps an invite code to its room.
 	Resolve(inviteCode string) (roomID string, ok bool)
+	// HandOver makes p the room's owner and host (an administrator taking
+	// over a voice channel's party). It returns ErrRoomNotFound for a
+	// missing room and ErrForbidden when p may not watch the room's title.
+	HandOver(ctx context.Context, p *auth.Principal, roomID string) error
 }
 
 // Title is a catalogue search hit.
@@ -151,6 +155,8 @@ type Service struct {
 	diag     diagnosticsCache
 	// oauthBase is the Discord API root used for the client credentials check.
 	oauthBase string
+	// hosts remembers who leads each voice channel's Activity.
+	hosts activityHosts
 }
 
 func New(d Deps) *Service {

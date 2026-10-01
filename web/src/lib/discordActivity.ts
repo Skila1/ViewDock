@@ -96,3 +96,35 @@ export function connectActivity(clientId: string): Promise<DiscordSDK> {
   }
   return connecting;
 }
+
+const LEFT_KEY = "vd.activity.left";
+
+// The watch party this viewer chose to leave in this Activity session. While
+// it is still running they are not sent back into it; they watch on their
+// own and can rejoin from the Activity's start page.
+export function leftPartyCode(): string {
+  try {
+    const raw = window.sessionStorage.getItem(LEFT_KEY);
+    if (!raw) return "";
+    const v = JSON.parse(raw) as { instance?: string; code?: string };
+    return v.instance === activityInstanceId() ? (v.code ?? "") : "";
+  } catch {
+    return "";
+  }
+}
+
+export function rememberLeftParty(code: string) {
+  try {
+    window.sessionStorage.setItem(LEFT_KEY, JSON.stringify({ instance: activityInstanceId(), code }));
+  } catch {
+    // Without storage the choice lasts until the page reloads (router state).
+  }
+}
+
+export function forgetLeftParty() {
+  try {
+    window.sessionStorage.removeItem(LEFT_KEY);
+  } catch {
+    /* nothing stored */
+  }
+}

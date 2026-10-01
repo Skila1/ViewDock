@@ -65,6 +65,8 @@ import { clearCsrf, ensureCsrf, head, request } from "./client";
 import { detectClientProfile } from "./profile";
 
 export type ActivityRoom = { room_id: string; invite_code: string; title: string; created?: boolean };
+/** Who leads the voice channel's Activity: the first to open it, or an administrator who joined later. */
+export type ActivityHost = { name: string; you: boolean };
 
 // Per-session calls go to the media worker that owns the session. Workers
 // authenticate these with the session stream token, so no cookie is required.
@@ -115,7 +117,7 @@ export const api = {
     return out;
   },
   activityRoom: (body: { instance_id: string; item_kind?: "movie" | "episode"; item_id?: string }) =>
-    request<{ room: ActivityRoom | null; can_create?: boolean }>("/api/v1/discord/activity/room", {
+    request<{ room: ActivityRoom | null; can_create?: boolean; host?: ActivityHost | null }>("/api/v1/discord/activity/room", {
       method: "POST",
       body,
     }),

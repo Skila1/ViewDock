@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Discord Activity: the first person in the voice channel to open it hosts and picks what everyone watches; the rest join that party automatically. An administrator who joins later takes over as host. The party panel has a Leave party button: after leaving you can watch on your own inside the Activity and Rejoin the channel's party from its start page.
+
 ## 0.2.9
 
 - New home page in the style of Jellyfin: My Media tiles for Movies, Shows, Anime and All titles, then Continue Watching (wide cards with the episode as "S1:E5 - Title" and a progress bar), Next Up (the next unwatched episode of shows you are watching), and Recently Added rails for each section with previous and next buttons. Searching, filtering or opening All titles still shows the full grid with filters. Works with the sidebar open or collapsed and on phones.

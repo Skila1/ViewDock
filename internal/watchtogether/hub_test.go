@@ -197,3 +197,51 @@ func TestDriftResync(t *testing.T) {
 		t.Fatalf("drift %v", out)
 	}
 }
+
+// An administrator joining a Discord channel's party takes it over: they
+// become owner and host, and the previous owner does not take it back.
+func TestHandOver(t *testing.T) {
+	ctx := context.Background()
+	h := New(loc{kind: "movie", id: "A"}, grants{}, &gate{})
+	first := &auth.Principal{Kind: auth.KindUser, UserID: "u1", DisplayName: "First"}
+	admin := &auth.Principal{Kind: auth.KindUser, UserID: "u2", DisplayName: "Admin", IsAdmin: true}
+	room, err := h.Create(ctx, first, "movie", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.HandOver(ctx, admin, room.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.State(room.ID); st["owner"] != admin.ID() || st["host"] != first.ID() {
+		t.Fatalf("before joining, the admin owns the room and the first host keeps playing: %v", st)
+	}
+	if _, err := h.Join(ctx, admin, room.InviteCode); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.State(room.ID); st["host"] != admin.ID() {
+		t.Fatalf("admin is host once in the room: %v", st)
+	}
+	if _, err := h.Join(ctx, first, room.InviteCode); err != nil {
+		t.Fatal(err)
+	}
+	if h.ReclaimOwner(ctx, first, room.ID) || h.State(room.ID)["host"] != admin.ID() {
+		t.Fatal("the previous owner took the room back")
+	}
+	// Handing over to a member makes them host at once.
+	if err := h.HandOver(ctx, first, room.ID); err != nil || h.State(room.ID)["host"] != first.ID() {
+		t.Fatalf("hand over to a member: %v %v", err, h.State(room.ID))
+	}
+	banned := &auth.Principal{Kind: auth.KindUser, UserID: "u3"}
+	h.mu.Lock()
+	room.Banned = map[string]bool{banned.ID(): true}
+	h.mu.Unlock()
+	partyOnly := &auth.Principal{Kind: auth.KindUser, UserID: "u4", PartyOnly: true}
+	for _, p := range []*auth.Principal{banned, partyOnly, nil} {
+		if err := h.HandOver(ctx, p, room.ID); err == nil {
+			t.Fatalf("hand over to %+v must be refused", p)
+		}
+	}
+	if err := h.HandOver(ctx, admin, "missing"); err == nil {
+		t.Fatal("missing room")
+	}
+}

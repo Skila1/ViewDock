@@ -89,6 +89,15 @@ func TestRemoteCoordinatorMatchesHub(t *testing.T) {
 	if rooms, _ := snap["rooms"].(int); rooms != 1 {
 		t.Fatalf("snapshot = %v", snap)
 	}
+	if err := c.HandOver(ctx, other, room.ID); err != nil {
+		t.Fatalf("hand over: %v", err)
+	}
+	if st := h.State(room.ID); st["owner"] != other.ID() {
+		t.Fatalf("hand over not applied: %v", st)
+	}
+	if err := c.HandOver(ctx, other, "missing"); err == nil {
+		t.Fatal("hand over of a missing room succeeded")
+	}
 }
 
 func TestRemoteCoordinatorFailsClosed(t *testing.T) {
