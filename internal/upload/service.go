@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/viewdock/viewdock/internal/auth"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/mediafs"
 	"github.com/viewdock/viewdock/internal/scan"
 )
 
@@ -124,8 +126,9 @@ func (s *Service) Create(ctx context.Context, p *auth.Principal, libraryID, file
 	if err := libraryKindOK(lib.ContentType, filename); err != nil {
 		return Session{}, err
 	}
-	if err := writableDir(lib.RootPath); err != nil {
-		return Session{}, err
+	if err := mediafs.CheckWritable(lib.RootPath); err != nil {
+		// "library folder is not writable: /media/x (why and how to fix)"
+		return Session{}, fmt.Errorf("%w: %s", ErrNotWritable, strings.TrimPrefix(err.Error(), mediafs.ErrNotWritable.Error()+": "))
 	}
 	if err := os.MkdirAll(s.Staging, 0o755); err != nil {
 		return Session{}, err
@@ -395,21 +398,12 @@ func libraryKindOK(contentType, filename string) error {
 			return ErrLibraryKind
 		}
 	case "tv":
-		if parsed.Kind == scan.KindMovie {
+		// A TV library only catalogues files named like episodes
+		// (Show S01E02); anything else would be skipped by the scanner.
+		if parsed.Kind != scan.KindEpisode {
 			return ErrLibraryKind
 		}
 	}
-	return nil
-}
-
-func writableDir(dir string) error {
-	f, err := os.CreateTemp(dir, ".vd-write-*")
-	if err != nil {
-		return ErrNotWritable
-	}
-	name := f.Name()
-	_ = f.Close()
-	_ = os.Remove(name)
 	return nil
 }
 

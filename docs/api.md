@@ -64,6 +64,8 @@ Cookie CSRF is not required when a `vd_` key is used.
 | GET | `/api/v1/offline/speedtest` | signed-in user |
 | GET | `/api/v1/content-restriction` | signed-in user |
 | PUT, DELETE | `/api/v1/movies/{id}/rating`, `/api/v1/series/{id}/rating` | `libraries.manage` |
+| POST | `/api/v1/library-moves/preview`, `/api/v1/library-moves` | `libraries.manage` |
+| GET | `/api/v1/library-moves/{id}` | `libraries.manage` |
 | GET, POST | `/api/v1/admin/households` | `users.manage` |
 | GET, PATCH, DELETE | `/api/v1/admin/households/{id}` | `users.manage` |
 | POST | `/api/v1/admin/households/{id}/invites` | `users.manage` |
@@ -167,3 +169,9 @@ When the player fails to start or stops during playback, it shows the error with
 curl -s -H "Authorization: Bearer vd_YOUR_SECRET" \
   "https://viewdock.example.com/api/v1/admin/logs?level=error&category=client_error&limit=50"
 ```
+
+## Libraries and moving titles
+
+`POST /api/v1/libraries` takes `{"name","path","content_type"}` with `content_type` `movies`, `tv` or `mixed`. ViewDock creates the folder itself: an empty `path` becomes `<VD_MEDIA_DIR>/<name>`, a relative `path` (`kids/movies`) is placed inside `VD_MEDIA_DIR`, and an absolute `path` must be inside `VD_MEDIA_DIR` or a `VD_LIBRARY_ROOTS` entry, also after following links. Missing folders and parents are created with mode `0755` and owned by `PUID:PGID`, then checked for write access; `400` explains a path that is outside the media folder, contains `..`, is used by another library, or cannot be written. `PATCH` validates a new `path` the same way (files are not moved) and refuses a `content_type` that the library's titles would violate.
+
+Titles move with `POST /api/v1/library-moves` and `{"destination_library_id", "items":[{"kind":"movie"|"series","id"}]}`, or `{"source_library_id","destination_library_id","all":true}` for every title of a library. A show always moves with all its seasons and episodes. `POST /api/v1/library-moves/preview` takes the same body, changes nothing, and returns `{"destination","eligible":[...],"ineligible":[...],"eligible_bytes"}`; each ineligible title has a `reason` (`incompatible`, `duplicate`, `same_library`, `missing_files`, `remote`, `no_files`, `unsafe_path`) and a readable `message`. Compatibility comes from each title's own kind: movies go to Movies or Mixed libraries, shows to TV or Mixed libraries. Starting a move returns `202` with a job; `GET /api/v1/library-moves/{id}` reports `status` (`running`, `done`, `failed`, `interrupted`), counts and each title's outcome (`moved`, `skipped`, `failed`, `rolled_back`). `409 move_busy` means another move, or a scan of one of the libraries, is running.

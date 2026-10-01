@@ -214,6 +214,7 @@ export interface SetupAdminRequest {
 
 export interface SetupLibraryRequest {
   name: string;
+  /** Empty lets ViewDock create and manage <media folder>/<name>. */
   path: string;
   content_type: ContentType;
 }
@@ -251,6 +252,80 @@ export interface Library {
   updated_at?: string;
 }
 
+/** A movie, or a show with all its seasons and episodes. */
+export type MoveItemKind = "movie" | "series";
+
+export interface MoveItemRef {
+  kind: MoveItemKind;
+  id: string;
+}
+
+export interface MoveRequest {
+  source_library_id?: string;
+  destination_library_id: string;
+  items?: MoveItemRef[];
+  all?: boolean;
+}
+
+export type MoveReason =
+  | "incompatible"
+  | "same_library"
+  | "duplicate"
+  | "remote"
+  | "not_found"
+  | "no_files"
+  | "missing_files"
+  | "unsafe_path"
+  | "interrupted";
+
+export interface MovePlanItem {
+  kind: MoveItemKind;
+  id: string;
+  title: string;
+  year?: number;
+  source_library_id?: string;
+  files: number;
+  bytes: number;
+  target?: string;
+  renamed?: boolean;
+  reason?: MoveReason;
+  message?: string;
+}
+
+export interface MovePlan {
+  destination: Library;
+  eligible: MovePlanItem[];
+  ineligible: MovePlanItem[];
+  eligible_bytes: number;
+}
+
+export type MoveItemStatus = "pending" | "moving" | "fs_done" | "moved" | "skipped" | "failed" | "rolled_back";
+
+export interface MoveJobItem {
+  kind: MoveItemKind;
+  id: string;
+  title: string;
+  source_library_id?: string;
+  status: MoveItemStatus;
+  reason?: MoveReason;
+  message?: string;
+  target?: string;
+}
+
+export interface MoveJob {
+  id: string;
+  source_library_id?: string;
+  destination_library_id: string;
+  status: "running" | "done" | "failed" | "interrupted";
+  total: number;
+  moved: number;
+  skipped: number;
+  failed: number;
+  created_at: string;
+  finished_at?: string;
+  items: MoveJobItem[];
+}
+
 export interface Movie {
   id: string;
   title: string;
@@ -275,6 +350,7 @@ export interface Series {
   title: string;
   year: number | null;
   poster_url: string | null;
+  backdrop_url?: string | null;
   unmatched: boolean;
   metadata_source: string;
   overview?: string;
@@ -460,6 +536,26 @@ export interface ProgressRecord {
   title?: string;
   poster_url?: string | null;
   unmatched?: boolean;
+  /** How the home page names the item and which artwork it can use. */
+  card?: HomeCard;
+}
+
+/** A movie or episode as the home page rails show it. */
+export interface HomeCard {
+  kind: "movie" | "episode";
+  id: string;
+  /** The movie, or the episode's show. */
+  title: string;
+  /** "S1:E5 - Chapter 5" for an episode, the year for a movie. */
+  subtitle?: string;
+  year?: number;
+  series_id?: string;
+  season?: number;
+  number?: number;
+  episode_title?: string;
+  poster_url?: string | null;
+  backdrop_url?: string | null;
+  thumb_url?: string | null;
 }
 
 export interface ShareMeta {

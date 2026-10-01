@@ -52,8 +52,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
          apt-get install -y --no-install-recommends vainfo intel-media-va-driver || true; \
        fi \
     && useradd --system --home /config --uid 1000 viewdock \
-    && mkdir -p /config /cache /transcode /media \
-    && chown viewdock:viewdock /config /cache /transcode
+    && mkdir -p /config /cache /transcode /media /update \
+    && chown viewdock:viewdock /config /cache /transcode /media /update
 COPY --from=build --chmod=755 /out/viewdock /usr/local/bin/viewdock
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENV VD_HTTP_ADDR=:8080 \

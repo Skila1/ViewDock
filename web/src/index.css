@@ -435,3 +435,48 @@ textarea {
     font-size: 14px;
   }
 }
+
+/* Home page rails: horizontal scroll without a visible scrollbar, snapping to cards. */
+.rail-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.rail-wide {
+  width: min(78vw, 300px);
+}
+
+.rail-poster {
+  width: min(38vw, 150px);
+}
+
+@media (min-width: 1280px) {
+  .rail-wide {
+    width: 340px;
+  }
+
+  .rail-poster {
+    width: 172px;
+  }
+}
+
+.home-card {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 120ms;
+}
+
+a:hover > .home-card,
+a.home-card:hover,
+a:focus-visible > .home-card,
+a.home-card:focus-visible {
+  outline-color: var(--color-accent);
+}

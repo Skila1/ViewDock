@@ -3,15 +3,9 @@ import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
 import type { ContentType, Library } from "@/types/api.gen";
+import { MoveContentDialog } from "./MoveContentDialog";
+import { CONTENT_TYPES, managedFolder, typeLabel } from "./moveContent";
 import { Card, CardGrid, NoteLine, PageHeader, Pill, errText, inputCls, primaryBtn, secondaryBtn, type Note } from "./ui";
-
-const CONTENT_TYPES: { value: ContentType; label: string }[] = [
-  { value: "movies", label: "Movies" },
-  { value: "tv", label: "TV shows" },
-  { value: "mixed", label: "Mixed" },
-];
-
-const typeLabel = (t: ContentType) => CONTENT_TYPES.find((c) => c.value === t)?.label ?? t;
 
 function useRefresh() {
   const qc = useQueryClient();
@@ -29,6 +23,7 @@ function LibraryFields({
   onName,
   onPath,
   onType,
+  folderHint,
 }: {
   name: string;
   path: string;
@@ -36,6 +31,7 @@ function LibraryFields({
   onName: (v: string) => void;
   onPath: (v: string) => void;
   onType: (v: ContentType) => void;
+  folderHint: string;
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -48,21 +44,30 @@ function LibraryFields({
         <select className={inputCls} value={type} onChange={(e) => onType(e.target.value as ContentType)}>
           {CONTENT_TYPES.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {c.label} ({c.holds})
             </option>
           ))}
         </select>
       </label>
-      <label className="block text-sm sm:col-span-2">
-        Folder on the server
-        <input className={`${inputCls} font-mono`} value={path} onChange={(e) => onPath(e.target.value)} placeholder="/media/movies" required />
-      </label>
+      <details className="text-sm sm:col-span-2" open={path !== ""}>
+        <summary className="cursor-pointer text-xs text-dim">Folder: {path.trim() || folderHint}</summary>
+        <label className="mt-2 block text-xs text-dim">
+          Custom folder (optional). A name like <span className="font-mono">kids/movies</span> is placed inside the media folder.
+          <input className={`${inputCls} font-mono`} value={path} onChange={(e) => onPath(e.target.value)} placeholder={folderHint} />
+        </label>
+      </details>
     </div>
   );
 }
 
+function useMediaDir() {
+  const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem, staleTime: 60_000 });
+  return system.data?.media_dir;
+}
+
 function AddLibrary() {
   const refresh = useRefresh();
+  const mediaDir = useMediaDir();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [type, setType] = useState<ContentType>("movies");
@@ -78,7 +83,7 @@ function AddLibrary() {
       await api.scanLibrary(lib.id).catch(() => undefined);
       setName("");
       setPath("");
-      setNote({ ok: true, text: `Saved ${lib.name}. The first scan has started.` });
+      setNote({ ok: true, text: `Created ${lib.name} in ${lib.path}. It is ready for uploads and the first scan has started.` });
       await refresh();
     } catch (err) {
       setNote({ ok: false, text: errText(err, "the library could not be created") });
@@ -88,11 +93,23 @@ function AddLibrary() {
   };
 
   return (
-    <Card id="media-add-library" title="Add a library" description="Point ViewDock at a folder on this server. New libraries are visible to the User group; change that in Library access.">
+    <Card
+      id="media-add-library"
+      title="Add a library"
+      description="ViewDock creates the library's folder and sets its permissions itself. New libraries are visible to the User group; change that in Library access."
+    >
       <form className="space-y-3" onSubmit={submit}>
-        <LibraryFields name={name} path={path} type={type} onName={setName} onPath={setPath} onType={setType} />
-        <button type="submit" className={`${primaryBtn} disabled:opacity-50`} disabled={busy || !name.trim() || !path.trim()}>
-          {busy ? "Saving…" : "Save"}
+        <LibraryFields
+          name={name}
+          path={path}
+          type={type}
+          onName={setName}
+          onPath={setPath}
+          onType={setType}
+          folderHint={managedFolder(mediaDir, name || "New library")}
+        />
+        <button type="submit" className={`${primaryBtn} disabled:opacity-50`} disabled={busy || !name.trim()}>
+          {busy ? "Creating…" : "Create library"}
         </button>
         <NoteLine note={note} />
       </form>
@@ -100,8 +117,10 @@ function AddLibrary() {
   );
 }
 
-function LibraryCard({ lib, titles }: { lib: Library; titles: number }) {
+function LibraryCard({ lib, titles, libraries }: { lib: Library; titles: number; libraries: Library[] }) {
   const refresh = useRefresh();
+  const mediaDir = useMediaDir();
+  const [moving, setMoving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(lib.name);
   const [path, setPath] = useState(lib.path);
@@ -130,7 +149,7 @@ function LibraryCard({ lib, titles }: { lib: Library; titles: number }) {
     e.preventDefault();
     const ok = await run(
       () => api.patchLibrary(lib.id, { name: name.trim(), path: path.trim(), content_type: type }),
-      "Saved. Scan the library to pick up a new folder.",
+      path.trim() !== lib.path ? "Saved. Files were not moved; use Move content to move titles between libraries." : "Saved.",
       "the library could not be saved",
     );
     if (ok) setEditing(false);
@@ -149,9 +168,9 @@ function LibraryCard({ lib, titles }: { lib: Library; titles: number }) {
     >
       {editing ? (
         <form className="space-y-3" onSubmit={save}>
-          <LibraryFields name={name} path={path} type={type} onName={setName} onPath={setPath} onType={setType} />
+          <LibraryFields name={name} path={path} type={type} onName={setName} onPath={setPath} onType={setType} folderHint={managedFolder(mediaDir, name)} />
           <div className="flex flex-wrap gap-2">
-            <button type="submit" className={`${primaryBtn} disabled:opacity-50`} disabled={busy || !name.trim() || !path.trim()}>
+            <button type="submit" className={`${primaryBtn} disabled:opacity-50`} disabled={busy || !name.trim()}>
               Save
             </button>
             <button
@@ -198,6 +217,9 @@ function LibraryCard({ lib, titles }: { lib: Library; titles: number }) {
         <Link className={secondaryBtn} to={`/admin/media/titles?library=${encodeURIComponent(lib.id)}`}>
           Titles
         </Link>
+        <button type="button" className={secondaryBtn} disabled={busy || titles === 0} onClick={() => setMoving(true)}>
+          Move content…
+        </button>
         {confirmDelete ? (
           <>
             <button
@@ -224,6 +246,7 @@ function LibraryCard({ lib, titles }: { lib: Library; titles: number }) {
         </p>
       ) : null}
       <NoteLine note={note} />
+      {moving ? <MoveContentDialog open={moving} onOpenChange={setMoving} libraries={libraries} source={lib} /> : null}
     </Card>
   );
 }
@@ -243,7 +266,8 @@ export function MediaLibrariesPage() {
         title="Libraries"
         description={
           <>
-            Folders on this server that ViewDock scans. Jellyfin libraries are managed from{" "}
+            Each library is a folder ViewDock creates and manages inside its media folder. Use Move content to move titles between compatible
+            libraries. Jellyfin libraries are managed from{" "}
             <Link className="text-accent" to="/admin/media/sources">
               Jellyfin servers
             </Link>
@@ -255,7 +279,7 @@ export function MediaLibrariesPage() {
       {libs.isError ? <p className="text-sm text-danger">{errText(libs.error, "libraries could not be loaded")}</p> : null}
       <CardGrid>
         {(libs.data ?? []).map((lib) => (
-          <LibraryCard key={`${lib.id}-${lib.updated_at ?? ""}`} lib={lib} titles={counts.get(lib.id) ?? 0} />
+          <LibraryCard key={`${lib.id}-${lib.updated_at ?? ""}`} lib={lib} titles={counts.get(lib.id) ?? 0} libraries={libs.data ?? []} />
         ))}
         <AddLibrary />
       </CardGrid>

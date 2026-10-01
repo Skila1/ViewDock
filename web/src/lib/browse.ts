@@ -12,6 +12,8 @@ export type BrowseQuery = {
   genre: string;
   tag: BrowseTag;
   sort: BrowseSort;
+  /** Show the full catalogue grid even with no filter set ("All titles"). */
+  all?: boolean;
 };
 
 export type BrowseItem = {
@@ -21,6 +23,7 @@ export type BrowseItem = {
   title: string;
   year: number | null;
   posterUrl: string | null;
+  backdropUrl: string | null;
   unmatched: boolean;
   overview: string;
   genres: string[];
@@ -65,6 +68,7 @@ export function parseBrowse(params: URLSearchParams): BrowseQuery {
     genre: params.get("genre") ?? "",
     tag: pick<BrowseTag>("tag", TAGS),
     sort: pick<BrowseSort>("sort", SORTS),
+    ...(params.get("all") === "1" ? { all: true } : {}),
   };
 }
 
@@ -75,6 +79,7 @@ export function browseParams(query: BrowseQuery): URLSearchParams {
   if (query.genre) p.set("genre", query.genre);
   if (query.tag) p.set("tag", query.tag);
   if (query.sort) p.set("sort", query.sort);
+  if (query.all) p.set("all", "1");
   return p;
 }
 
@@ -97,6 +102,7 @@ function item(kind: "movie" | "series", t: Movie | Series, href: string): Browse
     title: t.title,
     year: t.year,
     posterUrl: t.poster_url,
+    backdropUrl: t.backdrop_url ?? null,
     unmatched: t.unmatched,
     overview: t.overview ?? "",
     genres: t.genres ?? [],

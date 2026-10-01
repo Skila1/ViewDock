@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -58,6 +59,13 @@ func (s *Scanner) Attach(ctx context.Context, fileID string, body attachBody) er
 	defer func() { _ = tx.Rollback() }()
 
 	kind := strings.ToLower(strings.TrimSpace(body.Kind))
+	var contentType string
+	_ = tx.QueryRowContext(ctx, `SELECT content_type FROM libraries WHERE id = ?`, libraryID).Scan(&contentType)
+	switch {
+	case (kind == KindMovie || kind == "movies") && !kindFits(contentType, KindMovie),
+		(kind == KindEpisode || kind == "tv" || kind == "episodes") && !kindFits(contentType, KindEpisode):
+		return fmt.Errorf("%w: %s libraries hold %s", ErrWrongKind, library.ContentTypeLabel(contentType), acceptsLabel(contentType))
+	}
 	switch kind {
 	case KindMovie, "movies":
 		kind = KindMovie
@@ -109,4 +117,11 @@ func (s *Scanner) Attach(ctx context.Context, fileID string, body attachBody) er
 		return err
 	}
 	return tx.Commit()
+}
+
+func acceptsLabel(contentType string) string {
+	if contentType == "tv" {
+		return "TV episodes only"
+	}
+	return "movies only"
 }

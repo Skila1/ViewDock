@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- New home page in the style of Jellyfin: My Media tiles for Movies, Shows, Anime and All titles, then Continue Watching (wide cards with the episode as "S1:E5 - Title" and a progress bar), Next Up (the next unwatched episode of shows you are watching), and Recently Added rails for each section with previous and next buttons. Searching, filtering or opening All titles still shows the full grid with filters. Works with the sidebar open or collapsed and on phones.
+- Jellyfin servers now also provide backdrop images, used by the home page's wide cards and tiles.
+- ViewDock now creates each library's folder itself. Leave the folder empty and "Kids Movies" becomes `/media/Kids Movies`, owned by the ViewDock account and ready for uploads; no `mkdir`, `chown` or `chmod` over SSH. Library folders must be inside the media folder (or a `VD_LIBRARY_ROOTS` entry); `..`, links that lead elsewhere and folders used by another library are refused.
+- On every start the container gives the ViewDock account any media folder that root created, such as a `movies` folder made over SSH, which caused "library folder is not writable". Files are never changed. Set `VD_FIX_PERMISSIONS=false` to turn this off.
+- Move titles between libraries under Admin → Media: pick titles on the Titles page ("Move to library", "Move selected"), or move everything out of a library with "Move content". Movies go to Movies or Mixed libraries and shows to TV Shows or Mixed libraries, decided by each title's own kind, and ViewDock shows what will move and what will be skipped before you confirm. Files move on disk with their subtitles, artwork and show and season folders; watch history, progress, favourites, collections and metadata stay with each title. Nothing at the destination is ever replaced, a failed move puts the files back, and a move interrupted by a restart is finished or undone on the next start.
+- Libraries now enforce their type: a Movies library does not pick up new episodes, a TV Shows library does not pick up new movies, and a library's type cannot be changed to one its titles do not fit.
+- A library inside another library's folder is no longer scanned twice.
+- The ViewDock process keeps the GPU and Docker socket groups after dropping root.
+- The stream-limit error no longer blames the Jellyfin server. The limit is ViewDock's own "Maximum concurrent streams" setting for that server (Admin → Jellyfin servers), and every viewer counts, including each member of a watch party or Discord activity; the message now says so and how to raise it.
+
 ## 0.2.8
 
 - Joining a watch party on a Jellyfin server limited to one stream could refuse your own playback with "allows 1 playback at once". When a party seek and a quality change started at the same moment, one of your streams blocked the other. Your overlapping starts now replace each other.

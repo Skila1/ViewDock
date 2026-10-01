@@ -33,13 +33,19 @@ curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | s
 | `./config` | `/config` | SQLite only |
 | `./cache` | `/cache` | artwork + HLS |
 | `./transcode` | `/transcode` | in-flight jobs |
-| media folder | `/media` | writable so Admin uploads can land here. Entrypoint chowns the directory inode only; it never walks files |
+| media folder | `/media` | writable: ViewDock creates library folders here, and uploads and moves write here |
 
-## User
+## User and folder permissions
 
-`PUID` / `PGID` map the process user. Entrypoint chowns **directory inodes** of `/config`, `/cache`, `/transcode`, `/config/uploads`, and `/media` only. Media files are never walked.
+The container starts as root, prepares its folders, then runs ViewDock as `PUID:PGID` (default `1000:1000`). Do not set `user:` in Compose; the entrypoint needs root for this one step.
 
-If `/dev/dri` exists and the process starts as root, those device GIDs are added as supplementary groups.
+On every start (first install, `docker compose up -d` after an update, container recreation, host reboot) the entrypoint:
+
+- gives `/config`, `/config/uploads`, `/cache`, `/transcode` and `/update` to `PUID:PGID` (the folders themselves, not their contents);
+- runs `viewdock prepare-storage`, which gives `PUID:PGID` the media root (`/media` and any `VD_LIBRARY_ROOTS`) and every folder under it, up to four levels deep, that **root** created — for example a `movies` folder made with `mkdir` over SSH. Files are never changed, and folders owned by any other account are left alone. `VD_FIX_PERMISSIONS=false` turns this off; `VD_FIX_PERMISSIONS_DEPTH` changes the depth;
+- adds the group ids of `/dev/dri` devices and the Docker socket to the ViewDock account, so hardware transcoding and in-app updates keep working as a non-root user.
+
+Library folders themselves are created by ViewDock when you add a library (**Admin → Media → Libraries**), with mode `0755` and owner `PUID:PGID`. You never need to create, `chown` or `chmod` a library folder by hand.
 
 ## Health
 

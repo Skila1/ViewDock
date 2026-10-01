@@ -24,6 +24,7 @@ func (s *Service) Routes(r chi.Router) {
 	r.Patch("/libraries/{id}", s.handlePatchLibrary)
 	r.Delete("/libraries/{id}", s.handleDeleteLibrary)
 	r.Post("/libraries/{id}/scan", s.handleScanLibrary)
+	s.moveRoutes(r)
 
 	r.Get("/movies", s.handleListMovies)
 	r.Get("/movies/{id}", s.handleGetMovie)
@@ -31,6 +32,7 @@ func (s *Service) Routes(r chi.Router) {
 	r.Get("/series", s.handleListSeries)
 	r.Get("/series/{id}", s.handleGetSeries)
 	r.Get("/series/{id}/next", s.handleNextEpisode)
+	r.Get("/next-up", s.handleNextUp)
 	r.Get("/episodes/{id}", s.handleGetEpisode)
 	r.Get("/artwork/{kind}/{itemKind}/{id}", s.handleArtwork)
 	r.Put("/movies/{id}/rating", s.handleSetRating("movie"))

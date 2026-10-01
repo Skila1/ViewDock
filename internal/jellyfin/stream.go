@@ -488,9 +488,12 @@ func grantIsIdle(g *grant, now time.Time) bool {
 
 func (s *Service) streamLimit(ctx context.Context, src Source) error {
 	max := src.Policy.MaxStreams
-	msg := fmt.Sprintf("This Jellyfin server allows %d playback at once, and that is already in use. Stop the other one and try again.", max)
+	// The cap is ViewDock's own setting for this source (Admin → Jellyfin
+	// servers → Maximum concurrent streams), not a limit Jellyfin reported.
+	// Every viewer counts, including each member of a watch party.
+	msg := fmt.Sprintf("ViewDock allows %d stream at once from %s, and it is already in use. Stop it and try again, or ask an administrator to raise \"Maximum concurrent streams\" for this Jellyfin server (0 means no limit).", max, src.Name)
 	if max != 1 {
-		msg = fmt.Sprintf("This Jellyfin server allows %d playbacks at once, and they are all in use. Stop another one and try again.", max)
+		msg = fmt.Sprintf("ViewDock allows %d streams at once from %s, and they are all in use. Stop one and try again, or ask an administrator to raise \"Maximum concurrent streams\" for this Jellyfin server (0 means no limit).", max, src.Name)
 	}
 	s.event(ctx, src.ID, "blocked", false, fmt.Sprintf("refused stream: %d concurrent streams is the limit", max))
 	return &playback.SourceUnavailable{Reason: msg}

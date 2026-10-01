@@ -70,6 +70,7 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
 
   const close = () => {
     void queryClient.invalidateQueries({ queryKey: ["continue"] });
+    void queryClient.invalidateQueries({ queryKey: ["next-up"] });
     const detail = kind === "movie" ? `/movies/${id}` : episode.data?.series_id ? `/tv/${episode.data.series_id}` : "";
     const from = (location.state as { from?: string } | null)?.from;
     // Return to the title page entry the player was opened from, so Back

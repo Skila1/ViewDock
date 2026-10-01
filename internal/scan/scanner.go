@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,19 +38,54 @@ type Scanner struct {
 
 	mu   sync.Mutex
 	runs map[string]bool
+	// cataloguing marks libraries whose files are being walked and written
+	// to the catalogue; probing afterwards does not count.
+	cataloguing map[string]bool
 }
 
 // New constructs a Scanner. libs may be nil only in parser-only tests.
 func New(db *sql.DB, libs *library.Service, prober ffmpeg.Prober) *Scanner {
-	return &Scanner{DB: db, Libs: libs, Prober: prober, runs: map[string]bool{}}
+	return &Scanner{DB: db, Libs: libs, Prober: prober, runs: map[string]bool{}, cataloguing: map[string]bool{}}
 }
 
 var _ library.ScanStart = (*Scanner)(nil)
+
+// ErrMoveRunning is returned instead of scanning a library that a move is
+// changing, so a scan never catalogues a half-moved title.
+var ErrMoveRunning = errors.New("titles are being moved in or out of this library; scan again when the move finishes")
+
+// ErrWrongKind rejects a file the library's content type does not accept:
+// an episode in a Movies library, or a movie in a TV Shows library.
+var ErrWrongKind = errors.New("this file does not match the library type")
+
+// Scanning reports whether a scan is cataloguing libraryID right now. A
+// move waits for that; the slower probing that follows does not block it.
+func (s *Scanner) Scanning(libraryID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cataloguing[libraryID]
+}
+
+func (s *Scanner) setCataloguing(libraryID string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cataloguing == nil {
+		s.cataloguing = map[string]bool{}
+	}
+	if on {
+		s.cataloguing[libraryID] = true
+	} else {
+		delete(s.cataloguing, libraryID)
+	}
+}
 
 func (s *Scanner) StartScan(ctx context.Context, libraryID string) (string, error) {
 	if s.Libs != nil {
 		if _, err := s.Libs.Get(ctx, libraryID); err != nil {
 			return "", err
+		}
+		if s.Libs.MoveBusy(libraryID) {
+			return "", ErrMoveRunning
 		}
 	} else if err := s.libraryExists(ctx, libraryID); err != nil {
 		return "", err
@@ -115,7 +151,7 @@ func (s *Scanner) runScan(libraryID, runID string) {
 }
 
 func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, added int, err error) {
-	root, err := s.rootOf(ctx, libraryID)
+	root, contentType, err := s.libraryInfo(ctx, libraryID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -123,6 +159,14 @@ func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, adde
 		s.markLibraryOffline(ctx, libraryID)
 		return 0, 0, err
 	}
+	nested := s.nestedRoots(ctx, libraryID, root)
+	s.setCataloguing(libraryID, true)
+	cataloguing := true
+	defer func() {
+		if cataloguing {
+			s.setCataloguing(libraryID, false)
+		}
+	}()
 
 	var files []foundFile
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -140,6 +184,9 @@ func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, adde
 			}
 			if strings.EqualFold(d.Name(), ".viewdock-staging") {
 				return filepath.SkipDir
+			}
+			if nested[filepath.Clean(path)] {
+				return filepath.SkipDir // another library's folder; that library owns it
 			}
 			return nil
 		}
@@ -161,13 +208,15 @@ func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, adde
 	}
 
 	seenRel := map[string]bool{}
+	rejected := 0
 	for i := 0; i < len(files); i += catalogueBatch {
 		end := i + catalogueBatch
 		if end > len(files) {
 			end = len(files)
 		}
-		n, err := s.catalogueBatch(ctx, libraryID, root, files[i:end])
+		n, r, err := s.catalogueBatch(ctx, libraryID, root, contentType, files[i:end])
 		added += n
+		rejected += r
 		if err != nil {
 			return seen, added, err
 		}
@@ -176,7 +225,14 @@ func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, adde
 		}
 	}
 	seen = len(files)
+	if rejected > 0 {
+		slog.Warn("files skipped because they do not match the library type", "category", "scan",
+			"library", libraryID, "content_type", contentType, "files", rejected,
+			"hint", "move them to a Mixed library or one of the matching type")
+	}
 	s.markUnseen(ctx, libraryID, root, seenRel)
+	s.setCataloguing(libraryID, false)
+	cataloguing = false
 
 	for _, f := range files {
 		s.probeWhenStable(ctx, libraryID, f.abs, f.rel)
@@ -189,24 +245,41 @@ type foundFile struct {
 	info     os.FileInfo
 }
 
-func (s *Scanner) catalogueBatch(ctx context.Context, libraryID, root string, files []foundFile) (int, error) {
+func (s *Scanner) catalogueBatch(ctx context.Context, libraryID, root, contentType string, files []foundFile) (int, int, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	added := 0
+	added, rejected := 0, 0
 	for _, f := range files {
-		n, err := s.upsertFile(ctx, tx, libraryID, root, f.abs, f.rel, f.info)
+		n, err := s.upsertFile(ctx, tx, libraryID, root, contentType, f.abs, f.rel, f.info)
+		if errors.Is(err, ErrWrongKind) {
+			rejected++
+			continue
+		}
 		if err != nil {
-			return added, err
+			return added, rejected, err
 		}
 		added += n
 	}
-	return added, tx.Commit()
+	return added, rejected, tx.Commit()
 }
 
-func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, abs, rel string, info os.FileInfo) (int, error) {
+// kindFits reports whether a Movies, TV Shows or Mixed library accepts a
+// file of kind. Extras belong to movies, but a TV library keeps them as
+// plain extras rather than inventing movies for them.
+func kindFits(contentType, kind string) bool {
+	switch contentType {
+	case "movies":
+		return kind != KindEpisode
+	case "tv":
+		return kind == KindEpisode || kind == KindExtra
+	}
+	return true
+}
+
+func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, contentType, abs, rel string, info os.FileInfo) (int, error) {
 	parsed := Parse(rel)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mtime := info.ModTime().UTC().Format(time.RFC3339)
@@ -225,6 +298,11 @@ func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, a
 	_ = tx.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&existing)
 	if existing != "" {
 		_ = tx.QueryRowContext(ctx, `SELECT COALESCE(movie_id, '') FROM media_files WHERE id = ?`, existing).Scan(&existingMovieID)
+	}
+	// Files already catalogued keep working whatever the library type; new
+	// files must match it.
+	if existing == "" && !kindFits(contentType, kind) {
+		return 0, ErrWrongKind
 	}
 	added := 0
 	fileID := existing
@@ -265,6 +343,9 @@ func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, a
 			return 0, err
 		}
 	case KindExtra:
+		if contentType == "tv" {
+			break
+		}
 		if movieID, err := s.guessExtraMovie(ctx, tx, libraryID, rel, parsed, now); err == nil && movieID != "" {
 			_, _ = tx.ExecContext(ctx, `UPDATE media_files SET movie_id = ? WHERE id = ?`, movieID, fileID)
 		}
@@ -537,9 +618,47 @@ func (s *Scanner) rootOf(ctx context.Context, libraryID string) (string, error) 
 	return root, err
 }
 
+// libraryInfo returns a library's folder and content type.
+func (s *Scanner) libraryInfo(ctx context.Context, libraryID string) (string, string, error) {
+	if s.Libs != nil {
+		lib, err := s.Libs.Get(ctx, libraryID)
+		if err != nil {
+			return "", "", err
+		}
+		return lib.RootPath, lib.ContentType, nil
+	}
+	var root, ct string
+	err := s.DB.QueryRowContext(ctx, `SELECT root_path, content_type FROM libraries WHERE id = ?`, libraryID).Scan(&root, &ct)
+	return root, ct, err
+}
+
+// nestedRoots lists other libraries' folders inside root. A scan skips
+// them so one file is never catalogued by two libraries, which also lets a
+// new library live inside an older, broader one while titles move over.
+func (s *Scanner) nestedRoots(ctx context.Context, libraryID, root string) map[string]bool {
+	out := map[string]bool{}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, root_path FROM libraries WHERE id <> ?`, libraryID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	clean := filepath.Clean(root)
+	for rows.Next() {
+		var id, other string
+		if rows.Scan(&id, &other) != nil || other == "" {
+			continue
+		}
+		other = filepath.Clean(other)
+		if rel, err := filepath.Rel(clean, other); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+			out[other] = true
+		}
+	}
+	return out
+}
+
 // IngestFile catalogues a single new file (upload / watch) then probes it.
 func (s *Scanner) IngestFile(ctx context.Context, libraryID, absPath string) error {
-	root, err := s.rootOf(ctx, libraryID)
+	root, contentType, err := s.libraryInfo(ctx, libraryID)
 	if err != nil {
 		return err
 	}
@@ -562,7 +681,7 @@ func (s *Scanner) IngestFile(ctx context.Context, libraryID, absPath string) err
 	if err != nil {
 		return err
 	}
-	if _, err := s.upsertFile(ctx, tx, libraryID, root, absPath, rel, info); err != nil {
+	if _, err := s.upsertFile(ctx, tx, libraryID, root, contentType, absPath, rel, info); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

@@ -6,19 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/viewdock/viewdock/internal/audit"
 	"github.com/viewdock/viewdock/internal/config"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
+	"github.com/viewdock/viewdock/internal/mediafs"
 )
 
 var (
 	ErrInvalidContentType = errors.New("content_type must be movies, tv, or mixed")
 	ErrNameRequired       = errors.New("name required")
 	ErrNotFound           = errors.New("not found")
+	ErrRootInUse          = errors.New("another library already uses this folder")
 )
 
 // Service is the catalogue + library admin implementation.
@@ -33,7 +38,12 @@ type Service struct {
 	// when unset.
 	Audit *audit.Log
 	Cfg   config.Config
-	scan  ScanStart
+	// Storage holds the roots library folders may live under. Library
+	// folders are validated against it and created by ViewDock itself; with
+	// no roots configured no library can be created or re-pointed.
+	Storage mediafs.Roots
+	scan    ScanStart
+	moves   moveState
 }
 
 // NewService constructs a library Service. grants, prober, and thumber may be nil.
@@ -60,7 +70,7 @@ func (s *Service) Create(ctx context.Context, name, rootPath, contentType string
 	if err := validContentType(contentType); err != nil {
 		return Library{}, err
 	}
-	resolved, err := ResolveRoot(rootPath)
+	resolved, created, err := s.prepareRoot(ctx, rootPath, name, "")
 	if err != nil {
 		return Library{}, err
 	}
@@ -79,6 +89,9 @@ func (s *Service) Create(ctx context.Context, name, rootPath, contentType string
 		VALUES (?, ?, ?, ?, 1, ?, ?)
 	`, lib.ID, lib.Name, lib.RootPath, lib.ContentType, now, now)
 	if err != nil {
+		if created {
+			_ = os.Remove(resolved) // only succeeds while still empty
+		}
 		return Library{}, err
 	}
 	_, _ = s.DB.ExecContext(ctx, `
@@ -86,6 +99,75 @@ func (s *Service) Create(ctx context.Context, name, rootPath, contentType string
 		SELECT id, ?, 0 FROM roles WHERE name = 'User'
 	`, lib.ID)
 	return lib, nil
+}
+
+// prepareRoot validates a requested library folder against the storage
+// roots, creates it (with parents, owner and mode) when missing, proves it is
+// writable and returns its link-free absolute path. selfID is the library
+// being edited, if any, so it does not conflict with itself.
+func (s *Service) prepareRoot(ctx context.Context, requested, name, selfID string) (string, bool, error) {
+	target, err := s.Storage.Resolve(requested, name)
+	if err != nil {
+		return "", false, err
+	}
+	if err := s.rootAvailable(ctx, target, selfID); err != nil {
+		return "", false, err
+	}
+	created, err := s.Storage.EnsureDir(target)
+	if err != nil {
+		return "", created, err
+	}
+	resolved, err := ResolveRoot(target)
+	if err != nil {
+		return "", created, err
+	}
+	if err := s.rootAvailable(ctx, resolved, selfID); err != nil {
+		return "", created, err
+	}
+	if err := s.notCatalogued(ctx, resolved, selfID); err != nil {
+		return "", created, err
+	}
+	return resolved, created, nil
+}
+
+// notCatalogued refuses a folder whose files another library already lists
+// (a library at /media holding /media/movies), which would catalogue the
+// same files twice. Such titles are moved with Move content instead.
+func (s *Service) notCatalogued(ctx context.Context, dir, selfID string) error {
+	var name string
+	var n int
+	// An exact, case-sensitive prefix match (LIKE ignores case in SQLite).
+	prefix := filepath.Clean(dir) + string(os.PathSeparator)
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT l.name, COUNT(*) FROM media_files mf JOIN libraries l ON l.id = mf.library_id
+		WHERE mf.library_id <> ? AND substr(mf.abs_path, 1, ?) = ?
+		GROUP BY l.name ORDER BY COUNT(*) DESC LIMIT 1
+	`, selfID, utf8.RuneCountInString(prefix), prefix).Scan(&name, &n)
+	if err != nil || n == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s already lists %s in this folder; choose a new folder and use Move content to move them", name, plural(n, "file", "files"))
+}
+
+// rootAvailable rejects a folder that another library (local or remote)
+// already uses as its root.
+func (s *Service) rootAvailable(ctx context.Context, dir, selfID string) error {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, root_path FROM libraries`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	want := filepath.Clean(dir)
+	for rows.Next() {
+		var id, root string
+		if err := rows.Scan(&id, &root); err != nil {
+			return err
+		}
+		if id != selfID && root != "" && filepath.Clean(root) == want {
+			return ErrRootInUse
+		}
+	}
+	return rows.Err()
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Library, error) {
@@ -131,6 +213,9 @@ func (s *Service) Update(ctx context.Context, id string, patch Patch) (Library, 
 	if err != nil {
 		return Library{}, err
 	}
+	if (patch.RootPath != nil || patch.ContentType != nil) && s.MoveBusy(id) {
+		return Library{}, ErrMoveBusy
+	}
 	if patch.Name != nil {
 		n := strings.TrimSpace(*patch.Name)
 		if n == "" {
@@ -142,10 +227,15 @@ func (s *Service) Update(ctx context.Context, id string, patch Patch) (Library, 
 		if err := validContentType(*patch.ContentType); err != nil {
 			return Library{}, err
 		}
+		if *patch.ContentType != lib.ContentType {
+			if err := s.typeChangeAllowed(ctx, id, *patch.ContentType); err != nil {
+				return Library{}, err
+			}
+		}
 		lib.ContentType = *patch.ContentType
 	}
-	if patch.RootPath != nil {
-		resolved, err := ResolveRoot(*patch.RootPath)
+	if patch.RootPath != nil && filepath.Clean(strings.TrimSpace(*patch.RootPath)) != filepath.Clean(lib.RootPath) {
+		resolved, _, err := s.prepareRoot(ctx, *patch.RootPath, lib.Name, id)
 		if err != nil {
 			return Library{}, err
 		}
@@ -170,6 +260,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
+	if s.MoveBusy(id) {
+		return ErrMoveBusy
+	}
 	if err := DeleteLibraryFTS(ctx, s.DB, id); err != nil {
 		return err
 	}
@@ -192,6 +285,43 @@ func (s *Service) StartScan(ctx context.Context, libraryID string) (string, erro
 		return "", err
 	}
 	return s.scan.StartScan(ctx, libraryID)
+}
+
+// typeChangeAllowed refuses a content type that the library's existing
+// titles would violate, so a library's type always describes its content.
+func (s *Service) typeChangeAllowed(ctx context.Context, libraryID, contentType string) error {
+	var movies, shows int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM movies WHERE library_id = ?`, libraryID).Scan(&movies)
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM series WHERE library_id = ?`, libraryID).Scan(&shows)
+	switch {
+	case contentType == "movies" && shows > 0:
+		return &TypeConflictError{ContentType: contentType, Count: shows, Kind: "series"}
+	case contentType == "tv" && movies > 0:
+		return &TypeConflictError{ContentType: contentType, Count: movies, Kind: "movie"}
+	}
+	return nil
+}
+
+// TypeConflictError explains why a library cannot switch content type.
+type TypeConflictError struct {
+	ContentType string
+	Kind        string
+	Count       int
+}
+
+func (e *TypeConflictError) Error() string {
+	what := plural(e.Count, "TV show", "TV shows")
+	if e.Kind == "movie" {
+		what = plural(e.Count, "movie", "movies")
+	}
+	return fmt.Sprintf("this library still contains %s, which a %s library cannot hold; move them to a compatible library first", what, ContentTypeLabel(e.ContentType))
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 func validContentType(ct string) error {
@@ -270,8 +400,30 @@ func (s *Service) artworkURL(ctx context.Context, kind, itemKind, itemID string)
 	if err != nil || path == "" {
 		return nil
 	}
+	return artworkPath(kind, itemKind, itemID)
+}
+
+func artworkPath(kind, itemKind, itemID string) *string {
 	u := fmt.Sprintf("/api/v1/artwork/%s/%s/%s", kind, itemKind, itemID)
 	return &u
+}
+
+// artworkSet lists, in one query, the items of itemKind that have artwork
+// of kind, for lists that would otherwise ask once per title.
+func (s *Service) artworkSet(ctx context.Context, kind, itemKind string) map[string]bool {
+	out := map[string]bool{}
+	rows, err := s.DB.QueryContext(ctx, `SELECT item_id FROM artwork WHERE kind = ? AND item_kind = ? AND path <> ''`, kind, itemKind)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out[id] = true
+		}
+	}
+	return out
 }
 
 func (s *Service) openContained(absPath, libraryID string) (*os.File, error) {

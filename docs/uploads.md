@@ -16,7 +16,7 @@ Abandoned `open` sessions expire after 24 hours of inactivity. Completed, failed
 
 `/media` must be **read-write**. A leftover `:ro` mount will fail when the file is placed. `viewdock doctor` reports that.
 
-Uploads never recursively chown the media folder.
+Uploads never recursively chown the media folder. Library folders are created by ViewDock with the right owner, and the container entrypoint repairs root-owned library folders on every start, so "library folder is not writable" should not happen; if it does, the error names the folder and its owner.
 
 ## Reverse proxies and Cloudflare
 

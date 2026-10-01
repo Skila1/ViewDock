@@ -184,6 +184,10 @@ type itemPoster interface {
 	ItemPoster(ctx context.Context, itemKind, itemID string) *string
 }
 
+type itemCarder interface {
+	ItemCard(ctx context.Context, itemKind, itemID string) (library.Card, error)
+}
+
 // continueItems drops progress for titles that no longer exist or that the
 // user may no longer see, and names the rest.
 func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progress.Record) []progress.Record {
@@ -197,6 +201,7 @@ func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progr
 		return out
 	}
 	posters, _ := a.Catalog.(itemPoster)
+	carder, _ := a.Catalog.(itemCarder)
 	for _, rec := range list {
 		if len(out) == continueLimit {
 			break
@@ -220,6 +225,11 @@ func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progr
 		}
 		if posters != nil {
 			rec.PosterURL = posters.ItemPoster(ctx, rec.ItemKind, rec.ItemID)
+		}
+		if carder != nil {
+			if card, err := carder.ItemCard(ctx, rec.ItemKind, rec.ItemID); err == nil {
+				rec.Card = &card
+			}
 		}
 		out = append(out, rec)
 	}

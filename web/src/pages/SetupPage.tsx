@@ -4,6 +4,7 @@ import { Logo } from "@/components/brand/Logo";
 import { api } from "@/api/api";
 import { useAuth } from "@/store/auth";
 import type { ContentType, DetectResult, Library } from "@/types/api.gen";
+import { managedFolder } from "@/features/admin/moveContent";
 
 const STEPS = ["admin", "library", "ffmpeg", "tmdb", "scan", "done"] as const;
 type Step = (typeof STEPS)[number];
@@ -22,6 +23,7 @@ export function SetupPage() {
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [libName, setLibName] = useState("Library");
+  const [wholeMedia, setWholeMedia] = useState(false);
   const [libPath, setLibPath] = useState("");
   const [mediaDir, setMediaDir] = useState(system?.media_dir ?? "");
   const [contentType, setContentType] = useState<ContentType>("mixed");
@@ -64,7 +66,8 @@ export function SetupPage() {
     try {
       const lib = await api.setupLibrary({
         name: libName,
-        path: libPath || mediaDir,
+        // Empty: ViewDock creates and manages <media folder>/<name>.
+        path: wholeMedia ? libPath || mediaDir : "",
         content_type: contentType,
       });
       setLibrary(lib);
@@ -131,11 +134,17 @@ export function SetupPage() {
         <form onSubmit={onLibrary} className="space-y-3">
           <input className="w-full" placeholder="Library name" value={libName} onChange={(e) => setLibName(e.target.value)} required />
           <p className="rounded-md border border-line bg-raised px-3 py-2 text-sm text-dim">
-            Folder: <span className="text-fg">{mediaDir || libPath || "/media"}</span>
+            Folder: <span className="text-ink">{wholeMedia ? mediaDir || libPath || "/media" : managedFolder(mediaDir, libName)}</span>
             <span className="mt-1 block text-xs">
-              Using the folder already mounted into ViewDock. Put files in your host media directory (the compose <code className="text-accent">./media</code> volume).
+              {wholeMedia
+                ? "Uses the whole media folder mounted into ViewDock (the compose ./media volume), including files already there."
+                : "ViewDock creates this folder inside the media folder (the compose ./media volume) and sets its permissions. Nothing to create by hand."}
             </span>
           </p>
+          <label className="flex items-center gap-2 text-xs text-dim">
+            <input type="checkbox" checked={wholeMedia} onChange={(e) => setWholeMedia(e.target.checked)} />
+            Use the whole media folder instead (for files already in ./media)
+          </label>
           <label className="block text-xs text-dim">
             content_type
             <select
@@ -144,9 +153,9 @@ export function SetupPage() {
               onChange={(e) => setContentType(e.target.value as ContentType)}
               required
             >
-              <option value="movies">movies</option>
-              <option value="tv">tv</option>
-              <option value="mixed">mixed</option>
+              <option value="movies">Movies (movies only)</option>
+              <option value="tv">TV Shows (TV shows only)</option>
+              <option value="mixed">Mixed (movies and TV shows)</option>
             </select>
           </label>
           <button className="btn-green rounded-full px-4 py-2 text-sm" type="submit">

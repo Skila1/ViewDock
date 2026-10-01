@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/viewdock/viewdock/internal/db"
+	"github.com/viewdock/viewdock/internal/mediafs"
 )
 
 func testDB(t *testing.T) (*Service, string) {
@@ -21,7 +22,10 @@ func testDB(t *testing.T) (*Service, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB.Close() })
-	return NewService(sqlDB, nil, nil, nil, filepath.Join(dir, "cache")), dir
+	svc := NewService(sqlDB, nil, nil, nil, filepath.Join(dir, "cache"))
+	// Tests place library folders in their own temp dirs.
+	svc.Storage = mediafs.Roots{Paths: []string{os.TempDir()}}
+	return svc, dir
 }
 
 func TestCreateRequiresContentType(t *testing.T) {

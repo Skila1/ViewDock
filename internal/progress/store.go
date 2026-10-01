@@ -1,6 +1,10 @@
 package progress
 
-import "context"
+import (
+	"context"
+
+	"github.com/viewdock/viewdock/internal/library"
+)
 
 type Record struct {
 	ItemKind    string  `json:"item_kind"`
@@ -13,6 +17,9 @@ type Record struct {
 	UpdatedAt   string  `json:"updated_at"`
 	Title       string  `json:"title,omitempty"`
 	PosterURL   *string `json:"poster_url,omitempty"`
+	// Card names the item for the home page (show, "S1:E5 - Title" or the
+	// year) and carries its artwork. Only Continue Watching fills it.
+	Card *library.Card `json:"card,omitempty"`
 }
 
 type Store interface {

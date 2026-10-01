@@ -15,6 +15,10 @@
 | `VD_COORDINATOR_URL` | empty | On `all` or `control`: base URL of a separate `VD_ROLE=coordinator` process (for example `http://viewdock-coordinator:8080`). When empty, watch parties run inside the control plane |
 | `VD_COORDINATOR_SECRET` | empty | Shared secret (at least 32 characters) that signs requests between control planes and the coordinator. Required on both sides when a separate coordinator is used |
 | `VD_CONTROL_URL` | empty | Required with `VD_ROLE=frontend`: base URL of the control plane, `http` or `https` with a host and optional port only (for example `http://viewdock-control:8080`) |
+| `PUID`, `PGID` | `1000` | Account ViewDock runs as inside the container, and owner of the folders it creates |
+| `VD_LIBRARY_ROOTS` | empty | Extra storage roots (mounted into the container) that library folders may live in, separated by `:` or `,`. `VD_MEDIA_DIR` (`/media`) is always allowed. Libraries can never point outside these roots |
+| `VD_FIX_PERMISSIONS` | `true` | On start, give the ViewDock account the media roots and any library, show or season folder that root created in them. Files and folders owned by other accounts are never changed. `false` turns it off |
+| `VD_FIX_PERMISSIONS_DEPTH` | `4` | How many folder levels below each media root that start-up check visits |
 | `VD_NODE_SECRET` | empty | Worker credential issued under **Admin → Nodes** (at least 32 characters). Workers reject every request not signed with it, except `/healthz` |
 
 ### Media workers

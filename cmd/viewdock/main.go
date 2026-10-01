@@ -37,6 +37,9 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "prepare-storage" {
+		os.Exit(prepareStorage(config.Load(), os.Stdout))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		os.Exit(backup.RunCLI(context.Background(), os.Args[2:], config.Load(), os.Stdout, os.Stderr))
 	}
@@ -78,6 +81,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	warnUnwritable(cfg, logger)
 
 	provider, err := db.OpenProvider(context.Background(), db.ProviderConfig{
 		Dialect:       db.Dialect(cfg.DatabaseDriver),

@@ -23,6 +23,7 @@ type Movie struct {
 	RatingAge      *int     `json:"rating_age"`
 	RatingSource   string   `json:"rating_source,omitempty"`
 	PosterURL      *string  `json:"poster_url"`
+	BackdropURL    *string  `json:"backdrop_url,omitempty"`
 	Genres         []string `json:"genres"`
 	Anime          bool     `json:"anime"`
 	AddedAt        string   `json:"added_at,omitempty"`
@@ -45,6 +46,7 @@ type Series struct {
 	RatingAge      *int     `json:"rating_age"`
 	RatingSource   string   `json:"rating_source,omitempty"`
 	PosterURL      *string  `json:"poster_url"`
+	BackdropURL    *string  `json:"backdrop_url,omitempty"`
 	Genres         []string `json:"genres"`
 	Anime          bool     `json:"anime"`
 	AddedAt        string   `json:"added_at,omitempty"`
@@ -94,6 +96,7 @@ func (s *Service) ListMovies(ctx context.Context, grantedIDs []string) ([]Movie,
 		return nil, err
 	}
 	q += where + ` ORDER BY sort_title, title`
+	backdrops := s.artworkSet(ctx, "backdrop", "movie")
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -106,6 +109,9 @@ func (s *Service) ListMovies(ctx context.Context, grantedIDs []string) ([]Movie,
 			return nil, err
 		}
 		m.PosterURL = s.artworkURL(ctx, "poster", "movie", m.ID)
+		if backdrops[m.ID] {
+			m.BackdropURL = artworkPath("backdrop", "movie", m.ID)
+		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -153,6 +159,7 @@ func (s *Service) ListSeries(ctx context.Context, grantedIDs []string) ([]Series
 		return nil, err
 	}
 	q += where + ` ORDER BY sort_title, title`
+	backdrops := s.artworkSet(ctx, "backdrop", "series")
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -165,6 +172,9 @@ func (s *Service) ListSeries(ctx context.Context, grantedIDs []string) ([]Series
 			return nil, err
 		}
 		ser.PosterURL = s.artworkURL(ctx, "poster", "series", ser.ID)
+		if backdrops[ser.ID] {
+			ser.BackdropURL = artworkPath("backdrop", "series", ser.ID)
+		}
 		out = append(out, ser)
 	}
 	if err := rows.Err(); err != nil {

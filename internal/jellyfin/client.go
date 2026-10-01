@@ -252,6 +252,7 @@ type item struct {
 	OfficialRating    string            `json:"OfficialRating"`
 	ProviderIDs       map[string]string `json:"ProviderIds"`
 	ImageTags         map[string]string `json:"ImageTags"`
+	BackdropImageTags []string          `json:"BackdropImageTags"`
 	SeriesID          string            `json:"SeriesId"`
 	ParentIndexNumber *int              `json:"ParentIndexNumber"`
 	IndexNumber       *int              `json:"IndexNumber"`
@@ -289,7 +290,7 @@ func (c *client) items(ctx context.Context, userID, parentID, types string) ([]i
 			"IncludeItemTypes": {types}, "IsMissing": {"false"},
 			"Fields":     {"Overview,ProviderIds,OfficialRating,ProductionYear,Genres"},
 			"StartIndex": {fmt.Sprint(start)}, "Limit": {fmt.Sprint(page)},
-			"EnableImageTypes": {"Primary"}, "ImageTypeLimit": {"1"},
+			"EnableImageTypes": {"Primary,Backdrop"}, "ImageTypeLimit": {"1"},
 		}
 		var out struct {
 			Items []item `json:"Items"`
@@ -322,17 +323,24 @@ func (c *client) playable(ctx context.Context, userID, remoteID string) (item, e
 }
 
 // image downloads an item's primary image.
-func (c *client) image(ctx context.Context, remoteID, tag string) ([]byte, string, error) {
+// image downloads one of an item's images; imageType is "Primary" (poster
+// or episode still) or "Backdrop".
+func (c *client) image(ctx context.Context, remoteID, imageType, tag string) ([]byte, string, error) {
 	if err := c.allow(opImages); err != nil {
 		return nil, "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	q := url.Values{"maxHeight": {"900"}, "quality": {"90"}}
+	path := "/Items/" + url.PathEscape(remoteID) + "/Images/Primary"
+	if imageType == "Backdrop" {
+		q = url.Values{"maxWidth": {"1280"}, "quality": {"85"}}
+		path = "/Items/" + url.PathEscape(remoteID) + "/Images/Backdrop/0"
+	}
 	if tag != "" {
 		q.Set("tag", tag)
 	}
-	req, err := c.request(ctx, http.MethodGet, "/Items/"+url.PathEscape(remoteID)+"/Images/Primary", q, nil)
+	req, err := c.request(ctx, http.MethodGet, path, q, nil)
 	if err != nil {
 		return nil, "", err
 	}

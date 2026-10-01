@@ -133,6 +133,8 @@ type mapped struct {
 
 type artJob struct {
 	kind, itemKind, itemID, remoteID, tag string
+	// imageType is the Jellyfin image to fetch; "" means Primary.
+	imageType string
 }
 
 func (s *Service) syncSource(ctx context.Context, src Source) (int, error) {
@@ -181,12 +183,17 @@ func (s *Service) syncSource(ctx context.Context, src Source) (int, error) {
 			return "", err
 		}
 		keep[it.ID] = true
-		if src.Policy.Images && tag != "" && (tag != m.imageTag || !s.hasArtwork(ctx, kind, id)) {
-			artKind := "poster"
-			if kind == "episode" {
-				artKind = "thumb"
-			}
+		artKind := "poster"
+		if kind == "episode" {
+			artKind = "thumb"
+		}
+		if src.Policy.Images && tag != "" && (tag != m.imageTag || !s.hasArtwork(ctx, kind, id, artKind)) {
 			art = append(art, artJob{kind: artKind, itemKind: kind, itemID: id, remoteID: it.ID, tag: tag})
+		}
+		// Wide artwork for the home page's Continue Watching and library
+		// tiles. Fetched once; Jellyfin rarely replaces a backdrop.
+		if src.Policy.Images && kind != "episode" && len(it.BackdropImageTags) > 0 && !s.hasArtwork(ctx, kind, id, "backdrop") {
+			art = append(art, artJob{kind: "backdrop", imageType: "Backdrop", itemKind: kind, itemID: id, remoteID: it.ID, tag: it.BackdropImageTags[0]})
 		}
 		return id, nil
 	}
@@ -366,9 +373,9 @@ func ratingOf(official string) (string, any) {
 	return cert, nil
 }
 
-func (s *Service) hasArtwork(ctx context.Context, itemKind, itemID string) bool {
+func (s *Service) hasArtwork(ctx context.Context, itemKind, itemID, kind string) bool {
 	var n int
-	_ = s.DB.QueryRowContext(ctx, `SELECT 1 FROM artwork WHERE item_kind = ? AND item_id = ?`, itemKind, itemID).Scan(&n)
+	_ = s.DB.QueryRowContext(ctx, `SELECT 1 FROM artwork WHERE item_kind = ? AND item_id = ? AND kind = ?`, itemKind, itemID, kind).Scan(&n)
 	return n == 1
 }
 
@@ -382,7 +389,7 @@ func (s *Service) fetchArtwork(ctx context.Context, src Source, job artJob) erro
 	var ctype string
 	err := s.withClient(ctx, src, func(c *client, _ string) error {
 		var err error
-		raw, ctype, err = c.image(ctx, job.remoteID, job.tag)
+		raw, ctype, err = c.image(ctx, job.remoteID, job.imageType, job.tag)
 		return err
 	})
 	if err != nil {
@@ -416,6 +423,9 @@ func (s *Service) fetchArtwork(ctx context.Context, src Source, job artJob) erro
 		ON CONFLICT(item_kind, item_id, kind) DO UPDATE SET path = excluded.path, source = excluded.source
 	`, uuid.NewString(), job.itemKind, job.itemID, job.kind, filepath.ToSlash(rel)); err != nil {
 		return err
+	}
+	if job.imageType != "" {
+		return nil // image_tag tracks the Primary image only
 	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE remote_items SET image_tag = ? WHERE source_id = ? AND remote_id = ?`, job.tag, src.ID, job.remoteID)
 	return err

@@ -19,6 +19,7 @@ import type {
   RoleRow,
   SessionRow,
   Episode,
+  HomeCard,
   Inspector,
   InviteRow,
   Library,
@@ -26,6 +27,9 @@ import type {
   Me,
   Movie,
   MovieDetail,
+  MoveJob,
+  MovePlan,
+  MoveRequest,
   PlaybackSession,
   Preferences,
   ProgressPut,
@@ -149,6 +153,9 @@ export const api = {
     request<Library>(`/api/v1/libraries/${id}`, { method: "PATCH", body }),
   scanLibrary: (id: string) => request(`/api/v1/libraries/${id}/scan`, { method: "POST", body: {} }),
   deleteLibrary: (id: string) => request(`/api/v1/libraries/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  previewMove: (body: MoveRequest) => request<MovePlan>("/api/v1/library-moves/preview", { method: "POST", body }),
+  startMove: (body: MoveRequest) => request<MoveJob>("/api/v1/library-moves", { method: "POST", body }),
+  getMoveJob: (id: string) => request<MoveJob>(`/api/v1/library-moves/${encodeURIComponent(id)}`),
   matchTitle: (kind: "movie" | "series", id: string, tmdbId: number) =>
     request(`/api/v1/${kind === "movie" ? "movies" : "series"}/${encodeURIComponent(id)}/match`, { method: "POST", body: { tmdb_id: tmdbId } }),
   uploadPoster: (kind: "movie" | "series", id: string, file: File) =>
@@ -172,6 +179,7 @@ export const api = {
     request<SearchResponse>(`/api/v1/search/smart?q=${encodeURIComponent(q)}`),
 
   continueWatching: async () => asArray<ProgressRecord>(await request("/api/v1/playback/continue")),
+  nextUp: async () => asArray<HomeCard>(await request("/api/v1/next-up")),
 
   createSession: async (body: {
     item_kind: "movie" | "episode";

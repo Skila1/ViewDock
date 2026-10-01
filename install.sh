@@ -928,8 +928,11 @@ cmd_install() {
 
   install_docker
   mkdir -p "${PREFIX}/config" "${PREFIX}/config/uploads" "${PREFIX}/cache" "${PREFIX}/transcode" "${PREFIX}/media" "${PREFIX}/update"
-  chmod 0777 "${PREFIX}/update" "${PREFIX}/media" "${PREFIX}/config/uploads" || true
+  chmod 0777 "${PREFIX}/update" || true
+  # ViewDock runs as 1000:1000 and creates its own library folders under
+  # media/. The container entrypoint re-checks this on every start.
   chown 1000:1000 "${PREFIX}/media" "${PREFIX}/config/uploads" 2>/dev/null || true
+  chmod 0755 "${PREFIX}/media" "${PREFIX}/config/uploads" || true
   mkdir -p "${CFG_MEDIAHOST}"
   local dockergid
   dockergid="$(docker_sock_gid)"
@@ -1063,10 +1066,12 @@ cmd_doctor() {
     else
       echo "upload staging ok: ${PREFIX}/config/uploads"
     fi
-    if [[ ! -w "${PREFIX}/media" ]]; then
-      echo "media folder not writable: ${PREFIX}/media (Admin uploads need a read-write /media mount)"
-    else
-      echo "media folder writable: ${PREFIX}/media"
+    echo "media folder owner: $(stat -c '%u:%g %a' "${PREFIX}/media" 2>/dev/null || echo unknown) (ViewDock runs as 1000:1000)"
+    local rootowned
+    rootowned="$(find "${PREFIX}/media" -maxdepth 4 -type d -uid 0 2>/dev/null | head -5 || true)"
+    if [[ -n "${rootowned}" ]]; then
+      echo "folders owned by root under media (ViewDock repairs these when the container restarts):"
+      printf '%s\n' "${rootowned}" | sed 's/^/  /'
     fi
     if grep -q '/media:ro' "${PREFIX}/docker-compose.yml" 2>/dev/null; then
       echo "docker-compose.yml still mounts /media:ro; change it to /media so uploads can write"

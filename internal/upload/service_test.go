@@ -16,6 +16,7 @@ import (
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/mediafs"
 	"github.com/viewdock/viewdock/internal/scan"
 )
 
@@ -60,6 +61,7 @@ func setupUp(t *testing.T) (*Service, *library.Service, string, *fakeIngest, *fa
 		t.Fatal(err)
 	}
 	libs := library.NewService(sqlDB, nil, nil, nil, "")
+	libs.Storage = mediafs.Roots{Paths: []string{os.TempDir()}}
 	ing := &fakeIngest{}
 	pr := &fakeProbe{}
 	up := New(sqlDB, libs, ing, pr, filepath.Join(dir, "staging"))
@@ -326,6 +328,7 @@ func TestHappyPathIndexesMovie(t *testing.T) {
 	}
 	ff := ffmpeg.New()
 	libs := library.NewService(sqlDB, nil, ff, ff, dir)
+	libs.Storage = mediafs.Roots{Paths: []string{os.TempDir()}}
 	sc := scan.New(sqlDB, libs, ff)
 	libs.SetScan(sc)
 	up := New(sqlDB, libs, sc, ff, filepath.Join(dir, "staging"))

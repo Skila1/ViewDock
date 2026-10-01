@@ -149,7 +149,7 @@ function PolicyEditor({ value, onChange }: { value: MediaSourcePolicy; onChange:
           disabled={!value.stream}
           onChange={(e) => set({ max_streams: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
         />
-        <span className="block text-[11px] text-dim">0 means no limit.</span>
+        <span className="block text-[11px] text-dim">ViewDock's own cap, separate from Jellyfin. Every viewer uses one stream, including each member of a watch party or Discord activity. 0 means no limit.</span>
       </label>
     </fieldset>
   );

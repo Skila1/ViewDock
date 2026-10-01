@@ -10,6 +10,7 @@ import (
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/mediafs"
 )
 
 type stubProber struct{}
@@ -46,6 +47,7 @@ func TestScanCataloguesMovieAndExtra(t *testing.T) {
 	}
 
 	libs := library.NewService(sqlDB, nil, nil, nil, "")
+	libs.Storage = mediafs.Roots{Paths: []string{os.TempDir()}}
 	lib, err := libs.Create(context.Background(), "Movies", root, "movies")
 	if err != nil {
 		t.Fatal(err)

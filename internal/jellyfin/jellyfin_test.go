@@ -83,7 +83,7 @@ func fakeJellyfinCalls(t *testing.T) (*httptest.Server, *fakeCalls) {
 		}
 		_, _ = w.Write([]byte(`{"TotalRecordCount":4,"Items":[
 			{"Id":"m1","Name":"Dune","Type":"Movie","ProductionYear":2021,"ProviderIds":{"Tmdb":"438631"},"OfficialRating":"PG-13"},
-			{"Id":"m2","Name":"Only Remote","Type":"Movie","ProductionYear":2020,"ImageTags":{"Primary":"t1"},"Genres":["Comedy","comedy"]},
+			{"Id":"m2","Name":"Only Remote","Type":"Movie","ProductionYear":2020,"ImageTags":{"Primary":"t1"},"BackdropImageTags":["b1"],"Genres":["Comedy","comedy"]},
 			{"Id":"s1","Name":"Show","Type":"Series","ProductionYear":2019,"Genres":["Anime"]},
 			{"Id":"e1","Name":"Pilot","Type":"Episode","SeriesId":"s1","ParentIndexNumber":1,"IndexNumber":1}]}`))
 	})
@@ -91,6 +91,14 @@ func fakeJellyfinCalls(t *testing.T) (*httptest.Server, *fakeCalls) {
 		calls.images++
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("png"))
+	})
+	mux.HandleFunc("/Items/m2/Images/Backdrop/0", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("tag") != "b1" {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("jpg"))
 	})
 	mux.HandleFunc("/Videos/m1/master.m3u8", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(r) || r.URL.Query().Get("api_key") != "" {
@@ -236,6 +244,12 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	var backdrops int
+	_ = sqlDB.QueryRow(`SELECT COUNT(*) FROM artwork a JOIN remote_items ri ON ri.item_id = a.item_id
+		WHERE a.kind = 'backdrop' AND ri.remote_id = 'm2' AND a.source = 'jellyfin'`).Scan(&backdrops)
+	if backdrops != 1 {
+		t.Fatalf("Jellyfin backdrop not stored: %d", backdrops)
+	}
 	if src.ItemCount != 3 {
 		t.Fatalf("item count %d", src.ItemCount)
 	}
@@ -365,8 +379,8 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 	if get(first.URL) != http.StatusGone {
 		t.Fatalf("replaced stream still open")
 	}
-	if _, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false); err == nil || !strings.Contains(err.Error(), "1 playback") {
-		t.Fatalf("another viewer should still hit the limit: %v", err)
+	if _, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false); err == nil || !strings.Contains(err.Error(), "ViewDock allows 1 stream at once") || !strings.Contains(err.Error(), "Maximum concurrent streams") {
+		t.Fatalf("another viewer should still hit the limit, named as ViewDock's own setting: %v", err)
 	}
 	svc.mu.Lock()
 	for _, g := range svc.grants {
@@ -403,5 +417,41 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 	svc.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("viewer holds %d streams, want 1", n)
+	}
+}
+
+// A watch party opens one stream per member. With no ViewDock cap
+// (max_streams 0, the default) every member plays at the same time.
+func TestWatchPartyMembersEachStreamWithoutCap(t *testing.T) {
+	sqlDB := testDB(t)
+	ctx := context.Background()
+	cipher, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jf := fakeJellyfin(t)
+	svc := New(sqlDB, func() *secrets.Cipher { return cipher }, t.TempDir(), nil)
+	rec := httptest.NewRecorder()
+	body := `{"url":"` + jf.URL + `","username":"viewdock","password":"pw","policy":{"images":true,"stream":true,"transcode":true,"max_streams":0}}`
+	svc.handleCreate(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = waitSynced(t, svc)
+	var remoteDune string
+	if err := sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range []string{"host", "guest-1", "guest-2", "guest-3", "guest-4"} {
+		st, _, err := svc.Resolve(playback.WithStreamOwner(ctx, member), "movie", remoteDune, "", "", false)
+		if err != nil || st == nil {
+			t.Fatalf("%s could not stream: %v", member, err)
+		}
+	}
+	svc.mu.Lock()
+	n := len(svc.grants)
+	svc.mu.Unlock()
+	if n != 5 {
+		t.Fatalf("party holds %d streams, want 5", n)
 	}
 }

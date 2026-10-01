@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/viewdock/viewdock/internal/library"
 )
 
 const (
@@ -32,19 +34,15 @@ type ParseResult struct {
 }
 
 var (
-	videoExt = map[string]bool{
-		".mkv": true, ".mp4": true, ".avi": true, ".m4v": true,
-		".mov": true, ".ts": true, ".m2ts": true, ".wmv": true,
-		".webm": true, ".mpg": true, ".mpeg": true, ".flv": true,
-	}
+	videoExt = library.VideoExtensions
 
 	skipExt = map[string]bool{
 		".part": true, ".!qb": true, ".aria2": true, ".filepart": true,
 		".tmp": true, ".crdownload": true,
 	}
 
-	reTVBlock   = regexp.MustCompile(`(?i)S(\d{1,2})((?:E\d{1,3})+)`)
-	reTVx       = regexp.MustCompile(`(?i)(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)`)
+	reTVBlock       = regexp.MustCompile(`(?i)S(\d{1,2})((?:E\d{1,3})+)`)
+	reTVx           = regexp.MustCompile(`(?i)(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)`)
 	reYearParen     = regexp.MustCompile(`\(((?:19|20)\d{2})\)`)
 	reYearAny       = regexp.MustCompile(`(?:19|20)\d{2}`)
 	reResAfter      = regexp.MustCompile(`(?i)^[\s._-]*[x×][\s._-]*\d{3,4}`)

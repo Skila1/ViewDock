@@ -141,9 +141,8 @@ func (a *API) library(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, 503, "setup", "library not wired")
 		return
 	}
-	if strings.TrimSpace(body.Path) == "" && a.Auth != nil {
-		body.Path = a.Auth.Cfg.MediaDir
-	}
+	// An empty path lets ViewDock create and own a folder named after the
+	// library inside the media folder.
 	if body.Name == "" {
 		body.Name = "Library"
 	}

@@ -24,11 +24,17 @@ const defaultTrustedProxies = "" +
 const defaultLANCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
 
 type Config struct {
-	HTTPAddr         string
-	ConfigDir        string
-	CacheDir         string
-	TranscodeDir     string
-	MediaDir         string
+	HTTPAddr     string
+	ConfigDir    string
+	CacheDir     string
+	TranscodeDir string
+	MediaDir     string
+	// LibraryRoots are the storage roots library folders may live under.
+	// MediaDir is always first; VD_LIBRARY_ROOTS adds more (path-list separated).
+	LibraryRoots []string
+	// PUID and PGID own the folders ViewDock creates when it runs as root.
+	PUID             int
+	PGID             int
 	DatabasePath     string
 	LogLevel         string
 	PublicURL        string
@@ -92,6 +98,9 @@ func Load() Config {
 		BusyTimeoutMS:  getenvInt("VD_SQLITE_BUSY_TIMEOUT_MS", 20000),
 		ShutdownWait:   getenvDur("VD_SHUTDOWN_WAIT", 45*time.Second),
 	}
+	cfg.LibraryRoots = parseRoots(cfg.MediaDir, os.Getenv("VD_LIBRARY_ROOTS"))
+	cfg.PUID = getenvInt("PUID", 1000)
+	cfg.PGID = getenvInt("PGID", 1000)
 	if p := os.Getenv("VD_DATABASE_PATH"); p != "" {
 		cfg.DatabasePath = p
 	} else {
@@ -116,6 +125,22 @@ func Load() Config {
 		cfg.CookieSecure = true
 	}
 	return cfg
+}
+
+// parseRoots returns mediaDir followed by each non-empty, not yet listed entry
+// of extra (separated by the OS path-list separator or commas).
+func parseRoots(mediaDir, extra string) []string {
+	out := []string{mediaDir}
+	seen := map[string]bool{mediaDir: true}
+	for _, part := range strings.FieldsFunc(extra, func(r rune) bool { return r == os.PathListSeparator || r == ',' }) {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
 }
 
 func Getenv(key, def string) string     { return getenv(key, def) }

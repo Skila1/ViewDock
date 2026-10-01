@@ -3,8 +3,9 @@ import { Link, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageUp } from "lucide-react";
 import { api } from "@/api/api";
-import type { Movie, Series } from "@/types/api.gen";
+import type { Library, Movie, MoveItemRef, Series } from "@/types/api.gen";
 import { ContentRatingControl } from "./ContentRatingControl";
+import { MoveContentDialog } from "./MoveContentDialog";
 import { NoteLine, PageHeader, Pill, errText, secondaryBtn, type Note } from "./ui";
 
 type Kind = "movie" | "series";
@@ -13,7 +14,24 @@ type Filter = "all" | "unmatched";
 
 const PAGE = 60;
 
-function TitleRow({ row, libraryName }: { row: Row; libraryName: string }) {
+const rowKey = (r: Row) => `${r.kind}:${r.title.id}`;
+
+function TitleRow({
+  row,
+  libraryName,
+  movable,
+  selected,
+  onSelect,
+  onMove,
+}: {
+  row: Row;
+  libraryName: string;
+  /** Local library titles can move; titles from external servers cannot. */
+  movable: boolean;
+  selected: boolean;
+  onSelect: (on: boolean) => void;
+  onMove: () => void;
+}) {
   const qc = useQueryClient();
   const { kind, title } = row;
   const [matching, setMatching] = useState(false);
@@ -58,6 +76,14 @@ function TitleRow({ row, libraryName }: { row: Row; libraryName: string }) {
   return (
     <li className="space-y-2 rounded-lg border border-line bg-raised p-3">
       <div className="flex gap-3">
+        <input
+          type="checkbox"
+          className="mt-1 shrink-0 self-start"
+          aria-label={`Select ${title.title}`}
+          checked={selected}
+          disabled={!movable}
+          onChange={(e) => onSelect(e.target.checked)}
+        />
         <div className="h-24 w-16 shrink-0 overflow-hidden rounded bg-overlay">
           {title.poster_url ? <img src={title.poster_url} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
         </div>
@@ -83,6 +109,11 @@ function TitleRow({ row, libraryName }: { row: Row; libraryName: string }) {
               <ImageUp className="h-3.5 w-3.5" />
               Upload poster
             </button>
+            {movable ? (
+              <button type="button" className={secondaryBtn} disabled={busy} onClick={onMove}>
+                Move to library…
+              </button>
+            ) : null}
             <input
               ref={file}
               type="file"
@@ -124,6 +155,8 @@ export function MediaTitlesPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [limit, setLimit] = useState(PAGE);
+  const [selected, setSelected] = useState<Map<string, Row>>(new Map());
+  const [moveRows, setMoveRows] = useState<Row[] | null>(null);
 
   const libs = useQuery({ queryKey: ["libraries"], queryFn: api.listLibraries });
   const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies });
@@ -153,6 +186,19 @@ export function MediaTitlesPage() {
     setParams(next, { replace: true });
     setLimit(PAGE);
   };
+
+  const localLibs = useMemo(() => new Set((libs.data ?? []).map((l: Library) => l.id)), [libs.data]);
+  const movable = (r: Row) => !!r.title.library_id && localLibs.has(r.title.library_id);
+  const toggle = (r: Row, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (on) next.set(rowKey(r), r);
+      else next.delete(rowKey(r));
+      return next;
+    });
+  const moveItems = (list: Row[]): (MoveItemRef & { libraryId?: string })[] =>
+    list.map((r) => ({ kind: r.kind, id: r.title.id, libraryId: r.title.library_id }));
+  const shownMovable = rows.slice(0, limit).filter(movable);
 
   const loading = movies.isLoading || series.isLoading;
   const error = movies.error ?? series.error;
@@ -193,15 +239,54 @@ export function MediaTitlesPage() {
       {loading ? <p className="text-sm text-dim">Loading titles…</p> : null}
       {error ? <p className="text-sm text-danger">{errText(error, "titles could not be loaded")}</p> : null}
       {!loading && !error ? (
-        <p className="text-xs text-dim">
-          {rows.length} {rows.length === 1 ? "title" : "titles"}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-dim">
+          <span>
+            {rows.length} {rows.length === 1 ? "title" : "titles"}
+          </span>
+          {shownMovable.length > 0 ? (
+            <button
+              type="button"
+              className="text-accent"
+              onClick={() => setSelected((prev) => new Map([...prev, ...shownMovable.map((r) => [rowKey(r), r] as const)]))}
+            >
+              Select all shown
+            </button>
+          ) : null}
+          {selected.size > 0 ? (
+            <>
+              <span className="text-ink">{selected.size} selected</span>
+              <button type="button" className={secondaryBtn} onClick={() => setMoveRows(Array.from(selected.values()))}>
+                Move selected…
+              </button>
+              <button type="button" className="text-accent" onClick={() => setSelected(new Map())}>
+                Clear
+              </button>
+            </>
+          ) : null}
+        </div>
       ) : null}
       <ul className="grid gap-3 lg:grid-cols-2">
         {rows.slice(0, limit).map((r) => (
-          <TitleRow key={`${r.kind}-${r.title.id}`} row={r} libraryName={nameOf(r.title.library_id)} />
+          <TitleRow
+            key={`${r.kind}-${r.title.id}`}
+            row={r}
+            libraryName={nameOf(r.title.library_id)}
+            movable={movable(r)}
+            selected={selected.has(rowKey(r))}
+            onSelect={(on) => toggle(r, on)}
+            onMove={() => setMoveRows([r])}
+          />
         ))}
       </ul>
+      {moveRows ? (
+        <MoveContentDialog
+          open
+          onOpenChange={(v) => !v && setMoveRows(null)}
+          libraries={libs.data ?? []}
+          items={moveItems(moveRows)}
+          onDone={() => setSelected(new Map())}
+        />
+      ) : null}
       {rows.length > limit ? (
         <button type="button" className={secondaryBtn} onClick={() => setLimit((n) => n + PAGE)}>
           Show more ({rows.length - limit} left)

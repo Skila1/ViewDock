@@ -27,6 +27,7 @@ import (
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/jellyfin"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/mediafs"
 	"github.com/viewdock/viewdock/internal/mesh"
 	"github.com/viewdock/viewdock/internal/metadata"
 	"github.com/viewdock/viewdock/internal/nodeauth"
@@ -79,6 +80,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	ff := ffmpeg.New()
 	libs := library.NewService(sqlDB, authSvc.Grants, ff, ff, cfg.CacheDir)
 	libs.Audit, libs.Cfg = aud, cfg
+	libs.Storage = mediafs.Roots{Paths: cfg.LibraryRoots, UID: cfg.PUID, GID: cfg.PGID}
 	sc := scan.New(sqlDB, libs, ff)
 	libs.SetScan(sc)
 	logs := oplog.New(sqlDB)
@@ -91,6 +93,9 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	remoteParties := controlPlane && cfg.CoordinatorURL != ""
 	sc.OnIdle = func() { go func() { _ = meta.RunOnce(context.Background()) }() }
 	if controlPlane {
+		// Finish or roll back any move a restart interrupted before new
+		// moves, scans or uploads can touch the same folders.
+		libs.RecoverMoves(context.Background())
 		meta.Start(context.Background())
 	}
 	up := upload.New(sqlDB, libs, sc, ff, filepath.Join(cfg.ConfigDir, "uploads"))
@@ -359,7 +364,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 			}
 			path := r.URL.Path
 			write := r.Method != http.MethodGet && r.Method != http.MethodHead
-			if write && hasAnyPrefix(path, "/api/v1/libraries", "/api/v1/metadata", "/api/v1/artwork", "/api/v1/movies/", "/api/v1/series/", "/api/v1/episodes/", "/api/v1/collections") && !p.HasPerm(auth.PermLibrariesManage) {
+			if write && hasAnyPrefix(path, "/api/v1/libraries", "/api/v1/library-moves", "/api/v1/metadata", "/api/v1/artwork", "/api/v1/movies/", "/api/v1/series/", "/api/v1/episodes/", "/api/v1/collections") && !p.HasPerm(auth.PermLibrariesManage) {
 				httpapi.WriteErr(w, http.StatusForbidden, "forbidden", "permission required")
 				return
 			}
