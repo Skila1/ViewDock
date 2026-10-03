@@ -175,8 +175,9 @@ async function attachWithHls(
     // once, so MSE only holds a few seconds. Chrome's SourceBuffer holds
     // about 150 MB, which 30 seconds of an original 4K video (55 MB a
     // segment) overflows: the append fails and playback stops at the gap.
+    // Five seconds ahead keeps it to the playing segment and the next one.
     ...(buffer
-      ? { backBufferLength: 0, maxBufferLength: 8, maxMaxBufferLength: 12, maxBufferSize: 50 * 1000 * 1000, maxBufferHole: 0.5 }
+      ? { backBufferLength: 0, maxBufferLength: 5, maxMaxBufferLength: 8, maxBufferSize: 50 * 1000 * 1000, maxBufferHole: 0.5 }
       : {}),
     xhrSetup(xhr) {
       xhr.withCredentials = true;
