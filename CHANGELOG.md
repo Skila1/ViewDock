@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The player never actually played from the Jellyfin buffer cache: it downloaded every segment again itself while the cache downloaded the same segments alongside it, so each segment crossed the network twice and playback still stalled. The player now reads from the cache, and a segment the cache is already downloading is shared instead of requested again.
+- When Jellyfin sends the original video, the buffer cache downloads two segments at once, which on a fast link roughly doubles how far ahead of playback it gets. Re-encoded streams still download one segment at a time, because the encoder restarts when requests jump ahead.
+
 ## 0.3.3
 
 - 4K Dolby Vision films from UHD Blu-ray (profile 7, with an enhancement layer) were re-encoded instead of sent as they are, which stalls on most Jellyfin servers. Jellyfin now sends their HDR10 picture untouched to devices with an HEVC 10-bit decoder, like other HDR films. Profile 5 Dolby Vision, which has no HDR10 picture, is still converted.

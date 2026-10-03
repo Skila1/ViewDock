@@ -240,6 +240,14 @@ export function planWindow(
   return { next, dir, evict };
 }
 
+/**
+ * copyOf hands the player its own buffer: hls.js moves fragment data to its
+ * worker, which empties the original that the bucket still stores.
+ */
+async function copyOf(data: Promise<ArrayBuffer>): Promise<ArrayBuffer> {
+  return (await data).slice(0);
+}
+
 export class StreamFetchError extends Error {
   status: number;
   constructor(status: number) {
@@ -254,9 +262,16 @@ export type PrefetchSource = {
   spans(playhead: number): Span[];
   /** Fetches one span from the network. A non-2xx response must throw StreamFetchError. */
   fetch(span: Span, signal: AbortSignal): Promise<ArrayBuffer>;
+  /**
+   * Background downloads at once (default 1). More than one only suits
+   * sources that serve any span cheaply: an encoder restarts when requests
+   * jump ahead of it.
+   */
+  parallel?: number;
 };
 
-type Inflight = { promise: Promise<ArrayBuffer>; abort: AbortController; priority: boolean };
+/** promise has the data; stored settles once it is in the bucket (or could not be). */
+type Inflight = { promise: Promise<ArrayBuffer>; stored: Promise<void>; abort: AbortController; priority: boolean };
 
 /**
  * StreamPrefetcher keeps one title's buffer window filled. Background
@@ -281,6 +296,7 @@ export class StreamPrefetcher {
   private closed = false;
   private full = false;
   private failures = 0;
+  private retryAt = 0;
   private wakeUp: (() => void) | null = null;
   /** Downloads run from the start; only a pause after playback began stops them. */
   private started = false;
@@ -402,13 +418,13 @@ export class StreamPrefetcher {
     const running = this.inflight.get(span.key);
     if (running) {
       running.priority = true;
-      return running.promise;
+      return copyOf(running.promise);
     }
     for (const f of this.inflight.values()) if (!f.priority) f.abort.abort();
     this.lastDir = "forward";
-    const promise = this.fetchStore(span, true);
-    promise.finally(this.wake).catch(() => undefined);
-    return promise;
+    const job = this.fetchStore(span, true);
+    job.stored.finally(this.wake).catch(() => undefined);
+    return copyOf(job.promise);
   }
 
   destroy() {
@@ -424,36 +440,41 @@ export class StreamPrefetcher {
     this.wake();
   }
 
-  private fetchStore(span: Span, priority: boolean): Promise<ArrayBuffer> {
+  private fetchStore(span: Span, priority: boolean): Inflight {
     const abort = new AbortController();
+    // Parallel downloads share the connection, so one download's speed
+    // times how many ran is the overall rate.
+    const sharing = this.inflight.size + 1;
     const promise = (async () => {
       const began = performance.now();
       const buf = await this.source.fetch(span, abort.signal);
       const took = (performance.now() - began) / 1000;
       if (took > 0.05 && span.end > span.start) {
-        const sample = (span.end - span.start) / took;
+        const sample = ((span.end - span.start) / took) * sharing;
         this.rate = this.rate == null ? sample : this.rate * 0.7 + sample * 0.3;
-      }
-      // A span fetched before the bucket opened is still stored, so the
-      // background loop does not fetch it again.
-      const cache = await this.opened;
-      if (cache && !this.closed && !this.cached.has(span.key)) {
-        try {
-          await cache.put(span.key, new Response(buf, { headers: { [SIZE_HEADER]: String(buf.byteLength) } }));
-          this.cached.add(span.key);
-          this.sizes.set(span.key, buf.byteLength);
-          this.bytes += buf.byteLength;
-        } catch (err) {
-          // Usually QuotaExceededError: keep serving, stop growing until something is evicted.
-          if (!this.full) this.onNote?.("stream_cache_full", String(err));
-          this.full = true;
-        }
       }
       return buf;
     })();
-    this.inflight.set(span.key, { promise, abort, priority });
-    promise.finally(() => this.inflight.delete(span.key)).catch(() => undefined);
-    return promise;
+    // The player gets the data at once; storing never delays playback. The
+    // span stays in flight until stored, so nothing downloads it twice.
+    const stored = promise.then(async (buf) => {
+      const cache = await this.opened;
+      if (!cache || this.closed || this.cached.has(span.key)) return;
+      try {
+        await cache.put(span.key, new Response(buf, { headers: { [SIZE_HEADER]: String(buf.byteLength) } }));
+        this.cached.add(span.key);
+        this.sizes.set(span.key, buf.byteLength);
+        this.bytes += buf.byteLength;
+      } catch (err) {
+        // Usually QuotaExceededError: keep serving, stop growing until something is evicted.
+        if (!this.full) this.onNote?.("stream_cache_full", String(err));
+        this.full = true;
+      }
+    });
+    const job: Inflight = { promise, stored, abort, priority };
+    this.inflight.set(span.key, job);
+    stored.finally(() => this.inflight.delete(span.key)).catch(() => undefined);
+    return job;
   }
 
   private sleep(ms = IDLE_POLL_MS): Promise<void> {
@@ -476,10 +497,16 @@ export class StreamPrefetcher {
         await this.sleep();
         continue;
       }
+      if (Date.now() < this.retryAt) {
+        await this.sleep(this.retryAt - Date.now());
+        continue;
+      }
       const playhead = this.video.currentTime || 0;
       const spans = this.source.spans(playhead);
-      let plan = planWindow(spans, this.cached, playhead, this.lastDir);
-      const evict = [...plan.evict];
+      // Spans already downloading count as taken when picking the next one.
+      const taken = () => new Set([...this.cached, ...this.inflight.keys()]);
+      let plan = planWindow(spans, taken(), playhead, this.lastDir);
+      const evict = plan.evict.filter((key) => this.cached.has(key));
       if (this.bytes >= this.budget) evict.push(...behindToEvict(spans, this.sizes, playhead, this.bytes, this.budget * 0.9));
       if (evict.length > 0) {
         for (const key of evict) {
@@ -489,28 +516,34 @@ export class StreamPrefetcher {
         }
         await Promise.all(evict.map((key) => cache.delete(key).catch(() => false)));
         this.full = false;
-        plan = planWindow(spans, this.cached, playhead, this.lastDir);
+        plan = planWindow(spans, taken(), playhead, this.lastDir);
       }
       // Near the budget only what is ahead is fetched.
-      if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, this.cached, playhead, "forward", DEFAULT_WINDOW, false);
+      if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, taken(), playhead, "forward", DEFAULT_WINDOW, false);
       if (this.bytes >= this.budget) plan = { ...plan, next: null };
-      if (!plan.next || this.full) {
-        await this.sleep();
+      const background = [...this.inflight.values()].filter((f) => !f.priority);
+      if (!plan.next || this.full || background.length >= (this.source.parallel ?? 1)) {
+        // Wait for a download to finish or for something to change.
+        await Promise.race([this.sleep(), ...background.map((f) => f.stored.catch(() => undefined))]);
         continue;
       }
-      const running = this.inflight.get(plan.next.key);
-      try {
-        this.lastDir = plan.dir;
-        if (running) await running.promise;
-        else await this.fetchStore(plan.next, false);
-        this.failures = 0;
-      } catch (err) {
-        if (this.closed || (err instanceof DOMException && err.name === "AbortError")) continue;
-        this.failures++;
-        if (this.failures === 1 || this.failures % 10 === 0) this.onNote?.("stream_cache_fetch_failed", String(err));
-        if (err instanceof StreamFetchError && err.status === 410) return;
-        await this.sleep(Math.min(30_000, 1000 * 2 ** Math.min(this.failures, 5)));
-      }
+      this.lastDir = plan.dir;
+      const job = this.fetchStore(plan.next, false);
+      job.stored.then(
+        () => {
+          this.failures = 0;
+        },
+        (err: unknown) => {
+          if (this.closed || (err instanceof DOMException && err.name === "AbortError")) return;
+          this.failures++;
+          if (this.failures === 1 || this.failures % 10 === 0) this.onNote?.("stream_cache_fetch_failed", String(err));
+          // 410: the session ended, nothing more to download.
+          this.retryAt = err instanceof StreamFetchError && err.status === 410
+            ? Number.POSITIVE_INFINITY
+            : Date.now() + Math.min(30_000, 1000 * 2 ** Math.min(this.failures, 5));
+          this.wake();
+        },
+      );
     }
   }
 }

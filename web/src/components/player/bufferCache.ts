@@ -48,6 +48,9 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
 
   const keyOf = (lvl: number, sn: number) => `${base}/L${lvl}/${sn}`;
   const source: PrefetchSource = {
+    // Jellyfin copying the original video serves any segment at disk speed;
+    // a re-encode restarts when requests jump ahead, so it gets one at a time.
+    parallel: session.remote_video?.copy ? 2 : 1,
     spans() {
       if (!hls) return [];
       const lvl = level >= 0 ? level : Math.max(0, hls.loadLevel);
@@ -87,7 +90,8 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
 
     load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>, retries = 0) {
       const { frag, part } = context as FragmentLoaderContext;
-      if (!frag || part || typeof frag.sn !== "number" || frag.byteRange.length > 0 || context.rangeStart != null) {
+      // hls.js always sets rangeStart and rangeEnd; both 0 means the whole segment.
+      if (!frag || part || typeof frag.sn !== "number" || frag.byteRange.length > 0 || (context.rangeEnd ?? 0) > 0) {
         super.load(context, config, callbacks);
         return;
       }
