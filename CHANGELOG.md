@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- keep Jellyfin remuxes alive while paused and reject cut-short segments
+
 ## 0.3.9
 
 - Resuming a 4K Jellyfin film could load forever: Jellyfin sometimes answers the first segment after a jump with an empty response, and the player then switched to Jellyfin's backup H.264 re-encode, which is slower than real time. Empty segments are now retried, and the backup re-encode is never used while the original video plays (a device that cannot decode it still falls back to H.264 properly).
