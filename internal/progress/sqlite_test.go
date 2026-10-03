@@ -115,3 +115,20 @@ func TestCompletionThreshold(t *testing.T) {
 		t.Fatal("a lower percent finishes earlier")
 	}
 }
+
+func TestHistoryRecordsStartAndFinishOnce(t *testing.T) {
+	s, ctx := testStore(t)
+	hour := int64(3_600_000)
+	for _, pos := range []int64{10_000, 60_000, hour - 60_000, hour - 50_000, hour - 40_000, hour - 30_000} {
+		if err := s.Put(ctx, "u1", "movie", "m1", "", pos, hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM watch_history WHERE user_id = 'u1'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("history rows %d, want 2: the start and the finish, not one per report after finishing", n)
+	}
+}

@@ -95,6 +95,7 @@ func TestProfileLists(t *testing.T) {
 	t.Run("continue dismissal and history", func(t *testing.T) {
 		exec(t, svc, `INSERT INTO playback_progress(user_id, item_kind, item_id, position_ms, duration_ms, updated_at) VALUES ('u1', 'movie', 'm1', 60000, 6000000, '2026-01-01T00:00:00Z')`)
 		exec(t, svc, `INSERT INTO watch_history(id, user_id, item_kind, item_id, watched_at, position_ms) VALUES ('h1', 'u1', 'movie', 'm1', '2026-01-01T00:00:00Z', 60000)`)
+		exec(t, svc, `INSERT INTO watch_history(id, user_id, item_kind, item_id, watched_at, position_ms) VALUES ('h2', 'u1', 'movie', 'm1', '2026-01-01T00:00:10Z', 70000)`)
 		if rec := call("PUT", "/titles/movie/m1/continue", `{"dismissed":true}`); rec.Code != 200 {
 			t.Fatalf("dismiss: %d", rec.Code)
 		}
@@ -105,17 +106,17 @@ func TestProfileLists(t *testing.T) {
 		}
 		var hist []historyEntry
 		_ = json.Unmarshal(call("GET", "/me/history", "").Body.Bytes(), &hist)
-		if len(hist) != 1 || hist[0].Title != "One" || hist[0].PositionMS != 60000 {
-			t.Fatalf("history %+v", hist)
+		if len(hist) != 1 || hist[0].Title != "One" || hist[0].PositionMS != 60000 || hist[0].ID != "movie:m1" || hist[0].WatchedAt != "2026-01-01T00:00:10Z" {
+			t.Fatalf("one entry per title, with the latest viewing and current progress: %+v", hist)
 		}
-		if rec := other("DELETE", "/me/history/h1", ""); rec.Code != 200 {
+		if rec := other("DELETE", "/me/history/movie:m1", ""); rec.Code != 200 {
 			t.Fatalf("delete: %d", rec.Code)
 		}
 		_ = json.Unmarshal(call("GET", "/me/history", "").Body.Bytes(), &hist)
 		if len(hist) != 1 {
 			t.Fatal("another profile deleted this history entry")
 		}
-		call("DELETE", "/me/history/h1", "")
+		call("DELETE", "/me/history/movie:m1", "")
 		_ = json.Unmarshal(call("GET", "/me/history", "").Body.Bytes(), &hist)
 		if len(hist) != 0 {
 			t.Fatalf("deleted entry listed: %+v", hist)

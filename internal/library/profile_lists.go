@@ -329,7 +329,8 @@ type historyEntry struct {
 const historyPage = 100
 
 // handleHistory lists the profile's watch history, newest first, one entry
-// per start or finish of a title. before pages back by watched_at.
+// per title with its latest viewing and current progress. The entry id is
+// "<kind>:<id>". before pages back by watched_at.
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	userID := profileUser(w, r)
 	if userID == "" {
@@ -344,18 +345,21 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		limit = historyPage
 	}
 	rows, err := s.DB.QueryContext(r.Context(), `
-		SELECT h.id, h.item_kind, h.item_id, h.watched_at, h.position_ms,
-			COALESCE(p.duration_ms, 0), COALESCE(p.completed, 0),
+		SELECT h.item_kind || ':' || h.item_id, h.item_kind, h.item_id, h.watched_at,
+			COALESCE(p.position_ms, 0), COALESCE(p.duration_ms, 0), COALESCE(p.completed, 0),
 			COALESCE(m.title, s.title, ''), COALESCE(e.series_id, ''), COALESCE(e.season, 0), COALESCE(e.number, 0), COALESCE(e.title, '')
-		FROM watch_history h
-		LEFT JOIN playback_progress p ON p.user_id = h.user_id AND p.item_kind = h.item_kind AND p.item_id = h.item_id
+		FROM (
+			SELECT item_kind, item_id, MAX(watched_at) AS watched_at FROM watch_history
+			WHERE user_id = ? GROUP BY item_kind, item_id
+		) h
+		LEFT JOIN playback_progress p ON p.user_id = ? AND p.item_kind = h.item_kind AND p.item_id = h.item_id
 		LEFT JOIN movies m ON h.item_kind = 'movie' AND m.id = h.item_id
 		LEFT JOIN episodes e ON h.item_kind = 'episode' AND e.id = h.item_id
 		LEFT JOIN series s ON s.id = e.series_id
-		WHERE h.user_id = ? AND h.watched_at < ?
+		WHERE h.watched_at < ?
 		ORDER BY h.watched_at DESC
 		LIMIT ?
-	`, userID, before, limit*2)
+	`, userID, userID, before, limit*2)
 	if err != nil {
 		writeListErr(w, err)
 		return
@@ -399,7 +403,13 @@ func (s *Service) handleHistoryDelete(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		return
 	}
-	if _, err := s.DB.ExecContext(r.Context(), `DELETE FROM watch_history WHERE id = ? AND user_id = ?`, chi.URLParam(r, "id"), userID); err != nil {
+	// An entry is a title ("movie:<id>"): removing it removes every viewing of it.
+	kind, id, ok := strings.Cut(chi.URLParam(r, "id"), ":")
+	if !ok {
+		httpapi.WriteErr(w, http.StatusBadRequest, "bad_request", "history entries are <kind>:<id>")
+		return
+	}
+	if _, err := s.DB.ExecContext(r.Context(), `DELETE FROM watch_history WHERE user_id = ? AND item_kind = ? AND item_id = ?`, userID, kind, id); err != nil {
 		writeListErr(w, err)
 		return
 	}

@@ -834,6 +834,11 @@ export interface UserRow {
   role_ids?: string[];
   grants?: UserGrant[];
   discord_id?: string;
+  /** When the account was created, and when it linked Discord. */
+  created_at?: string;
+  discord_linked_at?: string;
+  content_age_limit?: number;
+  household?: { id: string; name: string; role: string };
 }
 
 export interface CreateUserRequest {

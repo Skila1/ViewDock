@@ -134,6 +134,14 @@ func (a *API) handleProgress(w http.ResponseWriter, r *http.Request) {
 	if body.PositionMS < 0 {
 		body.PositionMS = 0
 	}
+	// A closing player that can no longer read its video reports 0; keep the
+	// last position instead of erasing where the viewer stopped. A real
+	// return to the start arrives as a seek.
+	s.mu.Lock()
+	if body.Event == "stop" && body.PositionMS < 1000 && s.ResumeMS > 5000 {
+		body.PositionMS = s.ResumeMS
+	}
+	s.mu.Unlock()
 	if body.Event != "" && a.Flight != nil {
 		a.Flight.RecordContext(r.Context(), s.ID, "progress_"+body.Event, map[string]any{"position_ms": body.PositionMS})
 	}

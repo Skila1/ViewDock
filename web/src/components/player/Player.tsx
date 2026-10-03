@@ -587,11 +587,14 @@ export function Player({
       const sess = sessionRef.current;
       const video = videoRef.current;
       const origin = originRef.current;
-      const lastPos = sess && video ? Math.floor(logicalPositionMs(origin, video.currentTime || 0)) : 0;
-      const lastDur = sess && video ? Math.floor(sess.duration_ms || (video.duration || 0) * 1000) : 0;
+      // React detaches the video before this cleanup runs, so the position
+      // comes from the last time update, never from a missing element (that
+      // reported 0 and erased the resume point).
+      const lastPos = Math.floor(video && video.currentTime > 0 ? logicalPositionMs(origin, video.currentTime) : lastStablePosRef.current);
+      const lastDur = Math.floor(sess?.duration_ms || movieDurRef.current || (video?.duration || 0) * 1000);
       teardownAttach();
       void (async () => {
-        if (sess) {
+        if (sess && lastPos > 0) {
           try {
             await api.putProgress(sess.id, { position_ms: lastPos, duration_ms: lastDur, event: "stop" }, { kind: itemKind, id: itemId });
           } catch {

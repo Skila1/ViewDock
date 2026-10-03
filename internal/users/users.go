@@ -83,19 +83,44 @@ func (a *API) userJSON(r *http.Request, id, un, dn string, admin, dis, ageLimit 
 	}
 }
 
+// withMembership adds when the account joined (created, and when it linked
+// Discord) and its household, for the admin users table.
+func (a *API) withMembership(r *http.Request, out map[string]any, id, createdAt string) map[string]any {
+	out["created_at"] = createdAt
+	var linked string
+	if err := a.DB.QueryRowContext(r.Context(), a.query(`SELECT linked_at FROM user_identities WHERE user_id = ? AND provider = 'discord'`), id).Scan(&linked); err == nil {
+		out["discord_linked_at"] = linked
+	}
+	var hid, hname, hrole string
+	if err := a.DB.QueryRowContext(r.Context(), a.query(`
+		SELECT h.id, h.name, m.role FROM household_members m JOIN households h ON h.id = m.household_id WHERE m.user_id = ?
+	`), id).Scan(&hid, &hname, &hrole); err == nil {
+		out["household"] = map[string]any{"id": hid, "name": hname, "role": hrole}
+	}
+	return out
+}
+
 func (a *API) list(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.DB.QueryContext(r.Context(), `SELECT id, username, display_name, is_admin, disabled, content_age_limit FROM users ORDER BY username`)
+	rows, err := a.DB.QueryContext(r.Context(), `SELECT id, username, display_name, is_admin, disabled, content_age_limit, created_at FROM users ORDER BY username`)
 	if err != nil {
 		httpapi.WriteErr(w, 500, "users", err.Error())
 		return
 	}
 	defer rows.Close()
-	var out []map[string]any
+	type row struct {
+		id, un, dn, created  string
+		admin, dis, ageLimit int
+	}
+	var all []row
 	for rows.Next() {
-		var id, un, dn string
-		var admin, dis, ageLimit int
-		_ = rows.Scan(&id, &un, &dn, &admin, &dis, &ageLimit)
-		out = append(out, a.userJSON(r, id, un, dn, admin, dis, ageLimit))
+		var x row
+		_ = rows.Scan(&x.id, &x.un, &x.dn, &x.admin, &x.dis, &x.ageLimit, &x.created)
+		all = append(all, x)
+	}
+	rows.Close()
+	var out []map[string]any
+	for _, x := range all {
+		out = append(out, a.withMembership(r, a.userJSON(r, x.id, x.un, x.dn, x.admin, x.dis, x.ageLimit), x.id, x.created))
 	}
 	if out == nil {
 		out = []map[string]any{}
@@ -105,15 +130,15 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var un, dn string
+	var un, dn, created string
 	var admin, dis, ageLimit int
-	err := a.DB.QueryRowContext(r.Context(), `SELECT username, display_name, is_admin, disabled, content_age_limit FROM users WHERE id = ?`, id).
-		Scan(&un, &dn, &admin, &dis, &ageLimit)
+	err := a.DB.QueryRowContext(r.Context(), `SELECT username, display_name, is_admin, disabled, content_age_limit, created_at FROM users WHERE id = ?`, id).
+		Scan(&un, &dn, &admin, &dis, &ageLimit, &created)
 	if err != nil {
 		httpapi.WriteErr(w, 404, "users", "not found")
 		return
 	}
-	out := a.userJSON(r, id, un, dn, admin, dis, ageLimit)
+	out := a.withMembership(r, a.userJSON(r, id, un, dn, admin, dis, ageLimit), id, created)
 	if rest, err := library.RestrictionFor(r.Context(), a.DB, id); err == nil {
 		out["content_restriction"] = rest
 	}

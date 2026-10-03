@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Closing the player could erase the resume point: it sent position 0 because the video had already been removed from the page. It now sends the last position it played, and the server ignores a stop at 0 when it knows where the viewer was.
+- Watch history lists each title once with its latest date and current progress, instead of an entry every few seconds after a title was finished. Removing an entry removes that title's history.
+- Admin, Groups: groups are listed by rank (Superadmin first), and Create group opens a dialog with name, description, permissions and templates (Viewer, Uploader, Library manager, Moderator).
+- Admin, Households: largest first, and Create household opens a dialog with templates (Family, Couple, Shared house, Young kids) that also create the first invites and show their codes.
+- Admin, Users: one table of everyone, searchable and filterable (new, administrators, disabled), with accounts marked New for a week after registering, or after connecting Discord when Discord sign-in replaces registration. Select several to enable, disable, change group, set a content restriction or delete them together. Click a person for everything about the account: name, group (changeable), content restriction, household, Discord, personal library access with downloads, password reset, and disable or delete.
+
 ## 0.3.7
 
 - 4K Jellyfin films could freeze mid-playback with the next part already downloaded: the player kept 30 seconds behind the playhead in the browser's video buffer, which at 4K remux bitrates overflows Chrome's limit, so a segment failed to load and playback stopped at the gap. With the buffer cache the player now keeps only a few seconds in that buffer (the rest plays from the cache at once) and steps over small gaps.

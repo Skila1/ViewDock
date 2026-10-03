@@ -53,10 +53,10 @@ func (s *SQLite) Put(ctx context.Context, userID, itemKind, itemID, mediaFileID 
 	if done {
 		di = 1
 	}
-	var existed int
+	existed, wasDone := 0, 0
 	_ = s.DB.QueryRowContext(ctx, `
-		SELECT 1 FROM playback_progress WHERE user_id = ? AND item_kind = ? AND item_id = ?
-	`, userID, itemKind, itemID).Scan(&existed)
+		SELECT 1, completed FROM playback_progress WHERE user_id = ? AND item_kind = ? AND item_id = ?
+	`, userID, itemKind, itemID).Scan(&existed, &wasDone)
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO playback_progress(user_id, item_kind, item_id, media_file_id, position_ms, duration_ms, completed, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -71,7 +71,9 @@ func (s *SQLite) Put(ctx context.Context, userID, itemKind, itemID, mediaFileID 
 	if err != nil {
 		return err
 	}
-	if existed == 0 || done {
+	// History records starting a title and finishing it, once each: progress
+	// keeps arriving every few seconds after the finish point.
+	if existed == 0 || (done && wasDone == 0) {
 		_, _ = s.DB.ExecContext(ctx, `
 			INSERT INTO watch_history(id, user_id, item_kind, item_id, watched_at, position_ms)
 			VALUES (?, ?, ?, ?, ?, ?)
