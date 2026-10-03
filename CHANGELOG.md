@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - Jellyfin movies no longer stall every few seconds. ViewDock asked Jellyfin to re-encode every non-H.264 file to H.264 at its full size, which for a 4K HEVC film is slower than real time. Each browser and device now reports which codecs it decodes, and whether its graphics hardware decodes them, and Jellyfin sends the original video (HEVC, AV1 or H.264, including 4K and HDR10) whenever the device can play it, converting only the audio. This works the same in the Discord Activity, per viewer.
 - When a device cannot decode the original, Jellyfin re-encodes to H.264 at no more than 1080p and 20 Mbps for Auto quality, which Jellyfin keeps up with. If a browser claims a codec it then fails to play, the player switches to H.264 on its own at the same position.
