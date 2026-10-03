@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- download one segment at a time until Jellyfin answers
+
 ## 0.4.0
 
 - keep Jellyfin remuxes alive while paused and reject cut-short segments
