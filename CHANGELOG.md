@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Jellyfin movies no longer stall every few seconds. ViewDock asked Jellyfin to re-encode every non-H.264 file to H.264 at its full size, which for a 4K HEVC film is slower than real time. Each browser and device now reports which codecs it decodes, and whether its graphics hardware decodes them, and Jellyfin sends the original video (HEVC, AV1 or H.264, including 4K and HDR10) whenever the device can play it, converting only the audio. This works the same in the Discord Activity, per viewer.
+- When a device cannot decode the original, Jellyfin re-encodes to H.264 at no more than 1080p and 20 Mbps for Auto quality, which Jellyfin keeps up with. If a browser claims a codec it then fails to play, the player switches to H.264 on its own at the same position.
+- Pausing a Jellyfin title for more than 45 seconds ended the stream, so playing again failed with "started somewhere else". Paused and buffering players now keep their session.
+- The playback buffer cache no longer downloads the same part twice when playback starts, and it keeps at most 4 GB (or half the browser's storage) per title, dropping what is furthest behind first.
+
 ## 0.3.1
 
 - Jellyfin playback keeps the five minutes before and after the playhead stored in the browser, filled in the background from the moment playback starts, so a slow Jellyfin server or network no longer stalls the picture. Downloading pauses while the player is paused. The stored copy is kept for three minutes after the player closes, so resuming the same title soon reuses it, and is then deleted. Signing out deletes it at once.

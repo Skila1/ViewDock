@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/api/api";
-import { nativeHlsSupported } from "@/api/profile";
+import { codecFallbackActive, nativeHlsSupported, rememberCodecFallback } from "@/api/profile";
 import { cn } from "@/lib/cn";
 import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
@@ -24,7 +24,7 @@ import { debugPlaybackEnabled, fullscreenStrategy, movieDurationMs, type Playbac
 import { usePlayerStore } from "@/store/player";
 import type { ItemKind, PlaybackSession } from "@/types/api.gen";
 import { diagnosticsApi } from "@/api/diagnostics";
-import { attachSession, SessionGoneError, type AttachHandle } from "./attachMedia";
+import { attachSession, CodecFallbackError, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
@@ -375,7 +375,23 @@ export function Player({
             telemetry.record("error", { code: "HLS_FATAL", detail });
             failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
           },
-          { kind: itemKind, id: itemId, quality: qualityRef.current },
+          {
+            cacheTitle: { kind: itemKind, id: itemId, quality: qualityRef.current },
+            onCodecFallback: (detail) => {
+              if (genRef.current !== gen) return;
+              telemetry.record("codec_error", { detail, fallback: "h264" });
+              if (codecFallbackActive()) {
+                failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
+                return;
+              }
+              rememberCodecFallback();
+              const ms = originRef.current + (video.currentTime || 0) * 1000;
+              resumeRef.current = ms;
+              pendingSeekRef.current = ms;
+              setResumeMs(ms);
+              void createAndAttach("QUALITY");
+            },
+          },
         );
         if (genRef.current !== gen) {
           teardownAttach();
@@ -434,6 +450,15 @@ export function Player({
         if (e instanceof SessionGoneError || (e instanceof ApiError && e.status === 410)) {
           attachBusyRef.current = false;
           void createAndAttach("GONE");
+          return;
+        }
+        // The browser claimed a decoder it does not have: once per tab, ask
+        // the source for H.264 instead of failing.
+        if (e instanceof CodecFallbackError && !codecFallbackActive()) {
+          rememberCodecFallback();
+          telemetry.record("codec_error", { detail: e.message, fallback: "h264" });
+          attachBusyRef.current = false;
+          void createAndAttach("QUALITY");
           return;
         }
         const code = e instanceof ApiError ? (e.code ?? String(e.status)) : "ATTACH_FAILED";
@@ -648,7 +673,11 @@ export function Player({
     const id = window.setInterval(() => {
       const sess = sessionRef.current;
       const video = videoRef.current;
-      if (!sess || !video || phaseRef.current !== "playing") return;
+      // Paused and buffering players report too: the server ends sessions it
+      // has not heard from in 45 seconds, and an external source stream is
+      // not seen by the server, so a pause would otherwise end it.
+      const phase = phaseRef.current;
+      if (!sess || !video || !(phase === "playing" || phase === "paused" || phase === "buffering" || phase === "seeking")) return;
       const origin = originRef.current;
       void api.putProgress(sess.id, {
         position_ms: Math.floor(logicalPositionMs(origin, video.currentTime)),

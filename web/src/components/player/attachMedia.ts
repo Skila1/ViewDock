@@ -24,6 +24,27 @@ export class SessionGoneError extends Error {
   }
 }
 
+/** The browser could not decode the original video the source sent; retry with H.264. */
+export class CodecFallbackError extends Error {
+  constructor(detail: string) {
+    super(`CODEC_FALLBACK: ${detail}`);
+    this.name = "CodecFallbackError";
+  }
+}
+
+export type AttachOptions = {
+  cacheTitle?: BufferCacheTitle;
+  /** The original (non-H.264) video failed after playback started. */
+  onCodecFallback?: (detail: string) => void;
+};
+
+const CODEC_TAGS: Record<string, string[]> = { h264: ["avc1", "avc3"], hevc: ["hvc1", "hev1"], av1: ["av01"] };
+
+function levelCodec(codecs: string | undefined): string {
+  const tag = (codecs ?? "").split(".")[0].toLowerCase();
+  return Object.keys(CODEC_TAGS).find((c) => CODEC_TAGS[c].includes(tag)) ?? "";
+}
+
 export async function attachSession(
   video: HTMLVideoElement,
   session: PlaybackSession,
@@ -31,8 +52,9 @@ export async function attachSession(
   onEngine?: (engine: PlaybackEngine) => void,
   onBeyondGenerated?: (movieMs: number) => void,
   onFatal?: (detail: string) => void,
-  cacheTitle?: BufferCacheTitle,
+  opts: AttachOptions = {},
 ): Promise<AttachHandle> {
+  const cacheTitle = opts.cacheTitle;
   let aborted = false;
   const gone = () => {
     if (!aborted) onGone();
@@ -87,7 +109,7 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal, remote, cacheTitle);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal, remote, opts);
   }
   return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs, remote, onFatal);
 }
@@ -109,10 +131,28 @@ async function attachWithHls(
   onBeyondGenerated?: (movieMs: number) => void,
   onFatal?: (detail: string) => void,
   remote?: boolean,
-  cacheTitle?: BufferCacheTitle,
+  opts: AttachOptions = {},
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
+  const cacheTitle = opts.cacheTitle;
   const buffer = bufferCacheEnabled(session, cacheTitle) ? hlsBufferCache(video, session, cacheTitle, Hls) : null;
+  // The source sends its original video when this device decodes it. Jellyfin
+  // also lists an H.264 re-encode of the same size, which is what stalls, so
+  // the player stays on the original and falls back by asking for H.264 only.
+  const original = session.remote_video?.copy && session.remote_video.codec !== "h264" ? session.remote_video.codec : "";
+  let failCodec: (err: Error) => void = () => undefined;
+  const codecFailed = new Promise<never>((_, reject) => {
+    failCodec = reject;
+  });
+  codecFailed.catch(() => undefined);
+  let codecFallbackSent = false;
+  const codecFallback = (detail: string) => {
+    if (codecFallbackSent) return;
+    codecFallbackSent = true;
+    noteAttach(video, "codec_fallback", detail);
+    if (attached) opts.onCodecFallback?.(detail);
+    else failCodec(new CodecFallbackError(detail));
+  };
   const hls = new Hls({
     enableWorker: true,
     preferManagedMediaSource: true,
@@ -120,7 +160,10 @@ async function attachWithHls(
     ...eventPlaylistHlsSync(),
     maxBufferLength: 30,
     maxMaxBufferLength: 90,
-    backBufferLength: 900,
+    // The buffer cache keeps minutes on disk; MSE only needs a little,
+    // which matters at the 50+ Mbps of an original 4K video.
+    backBufferLength: buffer ? 30 : 900,
+    ...(buffer ? { maxBufferSize: 120 * 1000 * 1000 } : {}),
     xhrSetup(xhr) {
       xhr.withCredentials = true;
     },
@@ -161,6 +204,11 @@ async function attachWithHls(
       gone();
       return;
     }
+    const playingOriginal = original !== "" && levelCodec(hls.levels[hls.currentLevel]?.videoCodec ?? hls.levels[0]?.videoCodec) === original;
+    if (playingOriginal && data.type === Hls.ErrorTypes.MEDIA_ERROR && (mediaRecovered || !attached)) {
+      codecFallback(data.details || "media error");
+      return;
+    }
     if (!attached || isAborted()) return;
     if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
       mediaRecovered = true;
@@ -177,6 +225,19 @@ async function attachWithHls(
   hls.on(Hls.Events.MEDIA_DETACHING, () => noteAttach(video, "hls:MEDIA_DETACHING"));
   hls.on(Hls.Events.MANIFEST_LOADING, () => noteAttach(video, "hls:MANIFEST_LOADING"));
   hls.on(Hls.Events.MANIFEST_PARSED, () => noteAttach(video, "hls:MANIFEST_PARSED"));
+  if (original) {
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      // hls.js drops variants MSE cannot play, so a missing original means
+      // the browser overstated its decoder.
+      const idx = hls.levels.findIndex((l) => levelCodec(l.videoCodec) === original);
+      if (idx < 0) {
+        codecFallback(`no playable ${original} variant`);
+        return;
+      }
+      hls.currentLevel = idx;
+      noteAttach(video, "level_locked", `${original} level=${idx}`);
+    });
+  }
   const hlsQuiet = (name: string, extra?: string) => {
     if (!isFsWindow(video) && !name.includes("FLUSH") && name !== "FRAG_CHANGED") return;
     noteAttach(video, `hls:${name}`, extra);
@@ -356,15 +417,18 @@ async function attachWithHls(
   hls.loadSource(playlist);
   noteAttach(video, "hls.loadSource");
   try {
-    await waitHlsBuffered(
+    const buffered = waitHlsBuffered(
       hls as unknown as { on: (ev: string, cb: () => void) => void; off: (ev: string, cb: () => void) => void },
       video,
-      isAborted,
+      () => isAborted() || codecFallbackSent,
       Hls,
     );
+    buffered.catch(() => undefined);
+    await Promise.race([buffered, codecFailed]);
   } catch (err) {
     buffer?.destroy();
     hls.destroy();
+    if (err instanceof CodecFallbackError) throw err;
     if (fatalErr) throw fatalErr;
     throw err;
   }

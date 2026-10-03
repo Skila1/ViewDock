@@ -451,6 +451,15 @@ export interface ClientProfile {
   eac3: boolean;
   truehd: boolean;
   decoding_info?: DecodingInfo;
+  /** Video codecs the device decodes well, measured with MediaCapabilities. */
+  codecs?: Record<string, CodecCap>;
+}
+
+export interface CodecCap {
+  /** Tallest picture decoded smoothly; 2160 only with a hardware decoder. */
+  max_height: number;
+  hardware: boolean;
+  ten_bit: boolean;
 }
 
 export interface CreateSession {
@@ -517,6 +526,8 @@ export interface PlaybackSession {
   /** Playback sources for the item, present when an external media source also has it. */
   sources?: { id: string; label: string }[];
   source?: string;
+  /** External sources: the video codec sent, and whether it is the original rather than a re-encode. */
+  remote_video?: { codec: string; copy: boolean };
 }
 
 export interface ProgressPut {

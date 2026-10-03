@@ -272,10 +272,14 @@ type mediaSource struct {
 }
 
 type mediaStream struct {
-	Type    string `json:"Type"`
-	Codec   string `json:"Codec"`
-	BitRate int64  `json:"BitRate"`
-	Height  int    `json:"Height"`
+	Type           string  `json:"Type"`
+	Codec          string  `json:"Codec"`
+	BitRate        int64   `json:"BitRate"`
+	Height         int     `json:"Height"`
+	Width          int     `json:"Width"`
+	BitDepth       int     `json:"BitDepth"`
+	Level          float64 `json:"Level"`
+	VideoRangeType string  `json:"VideoRangeType"`
 }
 
 func (it item) durationMS() int64 { return it.RunTimeTicks / 10_000 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/viewdock/viewdock/internal/auth"
+	"github.com/viewdock/viewdock/internal/capability"
 	"github.com/viewdock/viewdock/internal/db"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/library"
@@ -176,7 +177,7 @@ func TestAPIKeySourceHonoursUsageRestrictions(t *testing.T) {
 
 	var remoteDune string
 	_ = sqlDB.QueryRow(`SELECT item_id FROM remote_items WHERE remote_id = 'm1'`).Scan(&remoteDune)
-	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", "", false); err == nil || calls.transcodes != 0 || !strings.Contains(err.Error(), "transcoding is turned off") {
+	if _, _, err := svc.Resolve(ctx, "movie", remoteDune, "", "", false, capability.Profile{}); err == nil || calls.transcodes != 0 || !strings.Contains(err.Error(), "transcoding is turned off") {
 		t.Fatalf("a file needing transcoding streamed with transcoding off: %v %+v", err, calls)
 	}
 
@@ -281,25 +282,25 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 		t.Fatalf("remote titles are searchable: %+v %v", hits, err)
 	}
 
-	stream, options, err := svc.Resolve(ctx, "movie", "dune", "", "", true)
+	stream, options, err := svc.Resolve(ctx, "movie", "dune", "", "", true, capability.Profile{})
 	if err != nil || stream != nil || len(options) != 2 {
 		t.Fatalf("local preferred: %v %v %v", stream, options, err)
 	}
-	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true)
+	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true, capability.Profile{})
 	if err != nil || stream == nil || stream.Delivery != decision.DeliveryHLS || stream.DurationMS != 6_000_000 {
 		t.Fatalf("remote pick: %+v %v", stream, err)
 	}
 	if strings.Contains(options[1].Label, ":") || options[1].Label == "" {
 		t.Fatalf("source label should be the server name alone: %q", options[1].Label)
 	}
-	if u, _ := url.Parse(stream.URL); u.Query().Get("VideoBitrate") != "20000000" || u.Query().Get("MaxHeight") != "" {
-		t.Fatalf("auto with no known bitrate must ask for 20 Mbps and keep the source size: %s", stream.URL)
+	if u, _ := url.Parse(stream.URL); u.Query().Get("VideoBitrate") != "20000000" || u.Query().Get("MaxHeight") != "1080" || u.Query().Get("VideoCodec") != "h264" {
+		t.Fatalf("a device that cannot decode the 4K HEVC source gets a 1080p H.264 re-encode: %s", stream.URL)
 	}
 	if got := strings.Join(stream.Qualities, ","); got != "auto,1080,720,480" {
 		t.Fatalf("qualities for a 2160p source: %s", got)
 	}
 	stream.Stop()
-	capped, _, err := svc.Resolve(ctx, "movie", "dune", options[1].ID, "720", true)
+	capped, _, err := svc.Resolve(ctx, "movie", "dune", options[1].ID, "720", true, capability.Profile{})
 	if err != nil || capped == nil {
 		t.Fatalf("720 pick: %v", err)
 	}
@@ -307,7 +308,7 @@ func TestSourceSyncMergeAndStream(t *testing.T) {
 		t.Fatalf("720 preset: %s", capped.URL)
 	}
 	capped.Stop()
-	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true)
+	stream, _, err = svc.Resolve(ctx, "movie", "dune", options[1].ID, "", true, capability.Profile{})
 	if err != nil || stream == nil {
 		t.Fatalf("remote pick again: %v", err)
 	}
@@ -361,11 +362,11 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 	}
 	mine := playback.WithStreamOwner(ctx, "viewer-a")
 	theirs := playback.WithStreamOwner(ctx, "viewer-b")
-	first, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false)
+	first, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false, capability.Profile{})
 	if err != nil || first == nil {
 		t.Fatalf("first stream: %v", err)
 	}
-	second, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false)
+	second, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false, capability.Profile{})
 	if err != nil || second == nil {
 		t.Fatalf("same viewer should replace their own stream: %v", err)
 	}
@@ -379,7 +380,7 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 	if get(first.URL) != http.StatusGone {
 		t.Fatalf("replaced stream still open")
 	}
-	if _, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false); err == nil || !strings.Contains(err.Error(), "ViewDock allows 1 stream at once") || !strings.Contains(err.Error(), "Maximum concurrent streams") {
+	if _, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false, capability.Profile{}); err == nil || !strings.Contains(err.Error(), "ViewDock allows 1 stream at once") || !strings.Contains(err.Error(), "Maximum concurrent streams") {
 		t.Fatalf("another viewer should still hit the limit, named as ViewDock's own setting: %v", err)
 	}
 	svc.mu.Lock()
@@ -388,7 +389,7 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 		g.lastHit = time.Time{}
 	}
 	svc.mu.Unlock()
-	taken, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false)
+	taken, _, err := svc.Resolve(theirs, "movie", remoteDune, "", "", false, capability.Profile{})
 	if err != nil || taken == nil {
 		t.Fatalf("an unread stream should free the slot: %v", err)
 	}
@@ -402,7 +403,7 @@ func TestStreamLimitReplacesTheSameViewer(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false); err != nil {
+			if _, _, err := svc.Resolve(mine, "movie", remoteDune, "", "", false, capability.Profile{}); err != nil {
 				errs <- err
 			}
 		}()
@@ -443,7 +444,7 @@ func TestWatchPartyMembersEachStreamWithoutCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, member := range []string{"host", "guest-1", "guest-2", "guest-3", "guest-4"} {
-		st, _, err := svc.Resolve(playback.WithStreamOwner(ctx, member), "movie", remoteDune, "", "", false)
+		st, _, err := svc.Resolve(playback.WithStreamOwner(ctx, member), "movie", remoteDune, "", "", false, capability.Profile{})
 		if err != nil || st == nil {
 			t.Fatalf("%s could not stream: %v", member, err)
 		}

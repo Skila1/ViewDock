@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LINGER_MS, expiredStreamCaches, planWindow, streamCacheName, type Span } from "./streamCache";
+import { LINGER_MS, behindToEvict, expiredStreamCaches, planWindow, streamCacheName, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
@@ -47,8 +47,27 @@ describe("planWindow", () => {
     expect(planWindow([], new Set(["s1"]), 600, "forward").evict).toEqual([]);
   });
 
+  it("skips the backfill near the disk budget", () => {
+    const plan = planWindow(spans, range(100, 150), 600, "forward", 300, false);
+    expect(plan.next).toBeNull();
+  });
+
   it("has nothing to do when the window is cached", () => {
     expect(planWindow(spans, range(50, 150), 600, "forward").next).toBeNull();
+  });
+});
+
+describe("behindToEvict", () => {
+  it("drops the oldest spans behind the playhead until the budget fits", () => {
+    const sizes = new Map([...range(50, 110)].map((k) => [k, 10] as [string, number]));
+    // 60 spans of 10 bytes, budget 450: drop 15, oldest first, never the 30s behind the playhead.
+    const out = behindToEvict(spans, sizes, 600, 600, 450);
+    expect(out).toEqual(Array.from({ length: 15 }, (_, i) => `s${50 + i}`));
+  });
+
+  it("keeps the last 30 seconds even when over budget", () => {
+    const sizes = new Map([...range(96, 110)].map((k) => [k, 10] as [string, number]));
+    expect(behindToEvict(spans, sizes, 600, 140, 0)).toEqual([]);
   });
 });
 

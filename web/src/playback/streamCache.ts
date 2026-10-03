@@ -22,6 +22,9 @@ const EVICT_MARGIN_SEC = 30;
 const MIN_AHEAD_SEC = 60;
 /** Ahead coverage below WINDOW_SEC minus this switches back to fetching forward. */
 const FORWARD_SLACK_SEC = 60;
+/** Disk a bucket may use: ten minutes of an original 4K video is about 5 GB. */
+const MAX_BUDGET_BYTES = 4 * 1024 ** 3;
+const SIZE_HEADER = "X-VD-Size";
 
 export function streamCacheSupported(): boolean {
   return typeof caches !== "undefined" && typeof window !== "undefined" && window.isSecureContext;
@@ -61,6 +64,22 @@ export function touchStreamCache(name: string, now = Date.now()) {
   const reg = readRegistry();
   reg[name] = { seenAt: now };
   writeRegistry(reg);
+}
+
+/**
+ * behindToEvict picks cached spans furthest behind the playhead (never the
+ * last 30 seconds) until bytes fits the budget, so a bucket over budget keeps
+ * what is ahead.
+ */
+export function behindToEvict(spans: Span[], sizes: Map<string, number>, playhead: number, bytes: number, budget: number): string[] {
+  const out: string[] = [];
+  const behind = spans.filter((s) => sizes.has(s.key) && s.end < playhead - EVICT_MARGIN_SEC).sort((a, b) => a.start - b.start);
+  for (const s of behind) {
+    if (bytes <= budget) break;
+    out.push(s.key);
+    bytes -= sizes.get(s.key) ?? 0;
+  }
+  return out;
 }
 
 /** Buckets whose player stopped heartbeating more than LINGER_MS ago. */
@@ -142,7 +161,14 @@ export type WindowPlan = { next: Span | null; dir: Direction; evict: string[] };
  * safe: transcoding sources restart the encoder whenever requests jump, so
  * alternating directions would restart it on every segment.
  */
-export function planWindow(spans: Span[], cached: Set<string>, playhead: number, lastDir: Direction, windowSec = WINDOW_SEC): WindowPlan {
+export function planWindow(
+  spans: Span[],
+  cached: Set<string>,
+  playhead: number,
+  lastDir: Direction,
+  windowSec = WINDOW_SEC,
+  allowBack = true,
+): WindowPlan {
   const lo = playhead - windowSec;
   const hi = playhead + windowSec;
   let forward: Span | null = null;
@@ -151,7 +177,7 @@ export function planWindow(spans: Span[], cached: Set<string>, playhead: number,
     if (cached.has(s.key)) continue;
     if (s.end > playhead && s.start < hi) {
       if (!forward || s.start < forward.start) forward = s;
-    } else if (s.end > lo && s.end <= playhead) {
+    } else if (allowBack && s.end > lo && s.end <= playhead) {
       if (!back || s.start < back.start) back = s;
     }
   }
@@ -213,7 +239,12 @@ export class StreamPrefetcher {
   private source: PrefetchSource;
   private onNote?: (what: string, detail?: string) => void;
   private cache: Cache | null = null;
+  private opened: Promise<Cache | null>;
+  private markOpened: (cache: Cache | null) => void = () => undefined;
   private cached = new Set<string>();
+  private sizes = new Map<string, number>();
+  private bytes = 0;
+  private budget = MAX_BUDGET_BYTES / 2;
   private inflight = new Map<string, Inflight>();
   private lastDir: Direction = "forward";
   private closed = false;
@@ -244,6 +275,9 @@ export class StreamPrefetcher {
     this.base = opts.keyBase;
     this.source = opts.source;
     this.onNote = opts.onNote;
+    this.opened = new Promise((resolve) => {
+      this.markOpened = resolve;
+    });
   }
 
   async start(): Promise<void> {
@@ -253,20 +287,31 @@ export class StreamPrefetcher {
     this.video.addEventListener("pause", this.onPause);
     this.video.addEventListener("seeking", this.onSeeking);
     try {
+      const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+      if (estimate?.quota) this.budget = Math.min(MAX_BUDGET_BYTES, estimate.quota * 0.5);
       const cache = await caches.open(this.name);
-      if (this.closed) return;
+      if (this.closed) {
+        this.markOpened(null);
+        return;
+      }
       const prefix = new URL(this.base + "/", location.origin).href;
       for (const req of await cache.keys()) {
         if (!req.url.startsWith(prefix)) {
           // Another quality or source of the same title.
           void cache.delete(req);
         } else if (!req.url.endsWith("/meta")) {
-          this.cached.add(new URL(req.url).pathname);
+          const key = new URL(req.url).pathname;
+          const size = Number((await cache.match(req))?.headers.get(SIZE_HEADER)) || 0;
+          this.cached.add(key);
+          this.sizes.set(key, size);
+          this.bytes += size;
         }
       }
       this.cache = cache;
-      this.onNote?.("stream_cache_open", `${this.name} cached=${this.cached.size}`);
+      this.markOpened(cache);
+      this.onNote?.("stream_cache_open", `${this.name} cached=${this.cached.size} budget_mb=${Math.round(this.budget / 1e6)}`);
     } catch (err) {
+      this.markOpened(null);
       this.onNote?.("stream_cache_unavailable", String(err));
       return;
     }
@@ -311,6 +356,7 @@ export class StreamPrefetcher {
     this.video.removeEventListener("pause", this.onPause);
     this.video.removeEventListener("seeking", this.onSeeking);
     for (const f of this.inflight.values()) f.abort.abort();
+    this.markOpened(null);
     this.wake();
   }
 
@@ -318,10 +364,15 @@ export class StreamPrefetcher {
     const abort = new AbortController();
     const promise = (async () => {
       const buf = await this.source.fetch(span, abort.signal);
-      if (this.cache && !this.closed) {
+      // A span fetched before the bucket opened is still stored, so the
+      // background loop does not fetch it again.
+      const cache = await this.opened;
+      if (cache && !this.closed && !this.cached.has(span.key)) {
         try {
-          await this.cache.put(span.key, new Response(buf));
+          await cache.put(span.key, new Response(buf, { headers: { [SIZE_HEADER]: String(buf.byteLength) } }));
           this.cached.add(span.key);
+          this.sizes.set(span.key, buf.byteLength);
+          this.bytes += buf.byteLength;
         } catch (err) {
           // Usually QuotaExceededError: keep serving, stop growing until something is evicted.
           if (!this.full) this.onNote?.("stream_cache_full", String(err));
@@ -356,12 +407,23 @@ export class StreamPrefetcher {
         continue;
       }
       const playhead = this.video.currentTime || 0;
-      const plan = planWindow(this.source.spans(playhead), this.cached, playhead, this.lastDir);
-      if (plan.evict.length > 0) {
-        for (const key of plan.evict) this.cached.delete(key);
-        await Promise.all(plan.evict.map((key) => cache.delete(key).catch(() => false)));
+      const spans = this.source.spans(playhead);
+      let plan = planWindow(spans, this.cached, playhead, this.lastDir);
+      const evict = [...plan.evict];
+      if (this.bytes >= this.budget) evict.push(...behindToEvict(spans, this.sizes, playhead, this.bytes, this.budget * 0.9));
+      if (evict.length > 0) {
+        for (const key of evict) {
+          this.cached.delete(key);
+          this.bytes -= this.sizes.get(key) ?? 0;
+          this.sizes.delete(key);
+        }
+        await Promise.all(evict.map((key) => cache.delete(key).catch(() => false)));
         this.full = false;
+        plan = planWindow(spans, this.cached, playhead, this.lastDir);
       }
+      // Near the budget only what is ahead is fetched.
+      if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, this.cached, playhead, "forward", WINDOW_SEC, false);
+      if (this.bytes >= this.budget) plan = { ...plan, next: null };
       if (!plan.next || this.full) {
         await this.sleep();
         continue;

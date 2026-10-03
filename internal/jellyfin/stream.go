@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/viewdock/viewdock/internal/auth"
+	"github.com/viewdock/viewdock/internal/capability"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/library"
@@ -49,7 +50,7 @@ var _ playback.Sources = (*Service)(nil)
 
 // Resolve implements playback.Sources. Local files win unless another
 // source is picked; items that exist only remotely stream from Jellyfin.
-func (s *Service) Resolve(ctx context.Context, itemKind, itemID, pick, quality string, hasLocal bool) (*playback.RemoteStream, []playback.SourceOption, error) {
+func (s *Service) Resolve(ctx context.Context, itemKind, itemID, pick, quality string, hasLocal bool, device capability.Profile) (*playback.RemoteStream, []playback.SourceOption, error) {
 	cands, err := s.candidates(ctx, itemKind, itemID)
 	if err != nil {
 		return nil, nil, err
@@ -76,7 +77,7 @@ func (s *Service) Resolve(ctx context.Context, itemKind, itemID, pick, quality s
 		}
 		chosen = 0
 	}
-	stream, err := s.openStream(ctx, cands[chosen], quality)
+	stream, err := s.openStream(ctx, cands[chosen], quality, device)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -186,7 +187,7 @@ func (s *Service) twinTitles(ctx context.Context, table, title string, year, tmd
 	return ids, rows.Err()
 }
 
-func (s *Service) openStream(ctx context.Context, c candidate, quality string) (*playback.RemoteStream, error) {
+func (s *Service) openStream(ctx context.Context, c candidate, quality string, device capability.Profile) (*playback.RemoteStream, error) {
 	src, err := s.get(ctx, c.sourceID)
 	if err != nil {
 		return nil, &playback.SourceUnavailable{Reason: "The Jellyfin server is not available right now."}
@@ -213,25 +214,18 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		return nil, &playback.SourceUnavailable{Reason: publicJellyfinError(err)}
 	}
 	mediaSourceID := c.remoteID
-	direct := false
 	var ms mediaSource
 	if len(it.MediaSources) > 0 {
 		ms = it.MediaSources[0]
 		if ms.ID != "" {
 			mediaSourceID = ms.ID
 		}
-		direct = browserPlayable(ms)
 	}
-	preset, capped := qualityPresets[quality]
-	if capped && !src.Policy.allows(opTranscode) {
-		capped = false
-	}
+	plan := negotiate(ms, device, quality, src.Policy.allows(opTranscode))
+	direct := plan.direct
 	if !direct && !src.Policy.allows(opTranscode) {
 		s.event(ctx, src.ID, "blocked", false, "refused stream: the file needs Jellyfin transcoding, which is not allowed")
 		return nil, &playback.SourceUnavailable{Reason: "This file needs transcoding, and transcoding is turned off for this Jellyfin server."}
-	}
-	if capped {
-		direct = false
 	}
 	tok, err := auth.RandomToken(24)
 	if err != nil {
@@ -247,16 +241,22 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		return nil, err
 	}
 	mode := "hls"
-	if direct {
+	switch {
+	case direct:
 		mode = "direct play"
+	case plan.copy:
+		mode = "hls with the original " + plan.codec + " video"
+	default:
+		mode = "hls re-encoded to h264"
 	}
 	s.event(ctx, src.ID, "stream_start", true, fmt.Sprintf("%s of item %s", mode, c.remoteID))
 
 	prefix := "/api/v1/media-sources/stream/" + tok + "/Videos/" + url.PathEscape(c.remoteID) + "/"
 	out := &playback.RemoteStream{
 		Source: c.option.ID, DurationMS: it.durationMS(),
-		Qualities: remoteQualities(ms, src.Policy.allows(opTranscode)),
-		Stop:      func() { s.revoke(tok) },
+		Qualities:  remoteQualities(ms, src.Policy.allows(opTranscode)),
+		Stop:       func() { s.revoke(tok) },
+		VideoCodec: plan.codec, VideoCopy: plan.copy,
 	}
 	if direct {
 		out.Delivery = decision.DeliveryDirect
@@ -264,53 +264,8 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string) (
 		return out, nil
 	}
 	out.Delivery = decision.DeliveryHLS
-	videoRate := autoVideoBitrate(ms)
-	if capped {
-		videoRate = preset.videoBitrate
-	}
-	out.URL = prefix + "master.m3u8?" + hlsQuery(mediaSourceID, g.playID, g.deviceID, preset, capped, videoRate).Encode()
+	out.URL = prefix + "master.m3u8?" + hlsQuery(mediaSourceID, g.playID, g.deviceID, plan).Encode()
 	return out, nil
-}
-
-// Jellyfin sizes its encoder from VideoBitrate. Without one, hardware encoders
-// fall back to a low default. Auto asks for the file's own video bitrate, so a
-// transcode stays at the original quality and a compatible stream can be copied.
-// Asking far above the file makes Jellyfin encode a much larger stream.
-const (
-	autoMaxBitrate     = 80_000_000
-	autoUnknownBitrate = 20_000_000
-	audioBitrate       = 320_000
-)
-
-type qualityPreset struct {
-	maxHeight, maxWidth int
-	videoBitrate        int64
-}
-
-// qualityPresets match the quality choices the player offers for local files.
-var qualityPresets = map[string]qualityPreset{
-	"1080": {maxHeight: 1080, maxWidth: 1920, videoBitrate: 10_000_000},
-	"720":  {maxHeight: 720, maxWidth: 1280, videoBitrate: 5_000_000},
-	"480":  {maxHeight: 480, maxWidth: 854, videoBitrate: 2_000_000},
-}
-
-func autoVideoBitrate(ms mediaSource) int64 {
-	var rate int64
-	for _, st := range ms.MediaStreams {
-		if st.Type == "Video" && st.BitRate > rate {
-			rate = st.BitRate
-		}
-	}
-	if rate <= 0 && ms.Bitrate > audioBitrate {
-		rate = ms.Bitrate - audioBitrate
-	}
-	if rate <= 0 {
-		rate = autoUnknownBitrate
-	}
-	if rate > autoMaxBitrate-audioBitrate {
-		rate = autoMaxBitrate - audioBitrate
-	}
-	return rate
 }
 
 func publicJellyfinError(err error) string {
@@ -329,23 +284,6 @@ func publicJellyfinError(err error) string {
 		}
 	}
 	return "The media source is unavailable right now."
-}
-
-func hlsQuery(mediaSourceID, playID, deviceID string, preset qualityPreset, capped bool, video int64) url.Values {
-	q := url.Values{
-		"MediaSourceId": {mediaSourceID}, "PlaySessionId": {playID}, "DeviceId": {deviceID},
-		"VideoCodec": {"h264"}, "AudioCodec": {"aac"},
-		"VideoBitrate": {fmt.Sprint(video)}, "AudioBitrate": {fmt.Sprint(audioBitrate)},
-		"MaxStreamingBitrate": {fmt.Sprint(video + audioBitrate)}, "TranscodingMaxAudioChannels": {"2"},
-		"SegmentContainer": {"ts"}, "AllowVideoStreamCopy": {"true"}, "AllowAudioStreamCopy": {"true"},
-		"BreakOnNonKeyFrames": {"true"}, "h264-level": {"51"},
-		"h264-profile": {"high,main,baseline,constrained baseline"},
-	}
-	if capped {
-		q.Set("MaxHeight", fmt.Sprint(preset.maxHeight))
-		q.Set("MaxWidth", fmt.Sprint(preset.maxWidth))
-	}
-	return q
 }
 
 // remoteQualities lists auto plus the presets below the source height, when

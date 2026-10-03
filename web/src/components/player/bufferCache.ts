@@ -84,7 +84,7 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
     private cancelled = false;
     private pending: LoaderCallbacks<LoaderContext> | null = null;
 
-    load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>) {
+    load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>, retries = 0) {
       const { frag, part } = context as FragmentLoaderContext;
       if (!frag || part || typeof frag.sn !== "number" || frag.byteRange.length > 0 || context.rangeStart != null) {
         super.load(context, config, callbacks);
@@ -110,6 +110,12 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
         },
         (err: unknown) => {
           if (this.cancelled) return;
+          // A shared background fetch was aborted (pause, seek): ask again
+          // instead of opening a second request to the source.
+          if (err instanceof DOMException && err.name === "AbortError" && retries < 2) {
+            this.load(context, config, callbacks, retries + 1);
+            return;
+          }
           this.pending = null;
           if (err instanceof StreamFetchError) {
             stats.loading.end = performance.now();

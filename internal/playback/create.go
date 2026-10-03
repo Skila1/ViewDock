@@ -548,6 +548,9 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		}
 		out["vod_ondemand"] = true
 		out["seekable_from_ms"] = 0
+		if s.RemoteVideoCodec != "" {
+			out["remote_video"] = map[string]any{"codec": s.RemoteVideoCodec, "copy": s.RemoteVideoCopy}
+		}
 		if s.Delivery == decision.DeliveryDirect {
 			urls["file"] = s.RemoteURL
 		} else {

@@ -7,20 +7,58 @@ import (
 
 // Profile is the player-reported ClientProfile. Explicit false wins over UA inference.
 type Profile struct {
-	UserAgent     string         `json:"user_agent"`
-	MSE           *bool          `json:"mse"`
-	HLSNative     *bool          `json:"hls_native"`
-	ASSJS         *bool          `json:"ass_js"`
-	HDR           *bool          `json:"hdr"`
-	ViewportW     int            `json:"viewport_w"`
-	ViewportH     int            `json:"viewport_h"`
-	HEVC          *bool          `json:"hevc"`
-	HEVCMain10    *bool          `json:"hevc_main10"`
-	AV1           *bool          `json:"av1"`
-	AC3           *bool          `json:"ac3"`
-	EAC3          *bool          `json:"eac3"`
-	TrueHD        *bool          `json:"truehd"`
-	DecodingInfo  map[string]any `json:"decoding_info"`
+	UserAgent    string         `json:"user_agent"`
+	MSE          *bool          `json:"mse"`
+	HLSNative    *bool          `json:"hls_native"`
+	ASSJS        *bool          `json:"ass_js"`
+	HDR          *bool          `json:"hdr"`
+	ViewportW    int            `json:"viewport_w"`
+	ViewportH    int            `json:"viewport_h"`
+	HEVC         *bool          `json:"hevc"`
+	HEVCMain10   *bool          `json:"hevc_main10"`
+	AV1          *bool          `json:"av1"`
+	AC3          *bool          `json:"ac3"`
+	EAC3         *bool          `json:"eac3"`
+	TrueHD       *bool          `json:"truehd"`
+	DecodingInfo map[string]any `json:"decoding_info"`
+	// Codecs is what the device decodes well, per video codec ("h264",
+	// "hevc", "av1"), measured by the player with MediaCapabilities.
+	Codecs map[string]CodecCap `json:"codecs,omitempty"`
+}
+
+// CodecCap is one video codec the device can decode. MaxHeight is the
+// tallest picture it decodes smoothly; 2160 is only reported when the
+// decoder is hardware (power efficient), since software 4K stutters.
+type CodecCap struct {
+	MaxHeight int  `json:"max_height"`
+	Hardware  bool `json:"hardware"`
+	TenBit    bool `json:"ten_bit"`
+}
+
+// DecodeLimit is the tallest picture of codec the device plays without
+// re-encoding, or 0 when it cannot decode it. tenBit asks for 10-bit
+// video (HDR and most HEVC remuxes). Without measured codecs the limit
+// falls back to the codec flags at 1080p.
+func (p Profile) DecodeLimit(codec string, tenBit bool) int {
+	if c, ok := p.Codecs[codec]; ok {
+		if tenBit && !c.TenBit {
+			return 0
+		}
+		return c.MaxHeight
+	}
+	ok := false
+	switch codec {
+	case "h264":
+		ok = !tenBit
+	case "hevc":
+		ok = p.HevcOK(tenBit)
+	case "av1":
+		ok = p.Bool("av1")
+	}
+	if ok {
+		return 1080
+	}
+	return 0
 }
 
 func Parse(raw []byte) (Profile, error) {

@@ -809,6 +809,20 @@ components:
         decoding_info:
           type: object
           additionalProperties: true
+        codecs:
+          type: object
+          description: >
+            Video codecs the device decodes well ("h264", "hevc", "av1"), measured
+            with MediaCapabilities. max_height is 2160 only with a hardware decoder.
+            External sources send the original video when the device decodes it.
+          additionalProperties:
+            $ref: "#/components/schemas/CodecCap"
+    CodecCap:
+      type: object
+      properties:
+        max_height: { type: integer }
+        hardware: { type: boolean }
+        ten_bit: { type: boolean }
     CreateSession:
       type: object
       required: [item_kind, item_id]
@@ -871,6 +885,14 @@ components:
           nullable: true
         duration_ms: { type: integer }
         seekable_from_ms: { type: integer }
+        remote_video:
+          type: object
+          description: >
+            External source sessions only: the video codec the player receives, and
+            whether it is the original video (copy) rather than a re-encode.
+          properties:
+            codec: { type: string }
+            copy: { type: boolean }
     CreateUploadRequest:
       type: object
       required: [library_id, filename]

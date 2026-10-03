@@ -79,7 +79,11 @@ type Session struct {
 	RemoteURL     string
 	// RemoteQualities are the quality choices the external source offers.
 	RemoteQualities []string
-	remoteStop      func()
+	// RemoteVideoCodec and RemoteVideoCopy describe the video the external
+	// source sends: its codec, and whether it is the original, not a re-encode.
+	RemoteVideoCodec string
+	RemoteVideoCopy  bool
+	remoteStop       func()
 
 	checkpoint checkpointState
 

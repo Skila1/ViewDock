@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/viewdock/viewdock/internal/auth"
+	"github.com/viewdock/viewdock/internal/capability"
 	"github.com/viewdock/viewdock/internal/decision"
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/library"
@@ -33,6 +34,10 @@ type RemoteStream struct {
 	Qualities []string
 	// Stop revokes the stream grant and ends any remote transcode.
 	Stop func()
+	// VideoCodec is the codec the player receives and VideoCopy whether the
+	// source sends the original video instead of re-encoding it.
+	VideoCodec string
+	VideoCopy  bool
 }
 
 // ErrSourceUnavailable means the chosen external source cannot play now.
@@ -70,9 +75,11 @@ func StreamOwner(ctx context.Context) string {
 
 // Sources resolves external media sources for catalogue items. pick is ""
 // (prefer local), SourceLocal, or an option id. quality is a player quality
-// choice ("" or "auto" for the original). A nil stream plays locally.
+// choice ("" or "auto" for the original). client is what the requesting
+// device decodes, so the source can send video it plays as is. A nil stream
+// plays locally.
 type Sources interface {
-	Resolve(ctx context.Context, itemKind, itemID, pick, quality string, hasLocal bool) (*RemoteStream, []SourceOption, error)
+	Resolve(ctx context.Context, itemKind, itemID, pick, quality string, hasLocal bool, client capability.Profile) (*RemoteStream, []SourceOption, error)
 }
 
 // createRemote answers the request with an external source session when one
@@ -93,7 +100,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		writeHidden(w, errHidden)
 		return true, nil
 	}
-	stream, options, err := a.Sources.Resolve(WithStreamOwner(r.Context(), p.ID()), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal)
+	stream, options, err := a.Sources.Resolve(WithStreamOwner(r.Context(), p.ID()), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal, body.Client.WithUA(r.UserAgent()))
 	if err != nil {
 		if errors.Is(err, library.ErrNotFound) {
 			writeHidden(w, errHidden)
@@ -138,6 +145,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
 		Decision:    decision.Result{Delivery: stream.Delivery, Mode: "remote", Playback: "remote"},
 		Source:      stream.Source, SourceOptions: options, RemoteURL: stream.URL, RemoteQualities: stream.Qualities, remoteStop: stream.Stop,
+		RemoteVideoCodec: stream.VideoCodec, RemoteVideoCopy: stream.VideoCopy,
 	}
 	a.Reg.Put(sess)
 	if a.Log != nil {
