@@ -145,6 +145,7 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
     // Jellyfin copying the original video serves any segment at disk speed;
     // a re-encode restarts when requests jump ahead, so it gets one at a time.
     parallel: session.remote_video?.copy ? 2 : 1,
+    encodes: !session.remote_video?.copy,
     spans() {
       if (!hls) return [];
       const lvl = level >= 0 ? level : Math.max(0, hls.loadLevel);

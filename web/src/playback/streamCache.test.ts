@@ -193,4 +193,27 @@ describe("StreamPrefetcher", () => {
     p.destroy();
     vi.unstubAllGlobals();
   });
+
+  it("never fetches behind the playhead from a source that encodes", async () => {
+    const bucket = { keys: async () => [], match: async () => undefined, put: async () => undefined, delete: async () => true };
+    vi.stubGlobal("caches", { open: async () => bucket, keys: async () => [], delete: async () => true });
+    const video = document.createElement("video");
+    Object.defineProperty(video, "paused", { value: false });
+    Object.defineProperty(video, "currentTime", { value: 300 });
+    const asked: number[] = [];
+    const source: PrefetchSource = {
+      encodes: true,
+      spans: () => spans,
+      fetch: async (span) => {
+        asked.push(span.start);
+        return new ArrayBuffer(4);
+      },
+    };
+    const p = new StreamPrefetcher({ video, cacheName: "vd-test", keyBase: "/k", source, startSec: 300 });
+    await p.start();
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(20));
+    p.destroy();
+    vi.unstubAllGlobals();
+    expect(asked.every((start) => start >= 300)).toBe(true);
+  });
 });

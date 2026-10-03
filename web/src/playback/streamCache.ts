@@ -345,6 +345,12 @@ export type PrefetchSource = {
    * jump ahead of it.
    */
   parallel?: number;
+  /**
+   * The source encodes as it goes. Only what is ahead is fetched: asking
+   * for anything behind restarts the encoder there, and the next request
+   * ahead restarts it again.
+   */
+  encodes?: boolean;
 };
 
 /** promise has the data; stored settles once it is in the bucket (or could not be). */
@@ -680,7 +686,8 @@ export class StreamPrefetcher {
       const spans = this.source.spans(playhead, win);
       // Spans already downloading count as taken when picking the next one.
       const taken = () => new Set([...this.cached, ...this.inflight.keys()]);
-      let plan = planWindow(spans, taken(), playhead, this.lastDir, win);
+      const back = !this.source.encodes;
+      let plan = planWindow(spans, taken(), playhead, back ? this.lastDir : "forward", win, back);
       const evict = plan.evict.filter((key) => this.cached.has(key));
       if (this.bytes >= this.budget) evict.push(...behindToEvict(spans, this.sizes, playhead, this.bytes, this.budget * 0.9));
       if (evict.length > 0) {
@@ -691,7 +698,7 @@ export class StreamPrefetcher {
         }
         await Promise.all(evict.map((key) => cache.delete(key).catch(() => false)));
         this.full = false;
-        plan = planWindow(spans, taken(), playhead, this.lastDir, win);
+        plan = planWindow(spans, taken(), playhead, back ? this.lastDir : "forward", win, back);
       }
       // Near the budget only what is ahead is fetched.
       if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, taken(), playhead, "forward", win, false);
