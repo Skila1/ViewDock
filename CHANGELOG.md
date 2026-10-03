@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- keep downloading when the buffer cache is full, resume from the server after a reopen
+
 ## 0.4.2
 
 - hold five seconds ahead in the player for buffered streams
