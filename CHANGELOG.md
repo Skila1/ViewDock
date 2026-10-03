@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.4
 
 - The player never actually played from the Jellyfin buffer cache: it downloaded every segment again itself while the cache downloaded the same segments alongside it, so each segment crossed the network twice and playback still stalled. The player now reads from the cache, and a segment the cache is already downloading is shared instead of requested again.
 - When Jellyfin sends the original video, the buffer cache downloads two segments at once, which on a fast link roughly doubles how far ahead of playback it gets. Re-encoded streams still download one segment at a time, because the encoder restarts when requests jump ahead.
