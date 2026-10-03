@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Resuming a 4K Jellyfin film could load forever: Jellyfin sometimes answers the first segment after a jump with an empty response, and the player then switched to Jellyfin's backup H.264 re-encode, which is slower than real time. Empty segments are now retried, and the backup re-encode is never used while the original video plays (a device that cannot decode it still falls back to H.264 properly).
+- The player keeps about two segments in the browser's video buffer during cached 4K playback, so it no longer hits Chrome's buffer limit.
+
 ## 0.3.8
 
 - Closing the player could erase the resume point: it sent position 0 because the video had already been removed from the page. It now sends the last position it played, and the server ignores a stop at 0 when it knows where the viewer was.

@@ -53,7 +53,13 @@ async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<str
   try {
     const res = await fetch(url, { credentials: "include", signal: idle.signal, headers });
     if (!res.ok || (want != null && res.status !== want)) throw new StreamFetchError(res.status);
-    if (!res.body) return await res.arrayBuffer();
+    // Jellyfin can answer 200 with an empty body while it restarts its
+    // remux at a new position; that is a failed download to retry, never data.
+    if (!res.body) {
+      const buf = await res.arrayBuffer();
+      if (!buf.byteLength) throw new StreamFetchError(502);
+      return buf;
+    }
     const reader = res.body.getReader();
     const parts: Uint8Array[] = [];
     let size = 0;
@@ -64,6 +70,7 @@ async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<str
       parts.push(value);
       size += value.byteLength;
     }
+    if (size === 0) throw new StreamFetchError(502);
     const out = new Uint8Array(size);
     let at = 0;
     for (const p of parts) {

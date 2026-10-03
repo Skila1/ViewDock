@@ -60,6 +60,22 @@ describe("cached fragment loader", () => {
     cache.destroy();
   });
 
+  it("reports an empty segment as a failed download, not as data", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(0))));
+    const video = document.createElement("video");
+    const cache = hlsBufferCache(video, session, { kind: "movie", id: "m1" }, FakeHls);
+    const Loader = cache.fLoader as unknown as new (c: HlsConfig) => {
+      load: (ctx: LoaderContext, cfg: LoaderConfiguration, cb: LoaderCallbacks<LoaderContext>) => void;
+    };
+    const onError = vi.fn();
+    const onSuccess = vi.fn();
+    new Loader({} as HlsConfig).load(context(4), {} as LoaderConfiguration, { onSuccess, onError, onTimeout: vi.fn() } as unknown as LoaderCallbacks<LoaderContext>);
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(onError.mock.calls[0][0].code).toBe(502);
+    expect(onSuccess).not.toHaveBeenCalled();
+    cache.destroy();
+  });
+
   it("leaves real byte-range requests to the default loader", () => {
     const video = document.createElement("video");
     const cache = hlsBufferCache(video, session, { kind: "movie", id: "m1" }, FakeHls);
