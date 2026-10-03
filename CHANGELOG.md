@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- hold five seconds ahead in the player for buffered streams
+
 ## 0.4.1
 
 - download one segment at a time until Jellyfin answers
