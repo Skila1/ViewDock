@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.6
 
 - A Jellyfin title left paused in a background tab could end its stream (browsers slow hidden tabs' timers to once a minute, and the server ended sessions after 45 seconds), and the player then kept loading forever. External-source sessions now last 5 minutes without a check-in, the player checks in as soon as the tab is visible again, and a session that ended anyway reopens at the same position, still paused if it was.
 - Resuming a Jellyfin title no longer downloads the first minutes of the film before jumping to the resume point; it starts loading where you left off.
