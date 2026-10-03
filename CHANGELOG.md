@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - Jellyfin playback keeps the five minutes before and after the playhead stored in the browser, filled in the background from the moment playback starts, so a slow Jellyfin server or network no longer stalls the picture. Downloading pauses while the player is paused. The stored copy is kept for three minutes after the player closes, so resuming the same title soon reuses it, and is then deleted. Signing out deletes it at once.
 - Jellyfin sources resync every 30 minutes instead of every 6 hours, so new, changed and removed titles show up sooner.
