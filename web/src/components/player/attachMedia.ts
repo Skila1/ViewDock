@@ -13,6 +13,8 @@ import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
   engine: PlaybackEngine;
+  /** Waits until enough is cached ahead to start without stalling (buffer cache sessions). */
+  prebuffer?: (maxMs: number) => Promise<void>;
   generatedEndSec?: () => number | undefined;
   destroy: () => void;
 };
@@ -72,6 +74,7 @@ export async function attachSession(
     onEngine?.("direct");
     return {
       engine: "direct",
+      prebuffer: buffer?.prebuffer,
       destroy() {
         aborted = true;
         buffer?.destroy();
@@ -435,6 +438,7 @@ async function attachWithHls(
   attached = true;
   return {
     engine: "hlsjs",
+    prebuffer: buffer?.prebuffer,
     generatedEndSec: () => playlistEdge,
     destroy() {
       stopHoldPoll();

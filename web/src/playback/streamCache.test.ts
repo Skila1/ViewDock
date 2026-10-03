@@ -1,24 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { LINGER_MS, behindToEvict, expiredStreamCaches, planWindow, streamCacheName, type Span } from "./streamCache";
+import { LINGER_MS, behindToEvict, cachedAhead, expiredStreamCaches, planWindow, prebufferTarget, streamCacheName, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
 const range = (from: number, to: number) => new Set(spans.slice(from, to).map((s) => s.key));
 
+const FIVE = { ahead: 300, behind: 300 };
+
 describe("planWindow", () => {
   it("fetches the segment under the playhead first", () => {
-    const plan = planWindow(spans, new Set(), 600, "forward");
+    const plan = planWindow(spans, new Set(), 600, "forward", FIVE);
     expect(plan.next?.key).toBe("s100");
     expect(plan.dir).toBe("forward");
   });
 
   it("keeps filling forward until five minutes ahead are cached", () => {
-    const plan = planWindow(spans, range(100, 130), 600, "forward");
+    const plan = planWindow(spans, range(100, 130), 600, "forward", FIVE);
     expect(plan.next?.key).toBe("s130");
   });
 
   it("backfills behind in ascending order once ahead is full", () => {
-    const plan = planWindow(spans, range(100, 150), 600, "forward");
+    const plan = planWindow(spans, range(100, 150), 600, "forward", FIVE);
     expect(plan.next?.key).toBe("s50");
     expect(plan.dir).toBe("back");
   });
@@ -26,20 +28,20 @@ describe("planWindow", () => {
   it("stays on the backfill while enough is cached ahead", () => {
     // The playhead moved one segment, opening a gap at the forward edge.
     const cached = new Set([...range(60, 100), ...range(101, 150)]);
-    const plan = planWindow(spans, cached, 606, "back");
+    const plan = planWindow(spans, cached, 606, "back", FIVE);
     expect(plan.next?.key).toBe("s51");
     expect(plan.dir).toBe("back");
   });
 
   it("returns forward when the ahead buffer runs low", () => {
     const cached = new Set([...range(60, 100), ...range(100, 105)]);
-    const plan = planWindow(spans, cached, 600, "back");
+    const plan = planWindow(spans, cached, 600, "back", FIVE);
     expect(plan.next?.key).toBe("s105");
     expect(plan.dir).toBe("forward");
   });
 
   it("evicts spans outside the window and its margin", () => {
-    const plan = planWindow(spans, new Set(["s0", "s45", "s100", "s154", "s155", "s199"]), 600, "forward");
+    const plan = planWindow(spans, new Set(["s0", "s45", "s100", "s154", "s155", "s199"]), 600, "forward", FIVE);
     expect(plan.evict.sort()).toEqual(["s0", "s155", "s199"]);
   });
 
@@ -48,12 +50,36 @@ describe("planWindow", () => {
   });
 
   it("skips the backfill near the disk budget", () => {
-    const plan = planWindow(spans, range(100, 150), 600, "forward", 300, false);
+    const plan = planWindow(spans, range(100, 150), 600, "forward", FIVE, false);
     expect(plan.next).toBeNull();
   });
 
   it("has nothing to do when the window is cached", () => {
-    expect(planWindow(spans, range(50, 150), 600, "forward").next).toBeNull();
+    expect(planWindow(spans, range(50, 150), 600, "forward", FIVE).next).toBeNull();
+  });
+
+  it("downloads ten minutes ahead by default", () => {
+    expect(planWindow(spans, range(100, 150), 600, "forward").next?.key).toBe("s150");
+    expect(planWindow(spans, range(100, 200), 600, "forward").next?.key).toBe("s50");
+  });
+});
+
+describe("prebuffer", () => {
+  it("needs a short head start when downloads outrun playback", () => {
+    expect(prebufferTarget(undefined, 6000)).toBe(12);
+    expect(prebufferTarget(2, 6000)).toBe(12);
+    expect(prebufferTarget(1.1, 6000)).toBe(30);
+  });
+
+  it("buffers enough to finish when downloads are slower than playback", () => {
+    expect(prebufferTarget(0.95, 300)).toBe(45);
+    expect(prebufferTarget(0.5, 6000)).toBe(600);
+  });
+
+  it("measures gapless cached seconds from the playhead", () => {
+    expect(cachedAhead(spans, range(100, 110), 603)).toBe(57);
+    expect(cachedAhead(spans, new Set([...range(100, 103), ...range(104, 110)]), 600)).toBe(18);
+    expect(cachedAhead(spans, range(101, 110), 600)).toBe(0);
   });
 });
 

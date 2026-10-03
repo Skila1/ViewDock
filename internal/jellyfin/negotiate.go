@@ -37,11 +37,19 @@ var qualityPresets = map[string]qualityPreset{
 }
 
 // browserRanges are the dynamic ranges a browser shows itself, tone mapping
-// HDR on SDR screens. Dolby Vision without a compatible base layer is not one.
+// HDR on SDR screens. Dolby Vision qualifies when it has an HDR10, HLG or
+// SDR base layer (profiles 7, 8 and UHD Blu-ray remuxes with an enhancement
+// layer): Jellyfin drops the Dolby Vision data and copies the base layer.
+// Profile 5 ("DOVI") has no such layer and shows wrong colours without it.
 var browserRanges = map[string]bool{
 	"": true, "SDR": true, "HDR10": true, "HDR10Plus": true, "HLG": true,
 	"DOVIWithHDR10": true, "DOVIWithHDR10Plus": true, "DOVIWithHLG": true, "DOVIWithSDR": true,
+	"DOVIWithEL": true, "DOVIWithELHDR10Plus": true,
 }
+
+// copyRanges is what ViewDock tells Jellyfin the browser shows. Leaving
+// Dolby Vision out makes Jellyfin copy a Dolby Vision source as its base layer.
+const copyRanges = "SDR,HDR10,HDR10Plus,HLG"
 
 // streamPlan is what ViewDock asks Jellyfin for, for one device.
 type streamPlan struct {
@@ -57,6 +65,8 @@ type streamPlan struct {
 	maxHeight, maxWidth int
 	// extra holds Jellyfin's per-codec limits ("hevc-rangetype", ...).
 	extra url.Values
+	// why says what the source is and, for a re-encode, why it was needed.
+	why string
 }
 
 func videoStream(ms mediaSource) mediaStream {
@@ -99,17 +109,35 @@ func negotiate(ms mediaSource, client capability.Profile, quality string, transc
 		capped = false
 	}
 	srcRate := autoVideoBitrate(ms)
+	depthNote := "8-bit"
+	if v.tenBit() {
+		depthNote = "10-bit"
+	}
+	rangeNote := v.VideoRangeType
+	if rangeNote == "" {
+		rangeNote = "SDR"
+	}
+	source := fmt.Sprintf("source %s %dp %s %s", src, height, depthNote, rangeNote)
 
-	copyable := !capped && browserRanges[v.VideoRangeType] && (src == "h264" || src == "hevc" || src == "av1")
-	if src == "h264" && v.tenBit() {
-		copyable = false
+	var reason string
+	switch {
+	case capped:
+		reason = "quality " + quality + " was chosen"
+	case src != "h264" && src != "hevc" && src != "av1":
+		reason = "browsers do not play " + src
+	case !browserRanges[v.VideoRangeType]:
+		reason = "browsers cannot show the " + rangeNote + " dynamic range"
+	case src == "h264" && v.tenBit():
+		reason = "browsers do not play 10-bit H.264"
+	default:
+		if limit := client.DecodeLimit(src, v.tenBit()); limit == 0 {
+			reason = "the device has no " + depthNote + " " + src + " decoder"
+		} else if height > limit {
+			reason = fmt.Sprintf("the device decodes %s up to %dp only (no hardware decoder for more)", src, limit)
+		}
 	}
-	if copyable {
-		limit := client.DecodeLimit(src, v.tenBit())
-		copyable = limit > 0 && height <= limit
-	}
-	if copyable {
-		p := streamPlan{copy: true, codec: src, container: "ts", extra: url.Values{}}
+	if reason == "" {
+		p := streamPlan{copy: true, codec: src, container: "ts", extra: url.Values{}, why: source}
 		if src == "h264" && browserPlayable(ms) {
 			p.direct = true
 			return p
@@ -129,17 +157,13 @@ func negotiate(ms mediaSource, client capability.Profile, quality string, transc
 			if v.tenBit() && depth < 10 {
 				depth = 10
 			}
-			rng := v.VideoRangeType
-			if rng == "" {
-				rng = "SDR"
-			}
 			p.extra.Set(src+"-videobitdepth", fmt.Sprint(depth))
-			p.extra.Set(src+"-rangetype", rng)
+			p.extra.Set(src+"-rangetype", copyRanges)
 		}
 		return p
 	}
 
-	p := streamPlan{codec: "h264", container: "ts", videoRate: srcRate, extra: url.Values{}}
+	p := streamPlan{codec: "h264", container: "ts", videoRate: srcRate, extra: url.Values{}, why: source + ": " + reason}
 	if capped {
 		p.maxHeight, p.maxWidth, p.videoRate = preset.maxHeight, preset.maxWidth, preset.videoBitrate
 		return p

@@ -27,7 +27,7 @@ func TestNegotiate(t *testing.T) {
 			t.Fatalf("plan %+v", p)
 		}
 		q := hlsQuery("m", "p", "d", p)
-		if q.Get("VideoCodec") != "h264,hevc" || q.Get("hevc-rangetype") != "HDR10" || q.Get("hevc-videobitdepth") != "10" || q.Get("SegmentContainer") != "mp4" {
+		if q.Get("VideoCodec") != "h264,hevc" || q.Get("hevc-rangetype") != copyRanges || q.Get("hevc-videobitdepth") != "10" || q.Get("SegmentContainer") != "mp4" {
 			t.Fatalf("query %v", q)
 		}
 		if p.videoRate < 70_000_000 {
@@ -36,7 +36,8 @@ func TestNegotiate(t *testing.T) {
 	})
 	t.Run("4K without a hardware decoder is re-encoded to 1080p", func(t *testing.T) {
 		p := negotiate(hdr4k, softwareOnly, "", true)
-		if p.copy || p.codec != "h264" || p.maxHeight != 1080 || p.maxWidth != 1920 || p.videoRate != transcodeMaxBitrate {
+		if p.copy || p.codec != "h264" || p.maxHeight != 1080 || p.maxWidth != 1920 || p.videoRate != transcodeMaxBitrate ||
+			p.why != "source hevc 2160p 10-bit HDR10: the device decodes hevc up to 1080p only (no hardware decoder for more)" {
 			t.Fatalf("plan %+v", p)
 		}
 	})
@@ -48,7 +49,14 @@ func TestNegotiate(t *testing.T) {
 	})
 	t.Run("Dolby Vision without a base layer is re-encoded", func(t *testing.T) {
 		dv := mediaSource{MediaStreams: []mediaStream{{Type: "Video", Codec: "hevc", Height: 2160, BitDepth: 10, VideoRangeType: "DOVI"}}}
-		if p := negotiate(dv, gpu, "auto", true); p.copy {
+		if p := negotiate(dv, gpu, "auto", true); p.copy || p.why != "source hevc 2160p 10-bit DOVI: browsers cannot show the DOVI dynamic range" {
+			t.Fatalf("plan %+v", p)
+		}
+	})
+	t.Run("UHD Blu-ray Dolby Vision with an enhancement layer copies its HDR10 base", func(t *testing.T) {
+		dv := mediaSource{MediaStreams: []mediaStream{{Type: "Video", Codec: "hevc", Height: 2160, BitDepth: 10, VideoRangeType: "DOVIWithEL"}}}
+		p := negotiate(dv, gpu, "auto", true)
+		if !p.copy || hlsQuery("m", "p", "d", p).Get("hevc-rangetype") != "SDR,HDR10,HDR10Plus,HLG" {
 			t.Fatalf("plan %+v", p)
 		}
 	})

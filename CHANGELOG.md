@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 4K Dolby Vision films from UHD Blu-ray (profile 7, with an enhancement layer) were re-encoded instead of sent as they are, which stalls on most Jellyfin servers. Jellyfin now sends their HDR10 picture untouched to devices with an HEVC 10-bit decoder, like other HDR films. Profile 5 Dolby Vision, which has no HDR10 picture, is still converted.
+- Jellyfin titles start downloading into the browser the moment playback opens and keep the next ten minutes stored (and the last five), instead of five minutes and only once playing. Playback starts once enough is stored to run without stalling: a few seconds when the download is faster than the film, longer when it is not, at most a minute.
+- Each Jellyfin stream's entry in the source's event log says what the file is and whether its video is sent as is or re-encoded, and why.
+
 ## 0.3.2
 
 - Jellyfin movies no longer stall every few seconds. ViewDock asked Jellyfin to re-encode every non-H.264 file to H.264 at its full size, which for a 4K HEVC film is slower than real time. Each browser and device now reports which codecs it decodes, and whether its graphics hardware decodes them, and Jellyfin sends the original video (HEVC, AV1 or H.264, including 4K and HDR10) whenever the device can play it, converting only the audio. This works the same in the Discord Activity, per viewer.

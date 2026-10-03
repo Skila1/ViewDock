@@ -66,6 +66,8 @@ const SPEEDS: MenuOption<number>[] = [
 ];
 
 const PAUSE_OVERLAY_MS = 10_000;
+// Longest a Jellyfin start waits for its head start in the buffer cache.
+const PREBUFFER_MAX_MS = 60_000;
 
 function qualityLabel(q: string): string {
   if (q === "auto") return "Auto";
@@ -420,6 +422,13 @@ export function Player({
           }
         }
         pendingSeekRef.current = null;
+        // Jellyfin streams download ahead into the buffer cache from the
+        // start; playback begins once enough is stored to run without stalling.
+        const prebuffer = attachRef.current?.prebuffer;
+        if (prebuffer) {
+          await prebuffer(PREBUFFER_MAX_MS);
+          if (genRef.current !== gen) return;
+        }
         try {
           await video.play();
           setBuffering(false);

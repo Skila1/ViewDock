@@ -6,7 +6,10 @@
  * it; the janitor then deletes it.
  */
 
+/** Kept behind the playhead. */
 export const WINDOW_SEC = 300;
+/** Downloaded ahead of the playhead, from the moment the session starts. */
+export const WINDOW_AHEAD_SEC = 600;
 export const LINGER_MS = 180_000;
 export const CACHE_PREFIX = "viewdock-stream-";
 export const KEY_PREFIX = "/__stream-cache/";
@@ -22,8 +25,8 @@ const EVICT_MARGIN_SEC = 30;
 const MIN_AHEAD_SEC = 60;
 /** Ahead coverage below WINDOW_SEC minus this switches back to fetching forward. */
 const FORWARD_SLACK_SEC = 60;
-/** Disk a bucket may use: ten minutes of an original 4K video is about 5 GB. */
-const MAX_BUDGET_BYTES = 4 * 1024 ** 3;
+/** Disk a bucket may use: fifteen minutes of an original 4K video is about 8 GB. */
+const MAX_BUDGET_BYTES = 8 * 1024 ** 3;
 const SIZE_HEADER = "X-VD-Size";
 
 export function streamCacheSupported(): boolean {
@@ -154,6 +157,34 @@ export type Direction = "forward" | "back";
 
 export type WindowPlan = { next: Span | null; dir: Direction; evict: string[] };
 
+export type Window = { ahead: number; behind: number };
+
+const DEFAULT_WINDOW: Window = { ahead: WINDOW_AHEAD_SEC, behind: WINDOW_SEC };
+
+/**
+ * prebufferTarget is how many seconds must be cached ahead before playback
+ * starts. rate is media seconds downloaded per second (undefined before the
+ * first download): above real time a short head start is enough; below it,
+ * enough to finish without stalling, up to the ahead window.
+ */
+export function prebufferTarget(rate: number | undefined, remainingSec: number): number {
+  if (rate == null || rate >= 1.25) return 12;
+  if (rate >= 1) return 30;
+  const left = Number.isFinite(remainingSec) && remainingSec > 0 ? remainingSec : WINDOW_AHEAD_SEC;
+  return Math.min(WINDOW_AHEAD_SEC, Math.round((1 - rate) * left + 30));
+}
+
+/** Seconds cached without a gap from the playhead on. */
+export function cachedAhead(spans: Span[], cached: Set<string>, playhead: number): number {
+  const sorted = spans.filter((s) => s.end > playhead).sort((a, b) => a.start - b.start);
+  let edge = playhead;
+  for (const s of sorted) {
+    if (s.start > edge + 0.5 || !cached.has(s.key)) break;
+    edge = s.end;
+  }
+  return edge - playhead;
+}
+
 /**
  * planWindow picks the next span to fetch and the cached keys to drop.
  * Forward of the playhead comes first. Behind it is filled in ascending
@@ -166,11 +197,11 @@ export function planWindow(
   cached: Set<string>,
   playhead: number,
   lastDir: Direction,
-  windowSec = WINDOW_SEC,
+  win: Window = DEFAULT_WINDOW,
   allowBack = true,
 ): WindowPlan {
-  const lo = playhead - windowSec;
-  const hi = playhead + windowSec;
+  const lo = playhead - win.behind;
+  const hi = playhead + win.ahead;
   let forward: Span | null = null;
   let back: Span | null = null;
   for (const s of spans) {
@@ -181,13 +212,13 @@ export function planWindow(
       if (!back || s.start < back.start) back = s;
     }
   }
-  const ahead = forward ? Math.max(0, forward.start - playhead) : windowSec;
+  const ahead = forward ? Math.max(0, forward.start - playhead) : win.ahead;
   let next: Span | null;
   let dir: Direction;
   if (lastDir === "back" && back && ahead >= MIN_AHEAD_SEC) {
     next = back;
     dir = "back";
-  } else if (forward && (lastDir === "forward" || ahead < windowSec - FORWARD_SLACK_SEC || !back)) {
+  } else if (forward && (lastDir === "forward" || ahead < win.ahead - FORWARD_SLACK_SEC || !back)) {
     next = forward;
     dir = "forward";
   } else if (back) {
@@ -251,11 +282,20 @@ export class StreamPrefetcher {
   private full = false;
   private failures = 0;
   private wakeUp: (() => void) | null = null;
+  /** Downloads run from the start; only a pause after playback began stops them. */
+  private started = false;
+  /** Media seconds downloaded per second, averaged. */
+  private rate: number | undefined;
   private heartbeat = 0;
   private readonly wake = () => {
     this.wakeUp?.();
   };
+  private readonly onPlay = () => {
+    this.started = true;
+    this.wake();
+  };
   private readonly onPause = () => {
+    if (!this.started) return;
     for (const f of this.inflight.values()) if (!f.priority) f.abort.abort();
   };
   private readonly onSeeking = () => {
@@ -283,7 +323,7 @@ export class StreamPrefetcher {
   async start(): Promise<void> {
     touchStreamCache(this.name);
     this.heartbeat = window.setInterval(() => touchStreamCache(this.name), HEARTBEAT_MS);
-    this.video.addEventListener("play", this.wake);
+    this.video.addEventListener("play", this.onPlay);
     this.video.addEventListener("pause", this.onPause);
     this.video.addEventListener("seeking", this.onSeeking);
     try {
@@ -316,6 +356,30 @@ export class StreamPrefetcher {
       return;
     }
     void this.loop();
+  }
+
+  /** Seconds cached without a gap from the playhead on. */
+  aheadSec(): number {
+    const playhead = this.video.currentTime || 0;
+    return cachedAhead(this.source.spans(playhead), this.cached, playhead);
+  }
+
+  /**
+   * prebuffer resolves once enough is cached ahead to play without stalling
+   * (prebufferTarget), or after maxMs. The player waits on it before it
+   * starts playback.
+   */
+  async prebuffer(maxMs: number, durationSec: number, onProgress?: (have: number, want: number) => void): Promise<void> {
+    const deadline = Date.now() + maxMs;
+    while (!this.closed && Date.now() < deadline) {
+      const playhead = this.video.currentTime || 0;
+      const want = prebufferTarget(this.rate, durationSec - playhead);
+      const have = this.aheadSec();
+      onProgress?.(have, want);
+      if (have >= want || playhead + have >= durationSec - 1) return;
+      this.wake();
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
 
   /** Wakes the loop, for example after a playlist update. */
@@ -352,7 +416,7 @@ export class StreamPrefetcher {
     this.closed = true;
     window.clearInterval(this.heartbeat);
     touchStreamCache(this.name);
-    this.video.removeEventListener("play", this.wake);
+    this.video.removeEventListener("play", this.onPlay);
     this.video.removeEventListener("pause", this.onPause);
     this.video.removeEventListener("seeking", this.onSeeking);
     for (const f of this.inflight.values()) f.abort.abort();
@@ -363,7 +427,13 @@ export class StreamPrefetcher {
   private fetchStore(span: Span, priority: boolean): Promise<ArrayBuffer> {
     const abort = new AbortController();
     const promise = (async () => {
+      const began = performance.now();
       const buf = await this.source.fetch(span, abort.signal);
+      const took = (performance.now() - began) / 1000;
+      if (took > 0.05 && span.end > span.start) {
+        const sample = (span.end - span.start) / took;
+        this.rate = this.rate == null ? sample : this.rate * 0.7 + sample * 0.3;
+      }
       // A span fetched before the bucket opened is still stored, so the
       // background loop does not fetch it again.
       const cache = await this.opened;
@@ -402,7 +472,7 @@ export class StreamPrefetcher {
   private async loop() {
     while (!this.closed) {
       const cache = this.cache;
-      if (!cache || this.video.paused) {
+      if (!cache || (this.started && this.video.paused)) {
         await this.sleep();
         continue;
       }
@@ -422,7 +492,7 @@ export class StreamPrefetcher {
         plan = planWindow(spans, this.cached, playhead, this.lastDir);
       }
       // Near the budget only what is ahead is fetched.
-      if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, this.cached, playhead, "forward", WINDOW_SEC, false);
+      if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, this.cached, playhead, "forward", DEFAULT_WINDOW, false);
       if (this.bytes >= this.budget) plan = { ...plan, next: null };
       if (!plan.next || this.full) {
         await this.sleep();

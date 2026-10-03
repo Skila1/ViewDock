@@ -249,6 +249,7 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string, d
 	default:
 		mode = "hls re-encoded to h264"
 	}
+	mode += " (" + plan.why + ")"
 	s.event(ctx, src.ID, "stream_start", true, fmt.Sprintf("%s of item %s", mode, c.remoteID))
 
 	prefix := "/api/v1/media-sources/stream/" + tok + "/Videos/" + url.PathEscape(c.remoteID) + "/"

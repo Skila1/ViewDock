@@ -4,6 +4,7 @@ import {
   KEY_PREFIX,
   StreamFetchError,
   StreamPrefetcher,
+  WINDOW_AHEAD_SEC,
   WINDOW_SEC,
   serviceWorkerServesStreamCache,
   streamCacheName,
@@ -150,10 +151,16 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
       instance.on(HlsCtor.Events.LEVEL_UPDATED, poke);
       void prefetch.start();
     },
+    prebuffer: (maxMs: number) => prefetch.prebuffer(maxMs, durationSecOf(session, video), (have, want) => noteAttach(video, "prebuffer", `have=${have.toFixed(1)} want=${want}`)),
     destroy() {
       prefetch.destroy();
     },
   };
+}
+
+function durationSecOf(session: PlaybackSession, video: HTMLVideoElement): number {
+  if (session.duration_ms && session.duration_ms > 0) return session.duration_ms / 1000;
+  return Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
 }
 
 class DirectSource implements PrefetchSource {
@@ -184,7 +191,7 @@ class DirectSource implements PrefetchSource {
     const bps = this.size / dur;
     const last = Math.ceil(this.size / DIRECT_CHUNK) - 1;
     const from = Math.max(0, Math.floor((Math.max(0, playhead - WINDOW_SEC - MARGIN_SEC) * bps) / DIRECT_CHUNK));
-    const to = Math.min(last, Math.floor(((playhead + WINDOW_SEC + MARGIN_SEC) * bps) / DIRECT_CHUNK));
+    const to = Math.min(last, Math.floor(((playhead + WINDOW_AHEAD_SEC + MARGIN_SEC) * bps) / DIRECT_CHUNK));
     const out: Span[] = [];
     for (let i = from; i <= to; i++) {
       out.push({ key: `${this.base}/${i}`, start: (i * DIRECT_CHUNK) / bps, end: Math.min((i + 1) * DIRECT_CHUNK, this.size) / bps });
@@ -230,6 +237,10 @@ export async function directBufferCache(video: HTMLVideoElement, session: Playba
     }
   })();
   const url = `${KEY_PREFIX}serve?${new URLSearchParams({ c: cacheName, k: base, u: src })}`;
-  return { url, destroy: () => prefetch.destroy() };
+  return {
+    url,
+    prebuffer: (maxMs: number) => prefetch.prebuffer(maxMs, durationSecOf(session, video)),
+    destroy: () => prefetch.destroy(),
+  };
 }
 
