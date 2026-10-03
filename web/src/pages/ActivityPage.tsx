@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
 import { Logo } from "@/components/brand/Logo";
 import { PosterCard } from "@/components/layout/PosterCard";
 import { PosterGrid } from "@/components/layout/PosterGrid";
+import { applyBrowse, toBrowseItems } from "@/lib/browse";
 import { activityInstanceId, forgetLeftParty, leftPartyCode } from "@/lib/discordActivity";
 
 const WAIT_POLL_MS = 5_000;
@@ -145,13 +146,20 @@ function TitlePicker({ intro, busy, error, onPick }: { intro?: string; busy: boo
   const [series, setSeries] = useState<Picked | null>(null);
   const term = useDebounced(q.trim(), 300);
   const searching = term.length >= 2;
-  const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies, enabled: !searching && !series });
-  const shows = useQuery({ queryKey: ["series"], queryFn: api.listSeries, enabled: !searching && !series });
-  const results = useQuery({
-    queryKey: ["activity-search", term],
-    queryFn: () => api.search(term),
-    enabled: searching && !series,
-  });
+  const movies = useQuery({ queryKey: ["movies"], queryFn: api.listMovies, enabled: !series });
+  const shows = useQuery({ queryKey: ["series"], queryFn: api.listSeries, enabled: !series });
+  // Searches the same catalogue lists the header search uses. The server
+  // search endpoint returns hits without posters, and its bare array was read
+  // as `{ items }`, so every search here showed "No matches".
+  const hits = useMemo(
+    () =>
+      searching
+        ? applyBrowse(toBrowseItems(movies.data ?? [], shows.data ?? []), { q: term, kind: "", genre: "", tag: "", sort: "" })
+        : [],
+    [searching, term, movies.data, shows.data],
+  );
+  const loadingLists = movies.isLoading || shows.isLoading;
+  const listError = movies.error ?? shows.error;
   const detail = useQuery({
     queryKey: ["series", series?.id],
     queryFn: () => api.getSeries(series!.id),
@@ -195,7 +203,6 @@ function TitlePicker({ intro, busy, error, onPick }: { intro?: string; busy: boo
     );
   }
 
-  const hits = results.data?.items ?? [];
   const pickMovie = (id: string) => onPick({ item_kind: "movie", item_id: id });
   return (
     <div className="space-y-4">
@@ -214,22 +221,18 @@ function TitlePicker({ intro, busy, error, onPick }: { intro?: string; busy: boo
 
       {searching ? (
         <section>
-          {results.isPending ? <p className="text-xs text-dim">Searching…</p> : null}
-          {results.isError ? <p className="text-xs text-danger">{errMessage(results.error)}</p> : null}
-          {results.isSuccess && hits.length === 0 ? <p className="text-xs text-dim">No matches.</p> : null}
+          {loadingLists ? <p className="text-xs text-dim">Searching…</p> : null}
+          {listError ? <p className="text-xs text-danger">{errMessage(listError)}</p> : null}
+          {!loadingLists && !listError && hits.length === 0 ? <p className="text-xs text-dim">No matches.</p> : null}
           <PosterGrid>
             {hits.map((hit) => (
               <PosterCard
-                key={`${hit.item_kind}:${hit.item_id}`}
+                key={hit.key}
                 title={hit.title}
-                posterUrl={hit.poster_url}
+                posterUrl={hit.posterUrl}
                 unmatched={hit.unmatched}
                 disabled={busy}
-                onSelect={() =>
-                  hit.item_kind === "series"
-                    ? setSeries({ id: hit.item_id, title: hit.title })
-                    : onPick({ item_kind: hit.item_kind, item_id: hit.item_id })
-                }
+                onSelect={() => (hit.kind === "series" ? setSeries({ id: hit.id, title: hit.title }) : pickMovie(hit.id))}
               />
             ))}
           </PosterGrid>

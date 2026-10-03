@@ -86,6 +86,25 @@ describe("ActivityPage", () => {
     expect(text()).toContain("Heat");
   });
 
+  it("finds titles when the host searches", async () => {
+    vi.mocked(api.activityRoom).mockResolvedValue({ room: null, can_create: true, host: { name: "Skila", you: true } });
+    await render();
+    const input = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const type = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 350));
+      });
+    };
+    await type("hea");
+    expect(text()).toContain("Heat");
+    expect(text()).not.toContain("No matches");
+    await type("zzz");
+    expect(text()).toContain("No matches");
+    expect(api.search).not.toHaveBeenCalled();
+  });
+
   it("makes everyone else wait for the host", async () => {
     vi.mocked(api.activityRoom).mockResolvedValue({ room: null, can_create: false, host: { name: "Skila", you: false } });
     await render();
