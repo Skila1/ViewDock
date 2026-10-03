@@ -3,6 +3,7 @@ import { api, ApiError } from "@/api/api";
 import { report, setJourneyContext } from "@/lib/journey";
 import { clearSnapshots, setSnapshotScope } from "@/lib/snapshotCache";
 import { signOutVault } from "@/lib/vault/manager";
+import { clearStreamCaches } from "@/playback/streamCache";
 import type { Me, SystemInfo } from "@/types/api.gen";
 
 export type GuestCaps = {
@@ -90,6 +91,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     } finally {
       await signOutVault(userId).catch(() => {});
       await clearSnapshots();
+      await clearStreamCaches().catch(() => {});
       setSnapshotScope(null);
       navigator.serviceWorker?.controller?.postMessage({ type: "viewdock:clear-user-caches" });
       setJourneyContext({ user_id: undefined, username: undefined });

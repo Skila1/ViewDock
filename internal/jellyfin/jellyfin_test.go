@@ -455,3 +455,26 @@ func TestWatchPartyMembersEachStreamWithoutCap(t *testing.T) {
 		t.Fatalf("party holds %d streams, want 5", n)
 	}
 }
+
+func TestSyncIsDue(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	at := func(ago time.Duration) string { return now.Add(-ago).Format(time.RFC3339) }
+	cases := []struct {
+		name string
+		src  Source
+		want bool
+	}{
+		{"never synced", Source{Enabled: true, Status: "pending"}, true},
+		{"disabled", Source{Enabled: false, Status: "ok", LastSyncAt: at(time.Hour)}, false},
+		{"recent", Source{Enabled: true, Status: "ok", LastSyncAt: at(29 * time.Minute)}, false},
+		{"half hour", Source{Enabled: true, Status: "ok", LastSyncAt: at(30 * time.Minute)}, true},
+		{"already syncing", Source{Enabled: true, Status: "syncing", Syncing: true, LastSyncAt: at(time.Hour)}, false},
+		{"error just failed", Source{Enabled: true, Status: "error", UpdatedAt: at(5 * time.Minute)}, false},
+		{"error retry", Source{Enabled: true, Status: "error", UpdatedAt: at(15 * time.Minute)}, true},
+	}
+	for _, c := range cases {
+		if got := syncIsDue(c.src, now); got != c.want {
+			t.Errorf("%s: syncIsDue = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

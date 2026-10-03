@@ -15,8 +15,15 @@ import (
 	"github.com/viewdock/viewdock/internal/secrets"
 )
 
-// SyncInterval is how often enabled sources are resynced.
-const SyncInterval = 6 * time.Hour
+// SyncInterval is how often enabled sources are resynced to pick up
+// content added, changed or removed on the Jellyfin server.
+const SyncInterval = 30 * time.Minute
+
+// errorRetryInterval is how often a source in error is retried.
+const errorRetryInterval = 15 * time.Minute
+
+// syncCheckInterval is how often sources are checked for a due sync.
+const syncCheckInterval = time.Minute
 
 var (
 	errNoCipher = errors.New("a server master key is required to store media source credentials")
@@ -268,7 +275,7 @@ func (s *Service) Start(ctx context.Context) {
 			}
 			s.syncDue(ctx)
 			s.sweepGrants()
-			timer.Reset(15 * time.Minute)
+			timer.Reset(syncCheckInterval)
 		}
 	}()
 }
@@ -278,13 +285,24 @@ func (s *Service) syncDue(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	now := time.Now()
 	for _, src := range sources {
-		if !src.Enabled {
-			continue
-		}
-		last, _ := time.Parse(time.RFC3339, src.LastSyncAt)
-		if src.Status == "error" || time.Since(last) >= SyncInterval {
+		if syncIsDue(src, now) {
 			s.Sync(ctx, src.ID)
 		}
 	}
+}
+
+// syncIsDue reports whether an enabled source should resync now. A source in
+// error waits errorRetryInterval after its last failure (recorded in updated_at).
+func syncIsDue(src Source, now time.Time) bool {
+	if !src.Enabled || src.Syncing {
+		return false
+	}
+	if src.Status == "error" {
+		failed, err := time.Parse(time.RFC3339, src.UpdatedAt)
+		return err != nil || now.Sub(failed) >= errorRetryInterval
+	}
+	last, err := time.Parse(time.RFC3339, src.LastSyncAt)
+	return err != nil || now.Sub(last) >= SyncInterval
 }

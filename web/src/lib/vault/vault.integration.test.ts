@@ -184,7 +184,7 @@ describe("service worker vault playback", () => {
     const channel = new MessageChannel();
     const reply = new Promise((resolve) => (channel.port1.onmessage = (event) => resolve(event.data)));
     await sw.message({ type: "viewdock:vault-ping" }, [channel.port2]);
-    expect(await reply).toEqual({ vault: 1 });
+    expect(await reply).toEqual({ vault: 1, streamCache: 1 });
     channel.port1.close();
   });
 

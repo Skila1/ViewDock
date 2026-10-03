@@ -7,6 +7,7 @@ import { App } from "./App";
 import "./index.css";
 import { replayOfflineMutations } from "./api/client";
 import { isDiscordActivity } from "./lib/discordActivity";
+import { startStreamCacheJanitor } from "./playback/streamCache";
 
 // Inside Discord's iframe the app is short-lived and served through Discord's
 // proxy, so offline caching would only serve stale builds.
@@ -20,6 +21,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
     void replayOfflineMutations();
   });
+  startStreamCacheJanitor();
 }
 
 const queryClient = new QueryClient({

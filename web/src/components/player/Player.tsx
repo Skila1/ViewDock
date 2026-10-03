@@ -375,6 +375,7 @@ export function Player({
             telemetry.record("error", { code: "HLS_FATAL", detail });
             failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
           },
+          { kind: itemKind, id: itemId, quality: qualityRef.current },
         );
         if (genRef.current !== gen) {
           teardownAttach();

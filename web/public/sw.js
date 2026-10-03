@@ -5,6 +5,15 @@ const KNOWN = [SHELL_CACHE, ASSET_CACHE, ART_CACHE];
 const SHELL = ["/", "/site.webmanifest"];
 const MAX_ASSETS = 200;
 const MAX_ART = 400;
+// Playback buffer buckets. Must match web/src/playback/streamCache.ts.
+const STREAM_PREFIX = "viewdock-stream-";
+const STREAM_KEY_PREFIX = "/__stream-cache/";
+const STREAM_SERVE = STREAM_KEY_PREFIX + "serve";
+const STREAM_CACHE_PROTOCOL = 1;
+// A range missing from the bucket is read from the network in bounded
+// pieces, so the player comes back and later reads hit the bucket.
+const STREAM_MISS_BYTES = 8 * 1024 * 1024;
+const STREAM_SERVE_BYTES = 32 * 1024 * 1024;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -15,7 +24,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key.startsWith("viewdock-") && !KNOWN.includes(key) && !key.startsWith("viewdock-vault")).map((key) => caches.delete(key)),
+      keys.filter((key) => key.startsWith("viewdock-") && !KNOWN.includes(key) && !key.startsWith("viewdock-vault") && !key.startsWith(STREAM_PREFIX)).map((key) => caches.delete(key)),
     )).then(() => self.clients.claim()),
   );
 });
@@ -26,9 +35,9 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   const type = event.data && event.data.type;
   if (type === "viewdock:clear-user-caches") {
-    event.waitUntil(Promise.all([caches.delete(ART_CACHE), clearVault()]));
+    event.waitUntil(Promise.all([caches.delete(ART_CACHE), clearVault(), clearStreamCaches()]));
   } else if (type === "viewdock:vault-ping" && event.ports && event.ports[0]) {
-    event.ports[0].postMessage({ vault: VAULT_PROTOCOL });
+    event.ports[0].postMessage({ vault: VAULT_PROTOCOL, streamCache: STREAM_CACHE_PROTOCOL });
   }
 });
 
@@ -219,6 +228,85 @@ async function vaultResponse(request, key) {
   return new Response(body, { status: 200, headers });
 }
 
+function clearStreamCaches() {
+  return caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith(STREAM_PREFIX)).map((key) => caches.delete(key))));
+}
+
+// Direct play through the buffer bucket: answer from contiguous cached
+// chunks, otherwise read a bounded range from the network.
+async function streamCacheResponse(request, url) {
+  const name = url.searchParams.get("c") || "";
+  const base = url.searchParams.get("k") || "";
+  let target;
+  try {
+    target = new URL(url.searchParams.get("u") || "", self.location.origin);
+  } catch (error) {
+    return vaultError(400, "Malformed stream.");
+  }
+  if (target.origin !== self.location.origin || target.pathname.startsWith(STREAM_KEY_PREFIX) || !name.startsWith(STREAM_PREFIX) || !base.startsWith(STREAM_KEY_PREFIX)) {
+    return vaultError(400, "Malformed stream.");
+  }
+  const header = request.headers.get("Range");
+  const network = (range) => fetch(target.href, { credentials: "same-origin", headers: range ? { Range: range } : {} });
+
+  let cache;
+  let meta;
+  try {
+    if (!(await caches.has(name))) return network(header);
+    cache = await caches.open(name);
+    const stored = await cache.match(base + "/meta");
+    meta = stored && (await stored.json());
+  } catch (error) {
+    return network(header);
+  }
+  if (!meta || !(meta.size > 0) || !(meta.chunk > 0)) return network(header);
+  const size = meta.size;
+  const chunk = meta.chunk;
+  const range = parseRange(header, size);
+  if (range.kind === "unsatisfiable") return network(header);
+  const start = range.kind === "partial" ? range.start : 0;
+  const end = range.kind === "partial" ? range.end : size - 1;
+  const first = Math.floor(start / chunk);
+
+  let hit = await cache.match(`${base}/${first}`);
+  if (!hit) {
+    let stop = Math.min(end, start + STREAM_MISS_BYTES - 1);
+    for (let i = first + 1; i * chunk <= stop; i++) {
+      if (await cache.match(`${base}/${i}`)) {
+        stop = i * chunk - 1;
+        break;
+      }
+    }
+    return network(`bytes=${start}-${stop}`);
+  }
+  const parts = [];
+  let index = first;
+  let stop = start - 1;
+  while (hit) {
+    const blob = await hit.blob();
+    const chunkStart = index * chunk;
+    const from = Math.max(start, chunkStart) - chunkStart;
+    const to = Math.min(end, chunkStart + blob.size - 1) - chunkStart + 1;
+    if (to <= from) break;
+    parts.push(blob.slice(from, to));
+    stop = chunkStart + to - 1;
+    index++;
+    if (stop >= end || stop - start + 1 >= STREAM_SERVE_BYTES) break;
+    hit = await cache.match(`${base}/${index}`);
+  }
+  if (parts.length === 0) return network(header);
+  return new Response(new Blob(parts), {
+    status: 206,
+    headers: {
+      "Content-Type": meta.type || "video/mp4",
+      "Content-Length": String(stop - start + 1),
+      "Content-Range": `bytes ${start}-${stop}/${size}`,
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 async function trim(cacheName, max) {
   const cache = await caches.open(cacheName);
   const keys = await cache.keys();
@@ -247,6 +335,11 @@ self.addEventListener("fetch", (event) => {
       return;
     }
     event.respondWith(vaultResponse(request, key).catch(() => vaultError(500, "Offline playback failed.")));
+    return;
+  }
+
+  if (url.pathname === STREAM_SERVE) {
+    event.respondWith(streamCacheResponse(request, url).catch(() => vaultError(502, "Stream unavailable.")));
     return;
   }
 

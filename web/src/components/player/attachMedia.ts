@@ -8,6 +8,7 @@ import { inspectPlaylistBody, playlistReadiness } from "@/playback/playlistInspe
 import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
 import { captureSeekHold, seekHoldAction, shouldReplaceForGenerated } from "@/playback/seekHold";
 import { nativeGeneratedEndSec } from "./seekWindow";
+import { bufferCacheEnabled, directBufferCache, hlsBufferCache, type BufferCacheTitle } from "./bufferCache";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
@@ -30,6 +31,7 @@ export async function attachSession(
   onEngine?: (engine: PlaybackEngine) => void,
   onBeyondGenerated?: (movieMs: number) => void,
   onFatal?: (detail: string) => void,
+  cacheTitle?: BufferCacheTitle,
 ): Promise<AttachHandle> {
   let aborted = false;
   const gone = () => {
@@ -42,12 +44,15 @@ export async function attachSession(
   if (session.delivery === "direct") {
     const src = sessionUrl(session.urls, "file", "direct", "media");
     if (!src) throw new Error("session missing urls.file");
-    video.src = src;
+    const buffer = bufferCacheEnabled(session, cacheTitle) ? await directBufferCache(video, session, cacheTitle, src) : null;
+    video.src = buffer?.url ?? src;
+    if (buffer) noteAttach(video, "stream_cache_direct");
     onEngine?.("direct");
     return {
       engine: "direct",
       destroy() {
         aborted = true;
+        buffer?.destroy();
         video.removeAttribute("src");
         video.load();
       },
@@ -82,7 +87,7 @@ export async function attachSession(
   onEngine?.(engine);
 
   if (engine === "hlsjs") {
-    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal, remote);
+    return attachWithHls(video, playlist, Hls, session, () => aborted, gone, onBeyondGenerated, onFatal, remote, cacheTitle);
   }
   return attachNativeHls(video, playlist, () => aborted, gone, playlistMeta.durationMs, remote, onFatal);
 }
@@ -104,8 +109,10 @@ async function attachWithHls(
   onBeyondGenerated?: (movieMs: number) => void,
   onFatal?: (detail: string) => void,
   remote?: boolean,
+  cacheTitle?: BufferCacheTitle,
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
+  const buffer = bufferCacheEnabled(session, cacheTitle) ? hlsBufferCache(video, session, cacheTitle, Hls) : null;
   const hls = new Hls({
     enableWorker: true,
     preferManagedMediaSource: true,
@@ -117,7 +124,12 @@ async function attachWithHls(
     xhrSetup(xhr) {
       xhr.withCredentials = true;
     },
+    ...(buffer ? { fLoader: buffer.fLoader } : {}),
   });
+  if (buffer) {
+    buffer.bind(hls);
+    noteAttach(video, "stream_cache_hls");
+  }
   let fatalErr: Error | null = null;
   let attached = false;
   let mediaRecovered = false;
@@ -351,6 +363,7 @@ async function attachWithHls(
       Hls,
     );
   } catch (err) {
+    buffer?.destroy();
     hls.destroy();
     if (fatalErr) throw fatalErr;
     throw err;
@@ -363,6 +376,7 @@ async function attachWithHls(
       stopHoldPoll();
       video.removeEventListener("seeking", onAvkitSeeking);
       video.removeEventListener("durationchange", onDurPin);
+      buffer?.destroy();
       hls.destroy();
       video.removeAttribute("src");
       video.querySelectorAll("source").forEach((el) => el.remove());

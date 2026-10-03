@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Jellyfin playback keeps the five minutes before and after the playhead stored in the browser, filled in the background from the moment playback starts, so a slow Jellyfin server or network no longer stalls the picture. Downloading pauses while the player is paused. The stored copy is kept for three minutes after the player closes, so resuming the same title soon reuses it, and is then deleted. Signing out deletes it at once.
+- Jellyfin sources resync every 30 minutes instead of every 6 hours, so new, changed and removed titles show up sooner.
+
 ## 0.3.0
 
 - Discord Activity: the first person in the voice channel to open it hosts and picks what everyone watches; the rest join that party automatically. An administrator who joins later takes over as host. The party panel has a Leave party button: after leaving you can watch on your own inside the Activity and Rejoin the channel's party from its start page.
