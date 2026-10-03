@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { LINGER_MS, adaptiveWindow, behindToEvict, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, type Span } from "./streamCache";
+import { describe, expect, it, vi } from "vitest";
+import { LINGER_MS, adaptiveWindow, behindToEvict, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, StreamPrefetcher, type PrefetchSource, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
@@ -151,5 +151,46 @@ describe("cachedRanges", () => {
       [0, 18],
       [30, 42],
     ]);
+  });
+});
+
+describe("StreamPrefetcher", () => {
+  it("runs one download until the source answers, then the allowed parallel downloads", async () => {
+    const store = new Map<string, Response>();
+    const bucket = {
+      keys: async () => [],
+      match: async (k: string) => store.get(k),
+      put: async (k: string, r: Response) => void store.set(k, r),
+      delete: async (k: string) => store.delete(k),
+    };
+    vi.stubGlobal("caches", { open: async () => bucket, keys: async () => [], delete: async () => true });
+    const video = document.createElement("video");
+    Object.defineProperty(video, "paused", { value: false });
+    const pending: (() => void)[] = [];
+    let running = 0;
+    let most = 0;
+    const source: PrefetchSource = {
+      parallel: 2,
+      spans: () => spans,
+      fetch: () => {
+        running++;
+        most = Math.max(most, running);
+        return new Promise<ArrayBuffer>((resolve) =>
+          pending.push(() => {
+            running--;
+            resolve(new ArrayBuffer(4));
+          }),
+        );
+      },
+    };
+    const p = new StreamPrefetcher({ video, cacheName: "vd-test", keyBase: "/k", source });
+    await p.start();
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(most).toBe(1);
+    pending.shift()!();
+    await vi.waitFor(() => expect(running).toBe(2));
+    p.destroy();
+    vi.unstubAllGlobals();
   });
 });

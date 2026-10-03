@@ -378,6 +378,13 @@ export class StreamPrefetcher {
   private closed = false;
   private full = false;
   private failures = 0;
+  /**
+   * Whether the source has answered since it started, failed or the player
+   * jumped. Until it has, one download runs at a time: Jellyfin starts its
+   * remux at the first segment asked for, and a second request racing it
+   * restarts the remux, so the two segments come from runs that do not line up.
+   */
+  private warm = false;
   private retryAt = 0;
   private wakeUp: (() => void) | null = null;
   /** Downloads run from the start; only a pause after playback began stops them. */
@@ -410,6 +417,7 @@ export class StreamPrefetcher {
   private readonly onPause = () => undefined;
   private readonly onSeeking = () => {
     this.lastDir = "forward";
+    this.warm = false;
     this.wake();
   };
 
@@ -611,6 +619,7 @@ export class StreamPrefetcher {
     const promise = (async () => {
       const began = performance.now();
       const buf = await this.source.fetch(span, abort.signal);
+      this.warm = true;
       const took = (performance.now() - began) / 1000;
       if (took > 0.05 && span.end > span.start) {
         const sample = ((span.end - span.start) / took) * sharing;
@@ -688,7 +697,8 @@ export class StreamPrefetcher {
       if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, taken(), playhead, "forward", win, false);
       if (this.bytes >= this.budget) plan = { ...plan, next: null };
       const background = [...this.inflight.values()].filter((f) => !f.priority);
-      if (!plan.next || this.full || background.length >= (this.source.parallel ?? 1)) {
+      const busy = this.warm ? background.length >= (this.source.parallel ?? 1) : this.inflight.size > 0;
+      if (!plan.next || this.full || busy) {
         // Wait for a download to finish or for something to change.
         await Promise.race([this.sleep(), ...background.map((f) => f.stored.catch(() => undefined))]);
         continue;
@@ -702,6 +712,7 @@ export class StreamPrefetcher {
         (err: unknown) => {
           if (this.closed || (err instanceof DOMException && err.name === "AbortError")) return;
           this.failures++;
+          this.warm = false;
           if (this.failures === 1 || this.failures % 10 === 0) this.onNote?.("stream_cache_fetch_failed", String(err));
           // 410: the session ended, nothing more to download.
           this.retryAt = err instanceof StreamFetchError && err.status === 410
