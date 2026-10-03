@@ -54,16 +54,27 @@ func (r *Registry) IDs() []string {
 	return out
 }
 
+// RemoteLease is the shortest lease of a session streamed from an external
+// source. Browsers slow a hidden tab's timers to one a minute, which must not
+// end the stream; the source's own stream slot is released separately when
+// the player stops reading.
+const RemoteLease = 5 * time.Minute
+
 func (r *Registry) Expire(lease time.Duration, kill func(*Session)) {
 	if lease <= 0 {
 		return
 	}
-	cut := time.Now().Add(-lease)
+	now := time.Now()
+	cut := now.Add(-lease)
+	remoteCut := now.Add(-max(lease, RemoteLease))
 	r.mu.Lock()
 	var dead []*Session
 	for id, s := range r.sessions {
 		s.mu.Lock()
 		stale := s.LastPing.Before(cut)
+		if s.RemoteURL != "" {
+			stale = s.LastPing.Before(remoteCut)
+		}
 		s.mu.Unlock()
 		if stale {
 			delete(r.sessions, id)

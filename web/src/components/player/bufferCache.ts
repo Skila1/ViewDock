@@ -43,7 +43,7 @@ async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<str
 }
 
 /** Buffer cache for an hls.js session: the prefetcher plus the fragment loader that reads from it. */
-export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession, title: BufferCacheTitle, HlsCtor: typeof Hls) {
+export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession, title: BufferCacheTitle, HlsCtor: typeof Hls, startSec = 0) {
   const base = streamKeyBase(variantOf(session, title));
   let hls: Hls | null = null;
   let level = -1;
@@ -89,6 +89,7 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
     keyBase: base,
     source,
     onNote: (what, detail) => noteAttach(video, what, detail),
+    startSec,
   });
 
   const Base = HlsCtor.DefaultConfig.loader as unknown as new (config: HlsConfig) => Loader<LoaderContext>;

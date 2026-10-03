@@ -38,6 +38,8 @@ export class CodecFallbackError extends Error {
 
 export type AttachOptions = {
   cacheTitle?: BufferCacheTitle;
+  /** Where playback starts (seconds), so a resumed external stream loads from there, not from the beginning. */
+  startSec?: number;
   /** The original (non-H.264) video failed after playback started. */
   onCodecFallback?: (detail: string) => void;
 };
@@ -141,7 +143,9 @@ async function attachWithHls(
 ): Promise<AttachHandle> {
   const movieSec = movieDurationSec(session.duration_ms);
   const cacheTitle = opts.cacheTitle;
-  const buffer = bufferCacheEnabled(session, cacheTitle) ? hlsBufferCache(video, session, cacheTitle, Hls) : null;
+  // External sources serve the whole title from 0, so a resume starts loading at the resume point.
+  const startSec = session.source?.startsWith("jellyfin:") && (opts.startSec ?? 0) > 2.5 ? (opts.startSec as number) : 0;
+  const buffer = bufferCacheEnabled(session, cacheTitle) ? hlsBufferCache(video, session, cacheTitle, Hls, startSec) : null;
   // The source sends its original video when this device decodes it. Jellyfin
   // also lists an H.264 re-encode of the same size, which is what stalls, so
   // the player stays on the original and falls back by asking for H.264 only.
@@ -162,7 +166,7 @@ async function attachWithHls(
   const hls = new Hls({
     enableWorker: true,
     preferManagedMediaSource: true,
-    startPosition: 0,
+    startPosition: startSec,
     ...eventPlaylistHlsSync(),
     maxBufferLength: 30,
     maxMaxBufferLength: 90,

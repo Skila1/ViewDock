@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A Jellyfin title left paused in a background tab could end its stream (browsers slow hidden tabs' timers to once a minute, and the server ended sessions after 45 seconds), and the player then kept loading forever. External-source sessions now last 5 minutes without a check-in, the player checks in as soon as the tab is visible again, and a session that ended anyway reopens at the same position, still paused if it was.
+- Resuming a Jellyfin title no longer downloads the first minutes of the film before jumping to the resume point; it starts loading where you left off.
+- The buffer cache no longer throws away half-finished downloads when you pause or when the player asks for the segment just before them, which made it download the same segments twice.
+- The wait for a head start before playback begins is at most 25 seconds.
+
 ## 0.3.5
 
 - Right-click any title (or press the context menu key) for Resume, Play from beginning, Go to series, Add to My List, Add to playlist, Mark as watched or unwatched, Remove from Continue Watching, Like, Dislike and Not interested, plus Refresh metadata and Media info for library managers. Only the actions that fit the title are shown.

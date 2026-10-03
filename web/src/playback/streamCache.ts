@@ -348,7 +348,10 @@ export type PrefetchSource = {
 };
 
 /** promise has the data; stored settles once it is in the bucket (or could not be). */
-type Inflight = { promise: Promise<ArrayBuffer>; stored: Promise<void>; abort: AbortController; priority: boolean };
+type Inflight = { promise: Promise<ArrayBuffer>; stored: Promise<void>; abort: AbortController; priority: boolean; span: Span };
+
+/** A player request this far from a background download means a seek: the download is no longer worth its bandwidth. */
+const ABORT_DISTANCE_SEC = 120;
 
 /**
  * StreamPrefetcher keeps one title's buffer window filled. Background
@@ -360,6 +363,8 @@ export class StreamPrefetcher {
   private name: string;
   private base: string;
   private source: PrefetchSource;
+  /** Where playback will start, until the player is there. */
+  private startSec: number;
   private onNote?: (what: string, detail?: string) => void;
   private cache: Cache | null = null;
   private opened: Promise<Cache | null>;
@@ -387,14 +392,22 @@ export class StreamPrefetcher {
   private readonly wake = () => {
     this.wakeUp?.();
   };
+
+  /**
+   * The position to cache around: the video's, or the resume position until
+   * playback reaches it, so a resumed title is not fetched from its start.
+   */
+  private playhead(): number {
+    const t = this.video.currentTime || 0;
+    return !this.started && t < 0.5 ? this.startSec : t;
+  }
   private readonly onPlay = () => {
     this.started = true;
     this.wake();
   };
-  private readonly onPause = () => {
-    if (!this.started) return;
-    for (const f of this.inflight.values()) if (!f.priority) f.abort.abort();
-  };
+  // A pause lets downloads already running finish (aborting and fetching
+  // them again later would waste them); the loop starts no new ones.
+  private readonly onPause = () => undefined;
   private readonly onSeeking = () => {
     this.lastDir = "forward";
     this.wake();
@@ -406,7 +419,9 @@ export class StreamPrefetcher {
     keyBase: string;
     source: PrefetchSource;
     onNote?: (what: string, detail?: string) => void;
+    startSec?: number;
   }) {
+    this.startSec = opts.startSec ?? 0;
     this.video = opts.video;
     this.name = opts.cacheName;
     this.base = opts.keyBase;
@@ -464,7 +479,7 @@ export class StreamPrefetcher {
 
   /** Average bytes per second of media among the stored spans. */
   private bytesPerMediaSec(): number | undefined {
-    const playhead = this.video.currentTime || 0;
+    const playhead = this.playhead();
     let bytes = 0;
     let secs = 0;
     for (const s of this.source.spans(playhead)) {
@@ -490,7 +505,7 @@ export class StreamPrefetcher {
     ranges: [number, number][];
     mediaBitrateBps: number | undefined;
   } {
-    const playhead = this.video.currentTime || 0;
+    const playhead = this.playhead();
     const spans = this.source.spans(playhead);
     const ranges = cachedRanges(spans, this.cached);
     const around = ranges.find(([a, b]) => a <= playhead + 0.5 && b >= playhead);
@@ -514,7 +529,7 @@ export class StreamPrefetcher {
 
   /** Seconds cached without a gap from the playhead on. */
   aheadSec(): number {
-    const playhead = this.video.currentTime || 0;
+    const playhead = this.playhead();
     return cachedAhead(this.source.spans(playhead), this.cached, playhead);
   }
 
@@ -526,7 +541,7 @@ export class StreamPrefetcher {
   async prebuffer(maxMs: number, durationSec: number, onProgress?: (have: number, want: number) => void): Promise<void> {
     const deadline = Date.now() + maxMs;
     while (!this.closed && Date.now() < deadline) {
-      const playhead = this.video.currentTime || 0;
+      const playhead = this.playhead();
       const want = prebufferTarget(this.rate, durationSec - playhead);
       const have = this.aheadSec();
       onProgress?.(have, want);
@@ -562,7 +577,13 @@ export class StreamPrefetcher {
       running.priority = true;
       return copyOf(running.promise);
     }
-    for (const f of this.inflight.values()) if (!f.priority) f.abort.abort();
+    // A source that re-encodes restarts its encoder for every jump, so it
+    // keeps a single reader: whatever runs in the background stops. A source
+    // copying the video only loses downloads far from what the player needs.
+    const single = (this.source.parallel ?? 1) <= 1;
+    for (const f of this.inflight.values()) {
+      if (!f.priority && (single || Math.abs(f.span.start - span.start) > ABORT_DISTANCE_SEC)) f.abort.abort();
+    }
     this.lastDir = "forward";
     const job = this.fetchStore(span, true);
     job.stored.finally(this.wake).catch(() => undefined);
@@ -615,7 +636,7 @@ export class StreamPrefetcher {
         this.full = true;
       }
     });
-    const job: Inflight = { promise, stored, abort, priority };
+    const job: Inflight = { promise, stored, abort, priority, span };
     this.inflight.set(span.key, job);
     stored.finally(() => this.inflight.delete(span.key)).catch(() => undefined);
     return job;
@@ -645,7 +666,7 @@ export class StreamPrefetcher {
         await this.sleep(this.retryAt - Date.now());
         continue;
       }
-      const playhead = this.video.currentTime || 0;
+      const playhead = this.playhead();
       const win = this.window();
       const spans = this.source.spans(playhead, win);
       // Spans already downloading count as taken when picking the next one.

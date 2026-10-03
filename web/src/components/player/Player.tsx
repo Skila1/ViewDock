@@ -81,7 +81,7 @@ const RECOVER_WINDOW_MS = 120_000;
 
 const PAUSE_OVERLAY_MS = 10_000;
 // Longest a Jellyfin start waits for its head start in the buffer cache.
-const PREBUFFER_MAX_MS = 60_000;
+const PREBUFFER_MAX_MS = 25_000;
 
 function qualityLabel(q: string): string {
   if (q === "auto") return "Auto";
@@ -210,6 +210,10 @@ export function Player({
     setPhase(next);
     return next;
   }, [setPhase]);
+
+  const reopenRef = useRef<(why: string) => void>(() => undefined);
+  // A reopened session stays paused when the viewer had paused.
+  const stayPausedRef = useRef(false);
 
   const teardownAttach = () => {
     attachRef.current?.destroy();
@@ -447,6 +451,7 @@ export function Player({
           },
           {
             cacheTitle: { kind: itemKind, id: itemId, quality: qualityRef.current },
+            startSec: isVodOnDemand(sess) ? startAt / 1000 : undefined,
             onCodecFallback: (detail) => {
               if (genRef.current !== gen) return;
               telemetry.record("codec_error", { detail, fallback: "h264" });
@@ -494,6 +499,12 @@ export function Player({
         // Jellyfin streams download ahead into the buffer cache from the
         // start; playback begins once enough is stored to run without stalling.
         const prebuffer = attachRef.current?.prebuffer;
+        if (stayPausedRef.current) {
+          stayPausedRef.current = false;
+          setBuffering(false);
+          bump("PAUSE");
+          return;
+        }
         if (prebuffer) {
           await prebuffer(PREBUFFER_MAX_MS);
           if (genRef.current !== gen) return;
@@ -752,7 +763,7 @@ export function Player({
   }, [failPlayback, telemetry]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
+    const tick = () => {
       const sess = sessionRef.current;
       const video = videoRef.current;
       // Paused and buffering players report too: the server ends sessions it
@@ -780,9 +791,22 @@ export function Player({
           throughput_bps: Math.round(cache?.throughputBps ?? 0),
           dropped_frames: q?.droppedVideoFrames ?? 0,
         },
+      }).catch((e) => {
+        // The session ended while nobody was watching (a long hidden tab):
+        // open a new one at the same position instead of loading forever.
+        if (e instanceof ApiError && e.status === 410 && sessionRef.current?.id === sess.id) reopenRef.current("progress_gone");
       });
-    }, 10_000);
-    return () => window.clearInterval(id);
+    };
+    const id = window.setInterval(tick, 10_000);
+    // Hidden tabs run timers once a minute; report as soon as the viewer is back.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -1106,6 +1130,18 @@ export function Player({
     noteAttach(video, "vd_seek", JSON.stringify({ source, target, inWindow: true, rel }));
     noteCurrentTimeWrite(video, rel, "Player.seek", sessionRef.current?.id);
     video.currentTime = rel;
+  };
+
+  reopenRef.current = (why: string) => {
+    const video = videoRef.current;
+    if (!video || attachBusyRef.current) return;
+    const ms = originRef.current + (video.currentTime || 0) * 1000;
+    resumeRef.current = ms;
+    pendingSeekRef.current = ms;
+    setResumeMs(ms);
+    noteAttach(video, "session_reopen", why);
+    stayPausedRef.current = video.paused;
+    void createAndAttach("GONE");
   };
 
   const changeQuality = (q: string) => {
