@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.5
 
 - Right-click any title (or press the context menu key) for Resume, Play from beginning, Go to series, Add to My List, Add to playlist, Mark as watched or unwatched, Remove from Continue Watching, Like, Dislike and Not interested, plus Refresh metadata and Media info for library managers. Only the actions that fit the title are shown.
 - My List, playlists and watch history (with single entries removable or the whole history cleared) on the new My List page. Everything belongs to your profile: resume points, watched state, likes, My List, playlists, history, the audio and subtitle tracks you pick for a movie or show, playback speed and quality.
