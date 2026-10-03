@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 4K Jellyfin films could freeze mid-playback with the next part already downloaded: the player kept 30 seconds behind the playhead in the browser's video buffer, which at 4K remux bitrates overflows Chrome's limit, so a segment failed to load and playback stopped at the gap. With the buffer cache the player now keeps only a few seconds in that buffer (the rest plays from the cache at once) and steps over small gaps.
+- A download from the media server that stalls is retried after 15 seconds without data instead of holding a download slot until it finishes.
+- The seek bar shows what is stored on this device as a lighter shade inside the bar, under the progress, instead of a separate line.
+
 ## 0.3.6
 
 - A Jellyfin title left paused in a background tab could end its stream (browsers slow hidden tabs' timers to once a minute, and the server ended sessions after 45 seconds), and the player then kept loading forever. External-source sessions now last 5 minutes without a check-in, the player checks in as soon as the tab is visible again, and a session that ended anyway reopens at the same position, still paused if it was.

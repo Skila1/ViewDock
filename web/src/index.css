@@ -202,6 +202,8 @@ textarea {
 .player-seek {
   --player-range-pct: 0%;
   --player-buffer-pct: 0%;
+  /* Ranges stored in the buffer cache, as a gradient set by the player. */
+  --player-cache-bg: linear-gradient(transparent, transparent);
   --seek-h: 4px;
   -webkit-appearance: none;
   appearance: none;
@@ -227,15 +229,12 @@ textarea {
 .player-seek::-webkit-slider-runnable-track {
   height: var(--seek-h);
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--vd-accent) 0,
-    var(--vd-accent) var(--player-range-pct),
-    rgb(255 255 255 / 42%) var(--player-range-pct),
-    rgb(255 255 255 / 42%) max(var(--player-range-pct), var(--player-buffer-pct)),
-    rgb(255 255 255 / 20%) max(var(--player-range-pct), var(--player-buffer-pct)),
-    rgb(255 255 255 / 20%) 100%
-  );
+  /* Top to bottom: progress, the player's own buffer, the cache, the track. */
+  background:
+    linear-gradient(to right, var(--vd-accent) 0, var(--vd-accent) var(--player-range-pct), transparent var(--player-range-pct)),
+    linear-gradient(to right, rgb(255 255 255 / 42%) 0, rgb(255 255 255 / 42%) var(--player-buffer-pct), transparent var(--player-buffer-pct)),
+    var(--player-cache-bg),
+    rgb(255 255 255 / 20%);
   transition: height 120ms ease-out;
 }
 
@@ -262,13 +261,10 @@ textarea {
 .player-seek::-moz-range-track {
   height: var(--seek-h);
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    rgb(255 255 255 / 42%) 0,
-    rgb(255 255 255 / 42%) var(--player-buffer-pct),
-    rgb(255 255 255 / 20%) var(--player-buffer-pct),
-    rgb(255 255 255 / 20%) 100%
-  );
+  background:
+    linear-gradient(to right, rgb(255 255 255 / 42%) 0, rgb(255 255 255 / 42%) var(--player-buffer-pct), transparent var(--player-buffer-pct)),
+    var(--player-cache-bg),
+    rgb(255 255 255 / 20%);
 }
 
 .player-seek::-moz-range-progress {

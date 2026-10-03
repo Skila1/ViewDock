@@ -83,6 +83,16 @@ const PAUSE_OVERLAY_MS = 10_000;
 // Longest a Jellyfin start waits for its head start in the buffer cache.
 const PREBUFFER_MAX_MS = 25_000;
 
+/** The buffer cache's stored ranges as a seek bar layer, a lighter gray than the empty track. */
+export function cacheGradient(ranges: [number, number][], originMs: number, totalMs: number): string {
+  if (!ranges.length || totalMs <= 0) return "linear-gradient(transparent, transparent)";
+  const shade = "rgb(255 255 255 / 30%)";
+  const pct = (sec: number) => `${Math.min(100, Math.max(0, ((originMs + sec * 1000) / totalMs) * 100)).toFixed(3)}%`;
+  const stops = ["transparent 0"];
+  for (const [a, b] of ranges) stops.push(`transparent ${pct(a)}`, `${shade} ${pct(a)}`, `${shade} ${pct(b)}`, `transparent ${pct(b)}`);
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
+
 function qualityLabel(q: string): string {
   if (q === "auto") return "Auto";
   return /^\d+$/.test(q) ? `${q}p` : q;
@@ -1624,15 +1634,6 @@ export function Player({
                   {formatClock(hoverSeek.ms)}
                 </span>
               ) : null}
-              {cacheStats && duration > 0 ? (
-                <div className="pointer-events-none absolute inset-x-0 -bottom-[3px] h-[3px]" aria-hidden title="Stored on this device">
-                  {cacheStats.ranges.map(([a, b]) => {
-                    const left = ((originRef.current + a * 1000) / seekMax) * 100;
-                    const width = ((b - a) * 1000 * 100) / seekMax;
-                    return <span key={a} className="absolute h-full rounded-full bg-sky-300/70" style={{ left: `${left}%`, width: `${Math.max(0.2, width)}%` }} />;
-                  })}
-                </div>
-              ) : null}
               <input
                 type="range"
                 min={0}
@@ -1642,7 +1643,13 @@ export function Player({
                 aria-valuetext={`${formatClock(pos)} of ${formatClock(duration)}`}
                 onChange={(e) => seek(Number(e.target.value), "slider")}
                 className="player-seek"
-                style={{ "--player-range-pct": `${progressPct}%`, "--player-buffer-pct": `${bufferPct}%` } as CSSProperties}
+                style={
+                  {
+                    "--player-range-pct": `${progressPct}%`,
+                    "--player-buffer-pct": `${bufferPct}%`,
+                    ...(cacheStats && duration > 0 ? { "--player-cache-bg": cacheGradient(cacheStats.ranges, originRef.current, seekMax) } : {}),
+                  } as CSSProperties
+                }
               />
             </div>
 

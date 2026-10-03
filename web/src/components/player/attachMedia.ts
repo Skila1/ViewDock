@@ -170,10 +170,14 @@ async function attachWithHls(
     ...eventPlaylistHlsSync(),
     maxBufferLength: 30,
     maxMaxBufferLength: 90,
-    // The buffer cache keeps minutes on disk; MSE only needs a little,
-    // which matters at the 50+ Mbps of an original 4K video.
-    backBufferLength: buffer ? 30 : 900,
-    ...(buffer ? { maxBufferSize: 120 * 1000 * 1000 } : {}),
+    backBufferLength: 900,
+    // The buffer cache keeps minutes on disk and hands segments over at
+    // once, so MSE only holds a few seconds. Chrome's SourceBuffer holds
+    // about 150 MB, which 30 seconds of an original 4K video (55 MB a
+    // segment) overflows: the append fails and playback stops at the gap.
+    ...(buffer
+      ? { backBufferLength: 4, maxBufferLength: 15, maxMaxBufferLength: 30, maxBufferSize: 60 * 1000 * 1000, maxBufferHole: 0.5 }
+      : {}),
     xhrSetup(xhr) {
       xhr.withCredentials = true;
     },

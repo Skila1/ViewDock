@@ -36,10 +36,49 @@ function variantOf(session: PlaybackSession, title: BufferCacheTitle): string {
   return [session.source ?? "", title.quality ?? "auto", session.delivery, session.seekable_from_ms ?? 0].join("|");
 }
 
+/** A download that receives nothing for this long is dropped and requested again. */
+const IDLE_ABORT_MS = 15_000;
+
 async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<string, string>, want?: number): Promise<ArrayBuffer> {
-  const res = await fetch(url, { credentials: "include", signal, headers });
-  if (!res.ok || (want != null && res.status !== want)) throw new StreamFetchError(res.status);
-  return res.arrayBuffer();
+  // A connection can stall without failing; an idle timer turns that into a
+  // retryable error instead of a download slot held for a minute.
+  const idle = new AbortController();
+  const onAbort = () => idle.abort();
+  signal.addEventListener("abort", onAbort);
+  let timer = window.setTimeout(() => idle.abort(), IDLE_ABORT_MS);
+  const kick = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => idle.abort(), IDLE_ABORT_MS);
+  };
+  try {
+    const res = await fetch(url, { credentials: "include", signal: idle.signal, headers });
+    if (!res.ok || (want != null && res.status !== want)) throw new StreamFetchError(res.status);
+    if (!res.body) return await res.arrayBuffer();
+    const reader = res.body.getReader();
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      kick();
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      size += value.byteLength;
+    }
+    const out = new Uint8Array(size);
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.byteLength;
+    }
+    return out.buffer;
+  } catch (err) {
+    // Stalled, not cancelled by the player: report it as a timeout to retry.
+    if (idle.signal.aborted && !signal.aborted) throw new StreamFetchError(408);
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /** Buffer cache for an hls.js session: the prefetcher plus the fragment loader that reads from it. */
