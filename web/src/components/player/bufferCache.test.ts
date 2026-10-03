@@ -1,10 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type Hls from "hls.js";
 import type { HlsConfig, LoaderCallbacks, LoaderConfiguration, LoaderContext } from "hls.js";
-import { hlsBufferCache } from "./bufferCache";
+import { completeSegment, hlsBufferCache } from "./bufferCache";
 import type { PlaybackSession } from "@/types/api.gen";
 
 const network = vi.fn();
+
+/** A minimal fMP4 media segment: a moof box and an mdat box. */
+function segment(mdat = 16): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(8 + 8 + mdat);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, 8);
+  out.set([0x6d, 0x6f, 0x6f, 0x66], 4);
+  view.setUint32(8, 8 + mdat);
+  out.set([0x6d, 0x64, 0x61, 0x74], 12);
+  return out;
+}
 
 class BaseLoader {
   context: LoaderContext | null = null;
@@ -41,7 +52,7 @@ afterEach(() => {
 
 describe("cached fragment loader", () => {
   it("serves whole segments through the buffer cache, one request per segment", async () => {
-    const fetchMock = vi.fn(async () => new Response(new Uint8Array(8)));
+    const fetchMock = vi.fn(async () => new Response(segment()));
     vi.stubGlobal("fetch", fetchMock);
     const video = document.createElement("video");
     const cache = hlsBufferCache(video, session, { kind: "movie", id: "m1" }, FakeHls);
@@ -83,5 +94,23 @@ describe("cached fragment loader", () => {
     new Loader({} as HlsConfig).load({ ...context(3), rangeStart: 0, rangeEnd: 1000 }, {}, {});
     expect(network).toHaveBeenCalledTimes(1);
     cache.destroy();
+  });
+});
+
+describe("completeSegment", () => {
+  it("accepts whole fMP4 and TS segments", () => {
+    expect(completeSegment(segment().buffer).byteLength).toBe(32);
+    const ts = new Uint8Array(188 * 3);
+    ts[0] = 0x47;
+    expect(completeSegment(ts.buffer).byteLength).toBe(564);
+  });
+
+  it("rejects segments Jellyfin cut short", () => {
+    const whole = segment(1000);
+    expect(() => completeSegment(whole.slice(0, 500).buffer)).toThrow();
+    expect(() => completeSegment(whole.slice(0, 8).buffer)).toThrow();
+    const ts = new Uint8Array(188 * 3 - 20);
+    ts[0] = 0x47;
+    expect(() => completeSegment(ts.buffer)).toThrow();
   });
 });

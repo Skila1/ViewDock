@@ -479,3 +479,26 @@ func TestSyncIsDue(t *testing.T) {
 		}
 	}
 }
+
+func TestPingGrantsKeepsLiveTranscodesAlive(t *testing.T) {
+	var pinged []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/Sessions/Playing/Ping" {
+			pinged = append(pinged, r.URL.Query().Get("playSessionId"))
+		}
+		w.WriteHeader(204)
+	}))
+	t.Cleanup(srv.Close)
+	svc := New(nil, nil, t.TempDir(), nil)
+	now := time.Now()
+	svc.grants = map[string]*grant{
+		"live":   {base: srv.URL, playID: "p-live", created: now, lastHit: now, expires: now.Add(time.Hour)},
+		"direct": {base: srv.URL, playID: "p-direct", direct: true, created: now, expires: now.Add(time.Hour)},
+		"idle":   {base: srv.URL, playID: "p-idle", created: now.Add(-2 * time.Hour), lastHit: now.Add(-time.Hour), expires: now.Add(time.Hour)},
+		"over":   {base: srv.URL, playID: "p-over", created: now, expires: now.Add(-time.Second)},
+	}
+	svc.pingGrants(context.Background())
+	if len(pinged) != 1 || pinged[0] != "p-live" {
+		t.Fatalf("pinged %v, want only the live HLS stream", pinged)
+	}
+}

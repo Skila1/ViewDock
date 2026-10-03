@@ -360,6 +360,14 @@ func (c *client) image(ctx context.Context, remoteID, imageType, tag string) ([]
 	return raw, resp.Header.Get("Content-Type"), err
 }
 
+// pingEncoding tells Jellyfin a play session's transcode is still wanted.
+// Jellyfin kills an HLS job about a minute after its last segment request,
+// so a paused viewer would otherwise come back to a restarted remux whose
+// segments do not line up with the ones already buffered.
+func (c *client) pingEncoding(ctx context.Context, playSessionID string) error {
+	return c.call(ctx, opTranscode, http.MethodPost, "/Sessions/Playing/Ping", url.Values{"playSessionId": {playSessionID}}, nil, nil)
+}
+
 // stopEncoding ends a Jellyfin transcode started for a play session. Each
 // stream uses its own device id because Jellyfin stops other transcodes
 // that share one.

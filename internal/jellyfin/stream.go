@@ -466,6 +466,37 @@ func (s *Service) revokeSource(sourceID string) {
 	}
 }
 
+// pingIdleLimit is how long a stream may go without a segment request and
+// still have its Jellyfin transcode kept alive: a long pause, not forever.
+const pingIdleLimit = 30 * time.Minute
+
+// pingGrants keeps the Jellyfin transcodes of live HLS streams running
+// while their viewers are paused. Ended sessions revoke their grants, so
+// only streams someone still has open are pinged.
+func (s *Service) pingGrants(ctx context.Context) {
+	now := time.Now()
+	s.mu.Lock()
+	var live []grant
+	for _, g := range s.grants {
+		seen := g.lastHit
+		if seen.IsZero() {
+			seen = g.created
+		}
+		if !g.direct && now.Before(g.expires) && now.Sub(seen) < pingIdleLimit {
+			live = append(live, *g)
+		}
+	}
+	s.mu.Unlock()
+	for _, g := range live {
+		c := &client{base: g.base, device: "viewdock-" + g.sourceID, token: g.token, http: s.HTTP, policy: Policy{Stream: true, Transcode: true}}
+		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := c.pingEncoding(pctx, g.playID); err != nil && s.Log != nil && ctx.Err() == nil {
+			s.Log.Warn("jellyfin transcode ping", "category", "media_sources", "id", g.sourceID, "err", err.Error())
+		}
+		cancel()
+	}
+}
+
 func (s *Service) sweepGrants() {
 	now := time.Now()
 	s.mu.Lock()

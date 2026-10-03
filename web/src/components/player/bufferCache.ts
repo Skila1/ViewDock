@@ -38,6 +38,12 @@ function variantOf(session: PlaybackSession, title: BufferCacheTitle): string {
 
 /** A download that receives nothing for this long is dropped and requested again. */
 const IDLE_ABORT_MS = 15_000;
+/**
+ * The wait for a response to start is longer: Jellyfin answers only once
+ * its remux reaches the segment, which takes a while after a restart, and
+ * asking again meanwhile makes it restart once more.
+ */
+const FIRST_BYTE_MS = 45_000;
 
 async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<string, string>, want?: number): Promise<ArrayBuffer> {
   // A connection can stall without failing; an idle timer turns that into a
@@ -45,7 +51,7 @@ async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<str
   const idle = new AbortController();
   const onAbort = () => idle.abort();
   signal.addEventListener("abort", onAbort);
-  let timer = window.setTimeout(() => idle.abort(), IDLE_ABORT_MS);
+  let timer = window.setTimeout(() => idle.abort(), FIRST_BYTE_MS);
   const kick = () => {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => idle.abort(), IDLE_ABORT_MS);
@@ -88,6 +94,40 @@ async function fetchBytes(url: string, signal: AbortSignal, headers?: Record<str
   }
 }
 
+/**
+ * completeSegment rejects a media segment that was cut short. Jellyfin
+ * answers 200 with whatever it had written when it kills or restarts a
+ * remux, and appending that to the player leaves a hole or garbled audio,
+ * so it is a failed download to retry and never stored.
+ */
+export function completeSegment(buf: ArrayBuffer): ArrayBuffer {
+  const bytes = new Uint8Array(buf);
+  const view = new DataView(buf);
+  // MPEG-TS: whole 188 byte packets.
+  if (bytes[0] === 0x47) {
+    if (bytes.byteLength % 188 !== 0) throw new StreamFetchError(502);
+    return buf;
+  }
+  // fMP4: top level boxes that end exactly at the end, with media data.
+  let at = 0;
+  let media = false;
+  while (at + 8 <= bytes.byteLength) {
+    let size = view.getUint32(at);
+    const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
+    if (size === 1) {
+      if (at + 16 > bytes.byteLength) throw new StreamFetchError(502);
+      size = view.getUint32(at + 8) * 2 ** 32 + view.getUint32(at + 12);
+    } else if (size === 0) {
+      size = bytes.byteLength - at;
+    }
+    if (size < 8 || at + size > bytes.byteLength) throw new StreamFetchError(502);
+    if (type === "mdat") media = true;
+    at += size;
+  }
+  if (at !== bytes.byteLength || !media) throw new StreamFetchError(502);
+  return buf;
+}
+
 /** Buffer cache for an hls.js session: the prefetcher plus the fragment loader that reads from it. */
 export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession, title: BufferCacheTitle, HlsCtor: typeof Hls, startSec = 0) {
   const base = streamKeyBase(variantOf(session, title));
@@ -126,7 +166,7 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
     fetch(span, signal) {
       const url = urls.get(span.key);
       if (!url) return Promise.reject(new StreamFetchError(404));
-      return fetchBytes(url, signal);
+      return fetchBytes(url, signal).then(completeSegment);
     },
   };
   const prefetch = new StreamPrefetcher({
@@ -285,7 +325,7 @@ export async function prefetchOpening(session: PlaybackSession, title: BufferCac
   let bytes = 0;
   for (const seg of media) {
     if (seg.start >= seconds || signal.aborted) break;
-    const buf = await fetchBytes(abs(seg.uri, mediaUrl), signal);
+    const buf = completeSegment(await fetchBytes(abs(seg.uri, mediaUrl), signal));
     await cache.put(`${base}/${tag}/${seg.sn}`, new Response(buf, { headers: { "X-VD-Size": String(buf.byteLength) } }));
     bytes += buf.byteLength;
     touchStreamCache(name, Date.now(), bytes);

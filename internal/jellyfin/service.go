@@ -262,8 +262,23 @@ func (s *Service) setStatus(ctx context.Context, id, status, lastErr string, cou
 	}
 }
 
+// pingInterval is well inside Jellyfin's one minute HLS kill timer.
+const pingInterval = 20 * time.Second
+
 // Start syncs enabled sources shortly after boot and then periodically.
 func (s *Service) Start(ctx context.Context) {
+	go func() {
+		tick := time.NewTicker(pingInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				s.pingGrants(ctx)
+			}
+		}
+	}()
 	go func() {
 		timer := time.NewTimer(time.Minute)
 		defer timer.Stop()
