@@ -8,8 +8,9 @@
 # A DEPLOY: push is also a release: unless the push already changed VERSION,
 # the patch version goes up, the "## Unreleased" changelog heading becomes the
 # new version, and a "Release X.Y.Z" commit is pushed to main before the image
-# is built from it. Admin, Updates reads VERSION from main, so installs only
-# see the update once the image is on its way. Pushes made with GITHUB_TOKEN
+# is built from it. Admin, Updates reads VERSION from main but offers a version
+# only once the registry has its image tag; until then it shows the release as
+# being built. Pushes made with GITHUB_TOKEN
 # do not start workflows, so the release commit does not loop.
 name: docker
 

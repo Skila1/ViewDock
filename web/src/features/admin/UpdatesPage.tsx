@@ -150,6 +150,11 @@ export function UpdatesPage() {
               <div className="text-2xl font-semibold">{d.latest_version || d.version || "0.1.0"}</div>
             </div>
           </div>
+          {d.pending_version ? (
+            <p className="text-xs text-dim">
+              {d.pending_version} is being built. It will be offered here once its image is published, usually within a few minutes.
+            </p>
+          ) : null}
           <p className="break-all text-xs text-dim">{d.image}</p>
           <p className="text-xs text-dim">
             Last check: {relativeTime(d.last_check_at)}. Last update: {relativeTime(d.last_applied_at)}

@@ -1,6 +1,7 @@
 package update
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,5 +178,38 @@ func TestImageRefDefault(t *testing.T) {
 	t.Setenv("VD_IMAGE", "ghcr.io/example/viewdock:1.2.3")
 	if ImageRef() != "ghcr.io/example/viewdock:1.2.3" {
 		t.Fatalf("got %s", ImageRef())
+	}
+}
+
+func TestWithTag(t *testing.T) {
+	for in, want := range map[string]string{
+		"ghcr.io/skila1/viewdock:latest": "ghcr.io/skila1/viewdock:0.4.3",
+		"ghcr.io/skila1/viewdock":        "ghcr.io/skila1/viewdock:0.4.3",
+		"localhost:5000/viewdock:latest": "localhost:5000/viewdock:0.4.3",
+		"localhost:5000/viewdock":        "localhost:5000/viewdock:0.4.3",
+	} {
+		if got := withTag(in, "0.4.3"); got != want {
+			t.Errorf("withTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestReleasePending(t *testing.T) {
+	cases := []struct {
+		name            string
+		tagErr          error
+		current, latest string
+		want            bool
+	}{
+		{"image pushed", nil, "sha256:a", "sha256:a", false},
+		{"still building", ErrNoManifest, "sha256:a", "sha256:a", true},
+		{"running digest unknown", ErrNoManifest, "", "sha256:a", true},
+		{"latest moved without a version tag", ErrNoManifest, "sha256:a", "sha256:b", false},
+		{"registry unreachable", errors.New("timeout"), "sha256:a", "sha256:a", false},
+	}
+	for _, c := range cases {
+		if got := releasePending(c.tagErr, c.current, c.latest); got != c.want {
+			t.Errorf("%s: releasePending = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -157,6 +157,8 @@ export interface UpdateStatus {
   available: boolean;
   version: string;
   latest_version: string;
+  /** A release announced in the repository whose image is still being built. */
+  pending_version?: string;
   image: string;
   current_digest?: string;
   latest_digest?: string;

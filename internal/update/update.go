@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -16,40 +17,44 @@ import (
 const settingsKey = "app_update"
 
 type Status struct {
-	AutoEnabled   bool             `json:"auto_enabled"`
-	HelperOK      bool             `json:"helper_ok"`
-	SocketOK      bool             `json:"socket_ok"`
-	CanApply      bool             `json:"can_apply"`
-	Available     bool             `json:"available"`
-	Version       string           `json:"version"`
-	LatestVersion string           `json:"latest_version"`
-	Image         string           `json:"image"`
-	CurrentDigest string           `json:"current_digest"`
-	LatestDigest  string           `json:"latest_digest"`
-	Changelog     []ChangelogEntry `json:"changelog"`
-	Progress      *Progress        `json:"progress,omitempty"`
-	LastCheckAt   *time.Time       `json:"last_check_at"`
-	LastAppliedAt *time.Time       `json:"last_applied_at"`
-	LastStatus    string           `json:"last_status"`
-	LastError     string           `json:"last_error"`
-	LastAppliedBy string           `json:"last_applied_by"`
-	Checking      bool             `json:"checking"`
-	Updating      bool             `json:"updating"`
-	ApplyReason   string           `json:"apply_reason"`
+	AutoEnabled   bool   `json:"auto_enabled"`
+	HelperOK      bool   `json:"helper_ok"`
+	SocketOK      bool   `json:"socket_ok"`
+	CanApply      bool   `json:"can_apply"`
+	Available     bool   `json:"available"`
+	Version       string `json:"version"`
+	LatestVersion string `json:"latest_version"`
+	// PendingVersion is a release whose image is still being built: the
+	// repository announces it before the registry can serve it.
+	PendingVersion string           `json:"pending_version,omitempty"`
+	Image          string           `json:"image"`
+	CurrentDigest  string           `json:"current_digest"`
+	LatestDigest   string           `json:"latest_digest"`
+	Changelog      []ChangelogEntry `json:"changelog"`
+	Progress       *Progress        `json:"progress,omitempty"`
+	LastCheckAt    *time.Time       `json:"last_check_at"`
+	LastAppliedAt  *time.Time       `json:"last_applied_at"`
+	LastStatus     string           `json:"last_status"`
+	LastError      string           `json:"last_error"`
+	LastAppliedBy  string           `json:"last_applied_by"`
+	Checking       bool             `json:"checking"`
+	Updating       bool             `json:"updating"`
+	ApplyReason    string           `json:"apply_reason"`
 }
 
 type stored struct {
-	AutoEnabled   bool             `json:"auto_enabled"`
-	Available     bool             `json:"available"`
-	CurrentDigest string           `json:"current_digest"`
-	LatestDigest  string           `json:"latest_digest"`
-	LatestVersion string           `json:"latest_version"`
-	Changelog     []ChangelogEntry `json:"changelog"`
-	LastCheckAt   *time.Time       `json:"last_check_at"`
-	LastAppliedAt *time.Time       `json:"last_applied_at"`
-	LastStatus    string           `json:"last_status"`
-	LastError     string           `json:"last_error"`
-	LastAppliedBy string           `json:"last_applied_by"`
+	AutoEnabled    bool             `json:"auto_enabled"`
+	Available      bool             `json:"available"`
+	CurrentDigest  string           `json:"current_digest"`
+	LatestDigest   string           `json:"latest_digest"`
+	LatestVersion  string           `json:"latest_version"`
+	PendingVersion string           `json:"pending_version,omitempty"`
+	Changelog      []ChangelogEntry `json:"changelog"`
+	LastCheckAt    *time.Time       `json:"last_check_at"`
+	LastAppliedAt  *time.Time       `json:"last_applied_at"`
+	LastStatus     string           `json:"last_status"`
+	LastError      string           `json:"last_error"`
+	LastAppliedBy  string           `json:"last_applied_by"`
 }
 
 var (
@@ -102,27 +107,38 @@ func Load(ctx context.Context, kv *settings.Store) Status {
 		reason = "Neither the host helper nor the Docker socket is available. Check now still works. Update now cannot run until you re-run the installer or mount the Docker socket."
 	}
 	return Status{
-		AutoEnabled:   st.AutoEnabled,
-		HelperOK:      helper,
-		SocketOK:      sock,
-		CanApply:      helper || sock,
-		Available:     available,
-		Version:       version.Version,
-		LatestVersion: latestVer,
-		Image:         ImageRef(),
-		CurrentDigest: st.CurrentDigest,
-		LatestDigest:  st.LatestDigest,
-		Changelog:     st.Changelog,
-		Progress:      progress,
-		LastCheckAt:   st.LastCheckAt,
-		LastAppliedAt: st.LastAppliedAt,
-		LastStatus:    st.LastStatus,
-		LastError:     st.LastError,
-		LastAppliedBy: st.LastAppliedBy,
-		Checking:      ch,
-		Updating:      updating,
-		ApplyReason:   reason,
+		AutoEnabled:    st.AutoEnabled,
+		HelperOK:       helper,
+		SocketOK:       sock,
+		CanApply:       helper || sock,
+		Available:      available,
+		Version:        version.Version,
+		LatestVersion:  latestVer,
+		PendingVersion: st.PendingVersion,
+		Image:          ImageRef(),
+		CurrentDigest:  st.CurrentDigest,
+		LatestDigest:   st.LatestDigest,
+		Changelog:      st.Changelog,
+		Progress:       progress,
+		LastCheckAt:    st.LastCheckAt,
+		LastAppliedAt:  st.LastAppliedAt,
+		LastStatus:     st.LastStatus,
+		LastError:      st.LastError,
+		LastAppliedBy:  st.LastAppliedBy,
+		Checking:       ch,
+		Updating:       updating,
+		ApplyReason:    reason,
 	}
+}
+
+// releasePending reports whether a release announced in the repository has
+// no image yet. Its version tag is the proof; an image whose :latest moved
+// away from the running one counts too, for registries without version tags.
+func releasePending(tagErr error, current, latest string) bool {
+	if !errors.Is(tagErr, ErrNoManifest) {
+		return false
+	}
+	return current == "" || digestEqual(current, latest)
 }
 
 func save(ctx context.Context, kv *settings.Store, st stored) error {
@@ -194,7 +210,30 @@ func Check(ctx context.Context, kv *settings.Store) (Status, error) {
 		return Load(ctx, kv), err
 	}
 	lv, notes := FetchReleaseNotes(ctx, version.Version)
+	pending := ""
+	if lv != "" && compareVersions(lv, version.Version) > 0 {
+		_, tagErr := RegistryDigest(ctx, withTag(img, lv))
+		if releasePending(tagErr, current, latest) {
+			pending = lv
+		}
+	}
 	st = reloadAfterCheck(ctx, kv, now)
+	st.PendingVersion = pending
+	if pending != "" {
+		// Offer only what the registry can serve; the release shows up on
+		// the first check after its image is pushed.
+		lv = ""
+		if compareVersions(st.LatestVersion, pending) >= 0 {
+			st.LatestVersion = version.Version
+		}
+		var published []ChangelogEntry
+		for _, e := range notes {
+			if compareVersions(e.Version, pending) < 0 {
+				published = append(published, e)
+			}
+		}
+		notes = published
+	}
 	st.CurrentDigest = current
 	st.LatestDigest = latest
 	if lv != "" || len(notes) > 0 {

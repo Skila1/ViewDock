@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,17 @@ func parseImage(ref string) (host, repo, tag string) {
 	}
 	repo = s
 	return
+}
+
+// ErrNoManifest means the registry has no image under the tag.
+var ErrNoManifest = errors.New("registry has no image with that tag")
+
+// withTag returns ref pointing at tag instead of its own tag.
+func withTag(ref, tag string) string {
+	if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
+		ref = ref[:i]
+	}
+	return ref + ":" + tag
 }
 
 func RegistryDigest(ctx context.Context, ref string) (string, error) {
@@ -61,6 +73,9 @@ func RegistryDigest(ctx context.Context, ref string) (string, error) {
 	}
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, res.Body)
+	if res.StatusCode == http.StatusNotFound {
+		return "", ErrNoManifest
+	}
 	if res.StatusCode >= 300 {
 		return "", fmt.Errorf("registry %s", res.Status)
 	}
