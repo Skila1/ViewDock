@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.8
 
 - Closing the player could erase the resume point: it sent position 0 because the video had already been removed from the page. It now sends the last position it played, and the server ignores a stop at 0 when it knows where the viewer was.
 - Watch history lists each title once with its latest date and current progress, instead of an entry every few seconds after a title was finished. Removing an entry removes that title's history.
