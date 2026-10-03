@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- offer an update only once its image is published
+
 ## 0.4.3
 
 - keep downloading when the buffer cache is full, resume from the server after a reopen
