@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.7
 
 - 4K Jellyfin films could freeze mid-playback with the next part already downloaded: the player kept 30 seconds behind the playhead in the browser's video buffer, which at 4K remux bitrates overflows Chrome's limit, so a segment failed to load and playback stopped at the gap. With the buffer cache the player now keeps only a few seconds in that buffer (the rest plays from the cache at once) and steps over small gaps.
 - A download from the media server that stalls is retried after 15 seconds without data instead of holding a download slot until it finishes.
