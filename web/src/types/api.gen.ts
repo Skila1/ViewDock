@@ -196,6 +196,43 @@ export interface Preferences {
   subtitle_lang: string;
   subtitle_mode: string;
   autoplay: boolean;
+  /** Player defaults for this profile. */
+  playback_rate?: number;
+  quality?: string;
+  /** Seconds the Up Next countdown runs before the next episode; 0 waits for a click. */
+  upnext_seconds?: number;
+  /** "" (local first), "local" or "remote" (Jellyfin first). */
+  source_pref?: string;
+  /** Home rows in order; empty means the default set. */
+  home_rows?: string[];
+}
+
+export interface ListEntry {
+  kind: "movie" | "series";
+  id: string;
+  added_at: string;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  items: ListEntry[];
+}
+
+export interface HistoryEntry {
+  id: string;
+  item_kind: "movie" | "episode";
+  item_id: string;
+  title: string;
+  series_id?: string;
+  season?: number;
+  number?: number;
+  watched_at: string;
+  position_ms: number;
+  duration_ms: number;
+  completed: boolean;
 }
 
 export interface SetupStatus {
@@ -370,6 +407,13 @@ export interface Series {
 export interface BrowseSignals {
   views: Record<string, number>;
   watched: string[];
+  /** Titles marked or played to the end ("movie:<id>", "series:<id>" when every episode is). */
+  finished?: string[];
+  liked?: string[];
+  disliked?: string[];
+  not_interested?: string[];
+  /** The profile's My List. */
+  watchlist?: string[];
   recommended: string[];
 }
 
@@ -528,6 +572,12 @@ export interface PlaybackSession {
   source?: string;
   /** External sources: the video codec sent, and whether it is the original rather than a re-encode. */
   remote_video?: { codec: string; copy: boolean };
+  /** External sources: the video bitrate in bits per second, when known. */
+  bitrate?: number;
+  /** Tracks and quality the session uses, including ones the profile chose. */
+  audio_index?: number;
+  subtitle_index?: number | null;
+  quality?: string;
 }
 
 export interface ProgressPut {
@@ -672,6 +722,24 @@ export interface WTTicket {
 
 export interface StreamRow {
   id: string;
+  duration_ms?: number;
+  source?: string;
+  video_codec?: string;
+  video_copy?: boolean;
+  bitrate_bps?: number;
+  position_ms?: number;
+  /** The player's last report of its buffers and network. */
+  client?: {
+    paused: boolean;
+    buffer_ahead_ms: number;
+    cache_ahead_ms: number;
+    cache_behind_ms: number;
+    cache_bytes: number;
+    cache_hit_rate: number;
+    throughput_bps: number;
+    dropped_frames: number;
+    at?: string;
+  };
   session_id?: string;
   user?: string;
   username?: string;

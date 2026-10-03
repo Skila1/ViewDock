@@ -5,6 +5,8 @@ import { cn } from "@/lib/cn";
 
 type Props = {
   title: string;
+  /** Why the row is here ("From what you watch"), shown under the title. */
+  subtitle?: string;
   /** Where the heading leads (the full, filtered list), when there is one. */
   to?: string;
   children: ReactNode;
@@ -12,7 +14,7 @@ type Props = {
 };
 
 /** A titled, horizontally scrolling row of cards with previous and next buttons. */
-export function MediaRail({ title, to, children, className }: Props) {
+export function MediaRail({ title, subtitle, to, children, className }: Props) {
   const track = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
 
@@ -62,6 +64,7 @@ export function MediaRail({ title, to, children, className }: Props) {
         ) : (
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
         )}
+        {subtitle ? <span className="mr-auto ml-1 hidden truncate text-xs text-dim sm:inline">{subtitle}</span> : null}
         {edges.start && edges.end ? null : (
           <div className="hidden shrink-0 sm:flex">
             {arrow(-1, edges.start)}

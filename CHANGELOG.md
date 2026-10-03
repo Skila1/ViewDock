@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Right-click any title (or press the context menu key) for Resume, Play from beginning, Go to series, Add to My List, Add to playlist, Mark as watched or unwatched, Remove from Continue Watching, Like, Dislike and Not interested, plus Refresh metadata and Media info for library managers. Only the actions that fit the title are shown.
+- My List, playlists and watch history (with single entries removable or the whole history cleared) on the new My List page. Everything belongs to your profile: resume points, watched state, likes, My List, playlists, history, the audio and subtitle tracks you pick for a movie or show, playback speed and quality.
+- Recommendations follow your likes and dislikes and say why: "Recommended for you", "Because you liked …" and "More …" rows for the genres you watch. Not interested hides a title without counting against its genre.
+- Customize home: pick and order the rows shown on the home page. Continue Watching now also shows the next episode of shows you are following, keeps one entry per show, and counts a title as finished once its credits start (configurable under Admin, Settings, Playback).
+- Up Next: near the end of an episode a card counts down to the next one (Profile, Playback sets the countdown; 0 waits for a click). After a movie, related titles are offered.
+- The player remembers your audio and subtitle choice for each movie and show, otherwise uses your preferred languages. Shows with several audio tracks get an Audio menu.
+- Keyboard: Space or K play and pause, J, L and the arrows seek 10 seconds, Up and Down change the volume, M mutes, F fullscreen, C captions, I stats, N next episode, 0 to 9 jump through the title.
+- Stats for nerds (press I or open it from the player settings): how the video is delivered, codec, resolution, bitrates, network speed, the buffer cache ahead and behind, cache size and hit rate, and dropped frames. The seek bar marks the parts stored on this device.
+- The buffer cache sizes itself from the title's bitrate and the storage allowed (a low bitrate title keeps up to 20 minutes ahead), keeps to a per-title and a device-wide limit (Profile, Playback cache, with a Clear button), and drops the least recently watched titles first.
+- Near the end of an episode, once it is stored to the end, the next episode's opening is downloaded too, so it starts at once.
+- A stream that dies reopens at the same position up to three times before an error is shown.
+- A device that fails to play a codec it claimed is not sent that codec again for 30 days (resettable under Profile, Playback cache).
+- When a title is both local and on a media server, your profile chooses which plays first, and the other is used when the first is unavailable.
+- Admin, Streams shows each session's profile, title, source, direct play or transcode, bitrate, position, buffer and network speed.
+
 ## 0.3.4
 
 - The player never actually played from the Jellyfin buffer cache: it downloaded every segment again itself while the cache downloaded the same segments alongside it, so each segment crossed the network twice and playback still stalled. The player now reads from the cache, and a segment the cache is already downloading is shared instead of requested again.

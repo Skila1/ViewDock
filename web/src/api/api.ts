@@ -32,6 +32,9 @@ import type {
   MoveRequest,
   PlaybackSession,
   Preferences,
+  ListEntry,
+  Playlist,
+  HistoryEntry,
   ProgressPut,
   ProgressRecord,
   SearchResponse,
@@ -125,7 +128,7 @@ export const api = {
   patchMe: (body: { display_name: string }) =>
     request<Me>("/api/v1/me", { method: "PATCH", body, queueWhenOffline: true }),
   getPreferences: () => request<Preferences>("/api/v1/me/preferences"),
-  putPreferences: (body: Preferences) =>
+  putPreferences: (body: Partial<Preferences>) =>
     request<Preferences>("/api/v1/me/preferences", { method: "PUT", body, queueWhenOffline: true }),
   changePassword: (body: { current?: string; next: string }) =>
     request("/api/v1/me/password", { method: "POST", body }),
@@ -171,6 +174,31 @@ export const api = {
   getMovie: (id: string) => request<MovieDetail>(`/api/v1/movies/${id}`),
   listSeries: async () => asArray<Series>(await request("/api/v1/series")),
   browseSignals: () => request<BrowseSignals>("/api/v1/browse/signals"),
+  setWatched: (kind: "movie" | "series" | "episode", id: string, watched: boolean) =>
+    request(`/api/v1/titles/${kind}/${encodeURIComponent(id)}/watched`, { method: "PUT", body: { watched } }),
+  setReaction: (kind: "movie" | "series", id: string, reaction: "like" | "dislike" | "not_interested" | "") =>
+    request(`/api/v1/titles/${kind}/${encodeURIComponent(id)}/reaction`, { method: "PUT", body: { reaction } }),
+  dismissContinue: (kind: "movie" | "episode", id: string, dismissed = true) =>
+    request(`/api/v1/titles/${kind}/${encodeURIComponent(id)}/continue`, { method: "PUT", body: { dismissed } }),
+  setTitleTracks: (kind: "movie" | "episode", id: string, body: { audio_index?: number; subtitle_index?: number }) =>
+    request(`/api/v1/titles/${kind}/${encodeURIComponent(id)}/tracks`, { method: "PUT", body }),
+  watchlist: async () => asArray<ListEntry>(await request("/api/v1/me/watchlist")),
+  setWatchlist: (kind: "movie" | "series", id: string, listed: boolean) =>
+    request(`/api/v1/me/watchlist/${kind}/${encodeURIComponent(id)}`, { method: listed ? "PUT" : "DELETE" }),
+  playlists: async () => asArray<Playlist>(await request("/api/v1/me/playlists")),
+  createPlaylist: (name: string) => request<Playlist>("/api/v1/me/playlists", { method: "POST", body: { name } }),
+  renamePlaylist: (id: string, name: string) => request(`/api/v1/me/playlists/${id}`, { method: "PATCH", body: { name } }),
+  deletePlaylist: (id: string) => request(`/api/v1/me/playlists/${id}`, { method: "DELETE" }),
+  addToPlaylist: (id: string, kind: "movie" | "series", itemId: string) =>
+    request(`/api/v1/me/playlists/${id}/items`, { method: "POST", body: { kind, id: itemId } }),
+  removeFromPlaylist: (id: string, kind: string, itemId: string) =>
+    request(`/api/v1/me/playlists/${id}/items/${kind}/${encodeURIComponent(itemId)}`, { method: "DELETE" }),
+  history: async (before?: string) =>
+    asArray<HistoryEntry>(await request(`/api/v1/me/history${before ? `?before=${encodeURIComponent(before)}` : ""}`)),
+  deleteHistory: (id: string) => request(`/api/v1/me/history/${id}`, { method: "DELETE" }),
+  clearHistory: () => request("/api/v1/me/history", { method: "DELETE" }),
+  refreshMetadata: (kind: "movie" | "series", id: string) =>
+    request(`/api/v1/${kind === "movie" ? "movies" : "series"}/${id}/refresh`, { method: "POST" }),
   getSeries: (id: string) => request<SeriesDetail>(`/api/v1/series/${id}`),
   getEpisode: (id: string) => request<Episode>(`/api/v1/episodes/${id}`),
   nextEpisode: (seriesId: string) => request<Episode>(`/api/v1/series/${seriesId}/next`),
@@ -203,7 +231,7 @@ export const api = {
     ),
   putProgress: (
     sessionId: string,
-    body: ProgressPut & { event?: "pause" | "seek" | "ended" | "stop" },
+    body: ProgressPut & { event?: "pause" | "seek" | "ended" | "stop"; stats?: Record<string, number | boolean> },
     item?: { kind: string; id: string },
   ) =>
     request(sessionPath(sessionId, "/progress"), {
@@ -219,6 +247,7 @@ export const api = {
     }),
   putItemProgress: (kind: string, id: string, body: { position_ms: number; duration_ms: number; client_updated_at: string }) =>
     request(`/api/v1/progress/${kind}/${encodeURIComponent(id)}`, { method: "PUT", body, queueWhenOffline: true }),
+  keepAlive: (sessionId: string) => request(sessionPath(sessionId, "/keepalive"), { method: "POST" }),
   endSession: (sessionId: string) => request(sessionPath(sessionId), { method: "DELETE" }).finally(() => forgetSession(sessionId)),
   sessionTelemetry: (sessionId: string, events: { type: string; at: number; data?: Record<string, unknown> }[]) =>
     request(sessionPath(sessionId, "/telemetry"), { method: "POST", body: { events } }),

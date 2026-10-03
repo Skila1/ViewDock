@@ -172,6 +172,9 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	rc.Bind(cfgLogRetention, func(string) { logs.SetRetentionDays(rc.Int(cfgLogRetention)) })
 	rc.Bind(cfgGuestHours, func(string) { usersAPI.SetMaxGuestHours(rc.Int(cfgGuestHours)) })
 	rc.Bind(cfgBlockUnrated, func(string) { library.SetBlockUnrated(rc.Bool(cfgBlockUnrated)) })
+	setCompletion := func(string) { progress.SetCompletion(rc.Int(cfgCompletePercent), rc.Int(cfgCompleteRemaining)) }
+	rc.Bind(cfgCompletePercent, setCompletion)
+	rc.Bind(cfgCompleteRemaining, setCompletion)
 	rc.Bind(cfgCertCountry, func(string) { meta.SetCertificationCountry(rc.String(cfgCertCountry)) })
 	rc.Bind(cfgFlightRetention, func(string) { flight.SetRetention(time.Duration(rc.Int(cfgFlightRetention)) * time.Hour) })
 	rc.Bind(cfgTelemetryBudget, func(string) {
@@ -262,6 +265,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	if controlPlane {
 		sources := jellyfin.New(sqlDB, kv.Cipher, cfg.CacheDir, logger)
 		sources.Audit, sources.Cfg = aud, cfg
+		meta.RefreshRemote = sources.RefreshItem
 		play.Sources = sources
 		sources.Start(context.Background())
 		srv.APIMounts = append(srv.APIMounts, sources.Routes)

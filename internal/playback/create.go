@@ -37,6 +37,11 @@ type createBody struct {
 	ShareToken       string             `json:"share_token"` // ignored; not auth
 	ReplaceSessionID string             `json:"replace_session_id"`
 	Source           string             `json:"source"`
+
+	// Filled from the profile: languages for picking tracks when neither the
+	// player nor a remembered choice picked them.
+	audioChosen, subChosen      bool
+	audioLang, subLang, subMode string
 }
 
 // Remote places new sessions on media workers instead of this process.
@@ -95,8 +100,16 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusUnauthorized, "unauthorized", "login required")
 		return
 	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	var body createBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var present map[string]json.RawMessage
+	if err == nil {
+		err = json.Unmarshal(raw, &body)
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &present)
+	}
+	if err != nil {
 		httpapi.WriteErr(w, 400, "bad_request", "invalid json")
 		return
 	}
@@ -107,6 +120,7 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	// Quality change is a new session: the client recreates at current position.
 	body.Client = body.Client.WithUA(r.UserAgent())
+	a.applyProfileDefaults(r.Context(), p, &body, present)
 
 	handled, sourceOptions := a.createRemote(w, r, p, body)
 	if handled {
@@ -141,6 +155,8 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := a.probe(r.Context(), loc)
+	langTracks(info, &body)
+	body.AudioIndex, body.SubtitleIndex = validTracks(info, body.AudioIndex, body.SubtitleIndex)
 	lan := bandwidth.IsLAN(r, a.Cfg)
 	shareH := 0
 	if p.IsGuest() && a.DB != nil {
@@ -525,6 +541,7 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		"id": s.ID, "stoken": s.Stoken, "delivery": s.Delivery, "hls_attach": s.HLSAttach,
 		"urls": urls, "qualities": qualities,
 		"audio": a.audioTracks(s.Info), "subtitles": a.subTracks(s.Info),
+		"audio_index": s.AudioIndex, "subtitle_index": s.SubtitleIndex, "quality": s.Quality,
 		"decision": map[string]any{
 			"mode": s.Mode, "playback": s.Decision.Playback, "reasons": s.Reasons,
 			"video": s.Decision.Video, "audio": s.Decision.Audio, "container": s.Decision.Container,
@@ -548,6 +565,7 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		}
 		out["vod_ondemand"] = true
 		out["seekable_from_ms"] = 0
+		out["bitrate"] = s.RemoteBitrate
 		if s.RemoteVideoCodec != "" {
 			out["remote_video"] = map[string]any{"codec": s.RemoteVideoCodec, "copy": s.RemoteVideoCopy}
 		}
@@ -562,6 +580,108 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 		out["source"] = s.Source
 	}
 	return out
+}
+
+// applyProfileDefaults fills what the player did not send from the profile:
+// its quality, preferred source and the tracks it picked for this title or
+// series before.
+func (a *API) applyProfileDefaults(ctx context.Context, p *auth.Principal, body *createBody, present map[string]json.RawMessage) {
+	if a.DB == nil || p == nil || !p.IsUser() || p.UserID == "" {
+		return
+	}
+	var quality, source string
+	_ = a.DB.QueryRowContext(ctx, `SELECT quality, source_pref, audio_lang, subtitle_lang, subtitle_mode FROM user_preferences WHERE user_id = ?`, p.UserID).
+		Scan(&quality, &source, &body.audioLang, &body.subLang, &body.subMode)
+	_, body.audioChosen = present["audio_index"]
+	_, body.subChosen = present["subtitle_index"]
+	if body.Quality == "" && quality != "auto" {
+		body.Quality = quality
+	}
+	if body.Source == "" && source == SourceRemote {
+		body.Source = SourceRemote
+	}
+	audio, sub := library.ProfileTracks(ctx, a.DB, p.UserID, body.ItemKind, body.ItemID)
+	if !body.audioChosen && audio >= 0 {
+		body.AudioIndex = audio
+		body.audioChosen = true
+	}
+	if !body.subChosen && sub >= -1 {
+		if sub >= 0 {
+			v := sub
+			body.SubtitleIndex = &v
+		}
+		body.subChosen = true
+	}
+}
+
+// langCode reduces ISO 639-1 and -2 codes ("en", "eng", "ger") to two letters.
+func langCode(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if alias, ok := map[string]string{"ger": "de", "deu": "de", "dut": "nl", "nld": "nl", "chi": "zh", "zho": "zh", "jpn": "ja", "kor": "ko",
+		"spa": "es", "por": "pt", "swe": "sv", "ara": "ar", "fre": "fr", "fra": "fr", "ita": "it", "rus": "ru", "eng": "en", "hin": "hi"}[s]; ok {
+		return alias
+	}
+	if len(s) > 2 {
+		return s[:2]
+	}
+	return s
+}
+
+// langTracks picks tracks by the profile's languages when nothing picked
+// them: the audio in the preferred language, and subtitles always (mode
+// "always"), only forced ones (mode "auto"), or none (mode "off").
+func langTracks(info *ffmpeg.MediaInfo, body *createBody) {
+	if info == nil {
+		return
+	}
+	if !body.audioChosen && body.audioLang != "" {
+		want := langCode(body.audioLang)
+		for _, s := range info.Streams {
+			if s.Kind == "audio" && langCode(s.Language) == want {
+				body.AudioIndex = s.Index
+				break
+			}
+		}
+	}
+	if body.subChosen || body.SubtitleIndex != nil || body.subMode == "off" || body.subLang == "" {
+		return
+	}
+	want := langCode(body.subLang)
+	for _, forcedOnly := range []bool{true, false} {
+		if !forcedOnly && body.subMode != "always" {
+			break
+		}
+		for _, s := range info.Streams {
+			if s.Kind == "subtitle" && langCode(s.Language) == want && (!forcedOnly || s.Forced) {
+				v := s.Index
+				body.SubtitleIndex = &v
+				return
+			}
+		}
+	}
+}
+
+// validTracks drops track choices the file does not have: a choice
+// remembered for a series may not exist in every episode.
+func validTracks(info *ffmpeg.MediaInfo, audio int, sub *int) (int, *int) {
+	if info == nil {
+		return audio, sub
+	}
+	has := func(index int, kind string) bool {
+		for _, s := range info.Streams {
+			if s.Index == index && s.Kind == kind {
+				return true
+			}
+		}
+		return false
+	}
+	if audio > 0 && !has(audio, "audio") {
+		audio = 0
+	}
+	if sub != nil && !has(*sub, "subtitle") {
+		sub = nil
+	}
+	return audio, sub
 }
 
 func (a *API) audioTracks(info *ffmpeg.MediaInfo) []map[string]any {

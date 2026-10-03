@@ -21,11 +21,13 @@ type Artwork interface {
 }
 
 type Service struct {
-	DB      *sql.DB
-	TMDB    *Client
-	Art     Artwork
-	mu      sync.Mutex
-	country atomic.Value
+	DB   *sql.DB
+	TMDB *Client
+	Art  Artwork
+	// RefreshRemote resyncs the external source a title came from.
+	RefreshRemote func(ctx context.Context, itemKind, itemID string) error
+	mu            sync.Mutex
+	country       atomic.Value
 }
 
 const defaultCertCountry = "US"

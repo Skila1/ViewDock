@@ -13,6 +13,7 @@ import (
 	"github.com/viewdock/viewdock/internal/ffmpeg"
 	"github.com/viewdock/viewdock/internal/hls"
 	"github.com/viewdock/viewdock/internal/hwaccel"
+	"github.com/viewdock/viewdock/internal/inspector"
 	"github.com/viewdock/viewdock/internal/library"
 )
 
@@ -83,7 +84,10 @@ type Session struct {
 	// source sends: its codec, and whether it is the original, not a re-encode.
 	RemoteVideoCodec string
 	RemoteVideoCopy  bool
-	remoteStop       func()
+	RemoteBitrate    int64
+	// ClientStats is the player's last report of its buffers and network.
+	ClientStats *inspector.ClientStats
+	remoteStop  func()
 
 	checkpoint checkpointState
 
@@ -94,7 +98,7 @@ type Session struct {
 	restarting  bool
 	cpuFallback bool
 	stderr      lockedBuf
-	jobMu       sync.Mutex // start/replace only — never held across waits or HTTP
+	jobMu       sync.Mutex // start/replace only, never held across waits or HTTP
 }
 
 type lockedBuf struct {

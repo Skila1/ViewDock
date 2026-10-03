@@ -19,6 +19,8 @@ const (
 	cfgWatchTogether     = "features.watch_together"
 	cfgDownloads         = "features.downloads"
 	cfgHardDrift         = "sync.hard_drift_ms"
+	cfgCompletePercent   = "playback.complete_percent"
+	cfgCompleteRemaining = "playback.complete_remaining_seconds"
 	cfgGuestHours        = "guests.max_hours"
 	cfgMeshPlayback      = "mesh.route_playback"
 	cfgDiscordPublicKey  = "discord.public_key"
@@ -79,6 +81,12 @@ func configDefs(cfg config.Config) []runtimecfg.Def {
 		{Key: cfgTranscodeSlots, Label: "Concurrent transcodes", Category: "Playback", Kind: runtimecfg.KindInt,
 			Default: strconv.Itoa(bandwidth.DefaultSlots), Min: 1, Max: 64,
 			Help: "Simultaneous FFmpeg transcodes on this node. New sessions beyond the limit are refused."},
+		{Key: cfgCompletePercent, Label: "Finished at (percent watched)", Category: "Playback", Kind: runtimecfg.KindInt,
+			Default: "92", Min: 50, Max: 100,
+			Help: "A title counts as watched, and leaves Continue Watching, once this much of it has played."},
+		{Key: cfgCompleteRemaining, Label: "Finished with this much left (seconds)", Category: "Playback", Kind: runtimecfg.KindInt,
+			Default: "180", Min: 0, Max: 1800,
+			Help: "A title also counts as watched when no more than this is left, so end credits do not keep it in Continue Watching. Applies to titles over ten times this long; 0 turns it off."},
 		{Key: cfgMeshPlayback, Label: "Play on registered media workers", Category: "Playback", Kind: runtimecfg.KindBool, Default: "0",
 			Help: "Place new playback sessions on healthy registered workers instead of this server. Always on when VD_ROLE=control."},
 		{Key: cfgDownloads, Label: "Downloads and Offline Vault", Category: "Offline Vault", Kind: runtimecfg.KindBool, Default: "1"},

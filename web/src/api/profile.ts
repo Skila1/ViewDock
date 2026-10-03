@@ -22,7 +22,7 @@ export function nativeHlsSupported(): boolean {
   return Boolean(el.canPlayType("application/vnd.apple.mpegURL"));
 }
 
-/** iOS 17.1+ ManagedMediaSource or classic MSE — use hls.js instead of AVPlayer. */
+/** iOS 17.1+ ManagedMediaSource or classic MSE: use hls.js instead of AVPlayer. */
 export function mseHlsAvailable(): boolean {
   return typeof MediaSource !== "undefined" || typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource !== "undefined";
 }
@@ -130,25 +130,45 @@ async function codecCap(codec: string, type: "file" | "media-source"): Promise<C
   return { max_height: max, hardware, ten_bit: tenBit };
 }
 
-const FALLBACK_KEY = "viewdock:codec-fallback";
+const FAILED_KEY = "viewdock:codec-failures";
+/** How long a device keeps avoiding a codec it failed to decode. */
+const FAILED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function readFailures(): Record<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAILED_KEY) ?? "{}") as Record<string, number>;
+    const now = Date.now();
+    return Object.fromEntries(Object.entries(raw).filter(([, at]) => typeof at === "number" && now - at < FAILED_TTL_MS));
+  } catch {
+    return {};
+  }
+}
 
 /**
- * Called when this browser failed to play a stream it claimed to decode.
- * For the rest of the tab, external sources send H.264 only.
+ * Called when this device failed to decode a codec it claimed to support.
+ * External sources then send this device another codec (in the end H.264)
+ * for the next 30 days, so it does not fail the same way every time.
  */
-export function rememberCodecFallback() {
+export function rememberCodecFailure(codec: string) {
+  if (!codec || codec === "h264") return;
   try {
-    sessionStorage.setItem(FALLBACK_KEY, "1");
+    localStorage.setItem(FAILED_KEY, JSON.stringify({ ...readFailures(), [codec]: Date.now() }));
   } catch {
     /* storage blocked: the next session may try the codec again */
   }
 }
 
-export function codecFallbackActive(): boolean {
+/** Codecs this device failed to decode recently. */
+export function failedCodecs(): Set<string> {
+  return new Set(Object.keys(readFailures()));
+}
+
+/** Forgets remembered decode failures (Profile, playback settings). */
+export function clearCodecFailures() {
   try {
-    return sessionStorage.getItem(FALLBACK_KEY) === "1";
+    localStorage.removeItem(FAILED_KEY);
   } catch {
-    return false;
+    /* ignore */
   }
 }
 
@@ -190,8 +210,8 @@ export async function detectClientProfile(): Promise<ClientProfile> {
     decodingInfo("audio", EAC3, probeType),
     measureCodecs(probeType),
   ]);
-  const fallback = codecFallbackActive();
-  const codecs = fallback ? { h264: measuredCodecs.h264 } : measuredCodecs;
+  const failed = failedCodecs();
+  const codecs = Object.fromEntries(Object.entries(measuredCodecs).filter(([c]) => !failed.has(c)));
   record(decoding_info, "hevc", hevc);
   record(decoding_info, "hevc_main10", hevc10);
   record(decoding_info, "av1", av1);
@@ -213,9 +233,9 @@ export async function detectClientProfile(): Promise<ClientProfile> {
     hdr: false,
     viewport_w: Math.round(window.innerWidth),
     viewport_h: Math.round(window.innerHeight),
-    hevc: hevcMain && !fallback,
-    hevc_main10: hevcMain10 && !fallback,
-    av1: apple || fallback ? false : (av1?.supported ?? canProbably(el, AV1)),
+    hevc: hevcMain && !failed.has("hevc"),
+    hevc_main10: hevcMain10 && !failed.has("hevc"),
+    av1: apple || failed.has("av1") ? false : (av1?.supported ?? canProbably(el, AV1)),
     ac3: nativeHls
       ? (ac3?.supported ?? (canPlayLoose(el, AC3) || true))
       : (ac3?.supported ?? mseTypeSupported(AC3)),

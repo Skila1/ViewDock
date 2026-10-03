@@ -11,8 +11,9 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/api/api";
-import { codecFallbackActive, nativeHlsSupported, rememberCodecFallback } from "@/api/profile";
+import { failedCodecs, nativeHlsSupported, rememberCodecFailure } from "@/api/profile";
 import { cn } from "@/lib/cn";
 import { enterAvkitDetailed, enterNativeFullscreen, exitNativeFullscreen, isIOSDevice, isNativeFullscreen, restoreMmsRemotePlaybackLock } from "@/lib/device";
 import { formatClock } from "@/lib/format";
@@ -27,6 +28,10 @@ import { diagnosticsApi } from "@/api/diagnostics";
 import { attachSession, CodecFallbackError, SessionGoneError, type AttachHandle } from "./attachMedia";
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
+import { StatsOverlay } from "./StatsOverlay";
+import { EndCard, UpNextCard, type EndCardTitle } from "./UpNext";
+import { prepareNext, takePrepared } from "./nextEpisode";
+import type { CacheStats } from "./bufferCache";
 import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
 import { PlayerSettingsMenu, type MenuOption } from "./PlayerSettingsMenu";
 import { PauseOverlay, type NowPlayingInfo } from "./PauseOverlay";
@@ -55,15 +60,24 @@ type Props = {
   onClose?: () => void;
   /** Leaves the watch party; when set, the party panel offers "Leave party". */
   onLeaveParty?: () => void;
+  /** Titles offered when a movie ends. */
+  related?: EndCardTitle[];
 };
 
 const SPEEDS: MenuOption<number>[] = [
   { value: 0.25, label: "0.25x" },
   { value: 0.5, label: "0.5x" },
+  { value: 0.75, label: "0.75x" },
   { value: 1, label: "Normal" },
   { value: 1.25, label: "1.25x" },
   { value: 1.5, label: "1.5x" },
+  { value: 1.75, label: "1.75x" },
+  { value: 2, label: "2x" },
 ];
+// Automatic recoveries from a dead stream within RECOVER_WINDOW_MS before
+// the error panel is shown.
+const RECOVER_LIMIT = 3;
+const RECOVER_WINDOW_MS = 120_000;
 
 const PAUSE_OVERLAY_MS = 10_000;
 // Longest a Jellyfin start waits for its head start in the buffer cache.
@@ -94,6 +108,7 @@ export function Player({
   onEnded,
   onClose,
   onLeaveParty,
+  related,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const attachRef = useRef<AttachHandle | null>(null);
@@ -110,6 +125,19 @@ export function Player({
   const [quality, setQuality] = useState("auto");
   const subtitleRef = useRef<number | null>(null);
   const [subtitle, setSubtitle] = useState<number | null>(null);
+  const lastSubtitleRef = useRef<number | null>(null);
+  const audioRef = useRef<number | undefined>(undefined);
+  const [audioIndex, setAudioIndex] = useState<number | undefined>(undefined);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
+  const [upNextDismissed, setUpNextDismissed] = useState(false);
+  const [movieEnded, setMovieEnded] = useState(false);
+  const recoverRef = useRef({ count: 0, at: 0 });
+  const nextPreparedRef = useRef(false);
+  const profile = Boolean(!shareToken);
+  const prefs = useQuery({ queryKey: ["prefs"], queryFn: api.getPreferences, staleTime: 60_000, enabled: profile });
+  const autoplayRef = useRef(true);
+  autoplayRef.current = prefs.data?.autoplay ?? true;
   const [cues, setCues] = useState<Cue[]>([]);
   const [shownCues, setShownCues] = useState<Cue[]>([]);
   const [speed, setSpeed] = useState(1);
@@ -297,15 +325,22 @@ export function Player({
         await endRemote();
         teardownAttach();
         if (genRef.current !== gen) return;
-        const sess = await api.createSession({
-          item_kind: itemKind,
-          item_id: itemId,
-          start_ms: startAt,
-          quality: qualityRef.current,
-          subtitle_index: subtitleRef.current ?? undefined,
-          replace_session_id: replaceId,
-          source: sourceRef.current,
-        });
+        // A next episode prepared near the end of the last one is taken over:
+        // its opening is already in the buffer cache.
+        const prepared = reason === "START" && !shareToken && !togetherCode ? takePrepared(itemKind, itemId) : null;
+        const sess =
+          prepared ??
+          (await api.createSession({
+            item_kind: itemKind,
+            item_id: itemId,
+            start_ms: startAt,
+            quality: qualityRef.current,
+            audio_index: audioRef.current,
+            subtitle_index: subtitleRef.current ?? undefined,
+            replace_session_id: replaceId,
+            source: sourceRef.current,
+          }));
+        if (prepared) noteAttach(video, "prepared_session", prepared.id);
         if (genRef.current !== gen) {
           try {
             await api.endSession(sess.id);
@@ -316,6 +351,19 @@ export function Player({
         }
         sessionRef.current = sess;
         telemetry.bind(sess.id);
+        // The server may have applied the profile's tracks and quality.
+        if (sess.subtitle_index !== undefined) {
+          subtitleRef.current = sess.subtitle_index ?? null;
+          setSubtitle(sess.subtitle_index ?? null);
+        }
+        if (typeof sess.audio_index === "number" && sess.audio_index > 0) {
+          audioRef.current = sess.audio_index;
+          setAudioIndex(sess.audio_index);
+        }
+        if (sess.quality && !qualityRef.current) {
+          qualityRef.current = sess.quality;
+          setQuality(sess.quality);
+        }
         firstFrameRef.current = false;
         stallAtRef.current = 0;
         telemetry.record("source_selected", {
@@ -375,6 +423,26 @@ export function Player({
           (detail) => {
             if (genRef.current !== gen || errShownRef.current) return;
             telemetry.record("error", { code: "HLS_FATAL", detail });
+            // A dead stream reopens at the same position before the viewer
+            // sees an error. A stream taken over by another device only
+            // gets one try, so two devices do not take it back and forth.
+            const elsewhere = detail.includes("started somewhere else");
+            const now = Date.now();
+            if (now - recoverRef.current.at > RECOVER_WINDOW_MS) recoverRef.current.count = 0;
+            if (recoverRef.current.count < (elsewhere ? 1 : RECOVER_LIMIT)) {
+              recoverRef.current.count += 1;
+              recoverRef.current.at = now;
+              const ms = originRef.current + (video.currentTime || 0) * 1000;
+              resumeRef.current = ms;
+              pendingSeekRef.current = ms;
+              setResumeMs(ms);
+              noteAttach(video, "auto_recover", `try=${recoverRef.current.count} ${detail}`);
+              telemetry.record("reconnect", { reason: detail, attempt: recoverRef.current.count });
+              window.setTimeout(() => {
+                if (genRef.current === gen) void createAndAttach("GONE");
+              }, 1000 * recoverRef.current.count);
+              return;
+            }
             failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
           },
           {
@@ -382,11 +450,12 @@ export function Player({
             onCodecFallback: (detail) => {
               if (genRef.current !== gen) return;
               telemetry.record("codec_error", { detail, fallback: "h264" });
-              if (codecFallbackActive()) {
+              const codec = sess.remote_video?.codec ?? "";
+              if (!codec || failedCodecs().has(codec)) {
                 failPlayback(`Playback stopped: the stream failed (${detail}).`, "HLS_FATAL", "playback");
                 return;
               }
-              rememberCodecFallback();
+              rememberCodecFailure(codec);
               const ms = originRef.current + (video.currentTime || 0) * 1000;
               resumeRef.current = ms;
               pendingSeekRef.current = ms;
@@ -463,8 +532,9 @@ export function Player({
         }
         // The browser claimed a decoder it does not have: once per tab, ask
         // the source for H.264 instead of failing.
-        if (e instanceof CodecFallbackError && !codecFallbackActive()) {
-          rememberCodecFallback();
+        const failedCodec = sessionRef.current?.remote_video?.codec ?? "";
+        if (e instanceof CodecFallbackError && failedCodec && !failedCodecs().has(failedCodec)) {
+          rememberCodecFailure(failedCodec);
           telemetry.record("codec_error", { detail: e.message, fallback: "h264" });
           attachBusyRef.current = false;
           void createAndAttach("QUALITY");
@@ -548,7 +618,7 @@ export function Player({
         setDur(probed);
         return;
       }
-      // Never adopt EVENT/live video.duration — that is why the slider
+      // Never adopt EVENT/live video.duration: that is why the slider
       // flashed ~30m then 2:50 then snapped back.
     };
     const onPlay = () => {
@@ -617,7 +687,10 @@ export function Player({
     const onVideoEnded = () => {
       bump("ENDED");
       checkpoint("ended");
-      onEnded?.();
+      const next = Boolean(sessionRef.current?.next_episode);
+      if (itemKind === "movie") setMovieEnded(true);
+      // Without autoplay the Up Next card waits for a click.
+      if (!next || autoplayRef.current) onEnded?.();
     };
     const domEv = [
       "play", "playing", "pause", "waiting", "stalled", "seeking", "seeked",
@@ -688,9 +761,25 @@ export function Player({
       const phase = phaseRef.current;
       if (!sess || !video || !(phase === "playing" || phase === "paused" || phase === "buffering" || phase === "seeking")) return;
       const origin = originRef.current;
+      const cache = attachRef.current?.stats?.();
+      const q = video.getVideoPlaybackQuality?.();
+      let bufferAhead = 0;
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) <= video.currentTime + 0.5 && video.buffered.end(i) >= video.currentTime) bufferAhead = video.buffered.end(i) - video.currentTime;
+      }
       void api.putProgress(sess.id, {
         position_ms: Math.floor(logicalPositionMs(origin, video.currentTime)),
         duration_ms: Math.floor(sess.duration_ms || (video.duration || 0) * 1000),
+        stats: {
+          paused: video.paused,
+          buffer_ahead_ms: Math.round(bufferAhead * 1000),
+          cache_ahead_ms: Math.round((cache?.aheadSec ?? 0) * 1000),
+          cache_behind_ms: Math.round((cache?.behindSec ?? 0) * 1000),
+          cache_bytes: cache?.bytes ?? 0,
+          cache_hit_rate: cache?.hitRate ?? 0,
+          throughput_bps: Math.round(cache?.throughputBps ?? 0),
+          dropped_frames: q?.droppedVideoFrames ?? 0,
+        },
       });
     }, 10_000);
     return () => window.clearInterval(id);
@@ -1028,9 +1117,25 @@ export function Player({
     }
     qualityRef.current = q;
     setQuality(q);
+    if (profile) void api.putPreferences({ quality: q }).catch(() => undefined);
     const video = videoRef.current;
     resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
     void createAndAttach("QUALITY");
+  };
+
+  const changeAudio = (index: number) => {
+    if (index === audioRef.current) return;
+    audioRef.current = index;
+    setAudioIndex(index);
+    if (profile) void api.setTitleTracks(itemKind, itemId, { audio_index: index }).catch(() => undefined);
+    const video = videoRef.current;
+    resumeRef.current = originRef.current + (video?.currentTime || 0) * 1000;
+    void createAndAttach("QUALITY");
+  };
+
+  const changeSpeed = (rate: number) => {
+    setSpeed(rate);
+    if (profile) void api.putPreferences({ playback_rate: rate }).catch(() => undefined);
   };
 
   const changeSource = (id: string) => {
@@ -1047,8 +1152,10 @@ export function Player({
 
   const changeSubtitle = (index: number | null) => {
     if (index === subtitleRef.current) return;
+    if (subtitleRef.current != null) lastSubtitleRef.current = subtitleRef.current;
     subtitleRef.current = index;
     setSubtitle(index);
+    if (profile) void api.setTitleTracks(itemKind, itemId, { subtitle_index: index ?? -1 }).catch(() => undefined);
     if (index == null) {
       setCues([]);
       setShownCues([]);
@@ -1130,34 +1237,88 @@ export function Player({
     video.playbackRate = rate;
   }, [speed, inParty, session?.id]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (settingsOpenRef.current) return;
-      if (e.target instanceof HTMLTextAreaElement) return;
-      if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        togglePlay("keyboard");
-        reveal();
-      }
-      if (e.key === "f" && !isIOSDevice()) toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-        e.preventDefault();
-        skip(e.key === "ArrowRight" ? 1 : -1);
-        reveal();
-      }
-      if (e.key === "m") {
-        const v = videoRef.current;
-        if (v) {
-          v.muted = !v.muted;
-          setMuted(v.muted);
-        }
-      }
-      if (e.key === "Escape") onClose?.();
+  // Desktop media keys: Space/K play-pause, J/L and arrows seek 10 s, Up and
+  // Down change the volume, M mute, F fullscreen, C captions, I stats, N
+  // next episode, 0 to 9 jump to that tenth, Esc exit.
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  keyRef.current = (e: KeyboardEvent) => {
+    if (settingsOpenRef.current || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target instanceof HTMLTextAreaElement) return;
+    if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const v = videoRef.current;
+    const handled = () => {
+      e.preventDefault();
+      reveal();
     };
+    if (e.code === "Space" || key === "k") {
+      handled();
+      togglePlay("keyboard");
+    } else if (key === "ArrowRight" || key === "ArrowLeft" || key === "j" || key === "l") {
+      handled();
+      skip(key === "ArrowRight" || key === "l" ? 1 : -1);
+    } else if ((key === "ArrowUp" || key === "ArrowDown") && v) {
+      handled();
+      const next = Math.min(1, Math.max(0, Math.round((v.volume + (key === "ArrowUp" ? 0.05 : -0.05)) * 100) / 100));
+      v.volume = next;
+      v.muted = next === 0;
+      setVolume(next);
+      setMuted(next === 0);
+    } else if (key === "m" && v) {
+      v.muted = !v.muted;
+      setMuted(v.muted);
+    } else if (key === "f" && !isIOSDevice()) {
+      toggleFullscreen({ preventDefault: () => e.preventDefault(), stopPropagation: () => e.stopPropagation() });
+    } else if (key === "c") {
+      handled();
+      const tracks = (sessionRef.current?.subtitles ?? []).filter((t) => typeof t.index === "number");
+      if (subtitleRef.current != null) changeSubtitle(null);
+      else if (tracks.length) changeSubtitle(lastSubtitleRef.current ?? (tracks[0].index as number));
+    } else if (key === "i") {
+      setStatsOpen((s) => !s);
+    } else if (key === "n" && sessionRef.current?.next_episode) {
+      handled();
+      onEnded?.();
+    } else if (/^[0-9]$/.test(key) && duration > 0) {
+      handled();
+      seek((Number(key) / 10) * duration, "keyboard");
+    } else if (key === "Escape") {
+      if (statsOpen) setStatsOpen(false);
+      else onClose?.();
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, pos]);
+  }, []);
+
+  // The profile's playback speed applies when playback starts.
+  useEffect(() => {
+    const rate = prefs.data?.playback_rate;
+    if (rate && rate > 0) setSpeed(rate);
+  }, [prefs.data?.playback_rate]);
+
+  // Buffer cache state for the stats overlay and the seek bar, and the
+  // next-episode prefetch once this one is cached to its end.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const stats = attachRef.current?.stats?.() ?? null;
+      setCacheStats(stats);
+      const sess = sessionRef.current;
+      const video = videoRef.current;
+      const next = sess?.next_episode;
+      if (!stats || !next || !video || nextPreparedRef.current || togetherCode || shareToken) return;
+      const total = (sess.duration_ms ?? 0) / 1000 || video.duration || 0;
+      const left = total - (video.currentTime || 0);
+      if (total > 0 && left < 240 && stats.aheadSec >= left - 3 && (stats.rate ?? 0) >= 1.3) {
+        nextPreparedRef.current = true;
+        noteAttach(video, "next_episode_prefetch", next.id);
+        void prepareNext(next.id, qualityRef.current).catch(() => undefined);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [togetherCode, shareToken]);
 
   const applePlayer = isIOSDevice();
   const duration = movieDurationMs(session, movieDurRef.current || dur);
@@ -1203,10 +1364,22 @@ export function Player({
     onChange: changeSubtitle,
     empty: "This title has no subtitles.",
   };
+  const audioTracks = (session?.audio ?? []).filter((t) => typeof t.index === "number");
+  const audioGroup =
+    audioTracks.length > 1
+      ? {
+          value: audioIndex ?? (audioTracks[0].index as number),
+          options: audioTracks.map((t, i) => ({
+            value: t.index as number,
+            label: [t.language?.toUpperCase(), t.title, t.codec?.toUpperCase()].filter(Boolean).join(" · ") || `Track ${i + 1}`,
+          })),
+          onChange: changeAudio,
+        }
+      : null;
   const speedGroup = {
     value: inParty ? 1 : speed,
     options: SPEEDS,
-    onChange: setSpeed,
+    onChange: changeSpeed,
     disabled: inParty ? "Party sync" : undefined,
   };
   const pauseInfo: NowPlayingInfo | null = info ?? (title ? { title } : null);
@@ -1266,6 +1439,19 @@ export function Player({
       {debug ? (
         <PlaybackDiagnostics video={videoRef.current} session={session} engine={engine} originMs={originRef.current} />
       ) : null}
+
+      {statsOpen ? <StatsOverlay video={videoRef.current} session={session} engine={engine ?? ""} stats={cacheStats} onClose={() => setStatsOpen(false)} /> : null}
+
+      {session?.next_episode && !inParty && !upNextDismissed && duration > 60_000 && duration - pos <= Math.max(25_000, (prefs.data?.upnext_seconds ?? 10) * 1000 + 5000) ? (
+        <UpNextCard
+          title={session.next_episode.title}
+          seconds={autoplayRef.current && (prefs.data?.upnext_seconds ?? 10) > 0 ? (prefs.data?.upnext_seconds ?? 10) : null}
+          onPlay={() => onEnded?.()}
+          onDismiss={() => setUpNextDismissed(true)}
+        />
+      ) : null}
+
+      {movieEnded && itemKind === "movie" && !inParty && related?.length ? <EndCard titles={related} onClose={onClose} /> : null}
 
       {panelOpen ? (
         <WatchTogetherOverlay
@@ -1402,6 +1588,15 @@ export function Player({
                   {formatClock(hoverSeek.ms)}
                 </span>
               ) : null}
+              {cacheStats && duration > 0 ? (
+                <div className="pointer-events-none absolute inset-x-0 -bottom-[3px] h-[3px]" aria-hidden title="Stored on this device">
+                  {cacheStats.ranges.map(([a, b]) => {
+                    const left = ((originRef.current + a * 1000) / seekMax) * 100;
+                    const width = ((b - a) * 1000 * 100) / seekMax;
+                    return <span key={a} className="absolute h-full rounded-full bg-sky-300/70" style={{ left: `${left}%`, width: `${Math.max(0.2, width)}%` }} />;
+                  })}
+                </div>
+              ) : null}
               <input
                 type="range"
                 min={0}
@@ -1507,6 +1702,8 @@ export function Player({
                   server={serverGroup}
                   subtitles={subtitleGroup}
                   speed={speedGroup}
+                  audio={audioGroup}
+                  onStats={() => setStatsOpen(true)}
                   buttonClassName={cn(ctrlBtn, settingsOpen && "bg-white/[0.12] text-white")}
                 />
                 <button

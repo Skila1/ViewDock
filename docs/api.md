@@ -114,7 +114,23 @@ When a session is placed on a worker, its `urls` point at `/mesh/{node}/...` on 
 
 Secrets are encrypted at rest with AES-256-GCM (see `VD_MASTER_KEY` in [environment.md](environment.md)). Saving a secret without a master key returns `503 no_master_key`.
 
-Movie and series listings include `genres` (from TMDB or Jellyfin), `anime` (an Anime genre, or a library or Jellyfin library named anime) and `added_at`. `GET /api/v1/browse/signals` returns `{"views","watched","recommended"}` for the signed-in user, keyed `movie:<id>` or `series:<id>` and limited to titles the user can see: `views` counts distinct viewers per title, `watched` lists titles the user has started, and `recommended` ranks up to 30 unwatched titles by how often their genres appear in what the user watched, then by views. Jellyfin titles are included in `GET /api/v1/search`.
+Movie and series listings include `genres` (from TMDB or Jellyfin), `anime` (an Anime genre, or a library or Jellyfin library named anime) and `added_at`. `GET /api/v1/browse/signals` returns `{"views","watched","finished","liked","disliked","not_interested","watchlist","recommended"}` for the signed-in user, keyed `movie:<id>` or `series:<id>` and limited to titles the user can see: `views` counts distinct viewers per title, `watched` lists titles the user has started, `finished` titles watched to the end (a series when every episode is), `liked`, `disliked` and `not_interested` the user's reactions, `watchlist` My List, and `recommended` ranks up to 30 titles the user has neither watched, disliked nor marked not interested by their genres' weight (watched 1, liked 3, disliked -3), then by views. Jellyfin titles are included in `GET /api/v1/search`.
+
+### Profile lists and preferences
+
+Everything here belongs to the signed-in user (profile); guests get `403`.
+
+- `PUT /api/v1/titles/{kind}/{id}/watched` with `{"watched":bool}` marks a movie, an episode or every episode of a series (`kind` `movie`, `episode` or `series`) as finished, or removes its progress.
+- `PUT /api/v1/titles/{kind}/{id}/reaction` with `{"reaction":"like"|"dislike"|"not_interested"|""}` (movies and series). Not interested hides a title from recommendations without counting against its genres.
+- `PUT /api/v1/titles/{kind}/{id}/continue` with `{"dismissed":bool}` hides a movie or episode from Continue Watching without marking it watched; playing it again shows it again.
+- `PUT /api/v1/titles/{kind}/{id}/tracks` with `{"audio_index","subtitle_index"}` remembers the tracks picked for a movie, or for a whole series when given an episode (`subtitle_index` -1 is off). New sessions use them when the player does not choose; otherwise the preferred languages pick the tracks.
+- `GET /api/v1/me/watchlist`, `PUT` and `DELETE /api/v1/me/watchlist/{kind}/{id}`: My List.
+- `GET` and `POST /api/v1/me/playlists` (`{"name"}`), `PATCH` and `DELETE /api/v1/me/playlists/{id}`, `POST /api/v1/me/playlists/{id}/items` (`{"kind","id"}`) and `DELETE /api/v1/me/playlists/{id}/items/{kind}/{itemID}`: playlists owned by the profile, separate from the server's collections.
+- `GET /api/v1/me/history?before=` lists watch history newest first, 100 at a time, with `title`, `watched_at`, `position_ms`, `duration_ms` and `completed`; `DELETE /api/v1/me/history/{id}` removes one entry and `DELETE /api/v1/me/history` clears it.
+
+`GET` and `PUT /api/v1/me/preferences` also carry `playback_rate`, `quality` (`auto`, `1080`, `720`, `480`), `upnext_seconds` (0 to 60, 0 waits for a click), `source_pref` (`""` for the local file first, `remote` for a media server first) and `home_rows` (home row ids in order, empty for the default). `PUT` merges the fields sent. Continue Watching keeps one entry per show, and a title counts as finished at `playback.complete_percent` (default 92) or with `playback.complete_remaining_seconds` (default 180) left, for titles over ten times that long.
+
+`POST /api/v1/movies/{id}/refresh` and `/api/v1/series/{id}/refresh` (`libraries.manage`) fetch a title's metadata again: from its media server when it came from one, otherwise from TMDB. `POST /api/v1/playback/sessions/{id}/keepalive` keeps a session that is not playing from expiring without recording progress. Session progress (`PUT .../progress`) may carry `stats` (`paused`, `buffer_ahead_ms`, `cache_ahead_ms`, `cache_behind_ms`, `cache_bytes`, `cache_hit_rate`, `throughput_bps`, `dropped_frames`), shown with the session under `GET /api/v1/admin/streams` alongside `username`, `item_title`, `source`, `video_codec`, `video_copy`, `bitrate_bps` and `position_ms`.
 
 `GET /api/v1/playback/continue` returns up to 20 in-progress items with their `title` and `poster_url`. Items whose title no longer exists, or that the user cannot see (library access or household rating limits), are left out.
 

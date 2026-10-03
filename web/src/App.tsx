@@ -30,6 +30,7 @@ import { ConnectedPage } from "@/pages/ConnectedPage";
 import { HomePage } from "@/pages/HomePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ProfilePage } from "@/pages/ProfilePage";
+import { MyListPage } from "@/pages/MyListPage";
 import { MovieDetailPage } from "@/pages/MovieDetailPage";
 import { SeriesDetailPage } from "@/pages/SeriesDetailPage";
 import { SetupPage } from "@/pages/SetupPage";
@@ -155,6 +156,7 @@ export function App() {
               <Route path="/tv/:id" element={<SeriesDetailPage />} />
               <Route path="/search" element={<SearchRedirect />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/my-list" element={<MyListPage />} />
               <Route path="/offline" element={<OfflineVaultPage />} />
               <Route path="/device-test" element={<DeviceTestPage />} />
               <Route path="/settings/connected" element={<ConnectedPage />} />

@@ -10,11 +10,16 @@ import {
   streamCacheName,
   streamCacheSupported,
   streamKeyBase,
+  touchStreamCache,
   type PrefetchSource,
   type Span,
+  type Window,
 } from "@/playback/streamCache";
 import { noteAttach } from "@/playback/attachTrace";
+import { sessionUrl } from "@/api/profile";
 import type { PlaybackSession } from "@/types/api.gen";
+
+export type CacheStats = ReturnType<StreamPrefetcher["stats"]>;
 
 /** What the player knows about the title, for naming its buffer bucket. */
 export type BufferCacheTitle = { kind: string; id: string; quality?: string };
@@ -46,7 +51,10 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
   let spans: Span[] = [];
   const urls = new Map<string, string>();
 
-  const keyOf = (lvl: number, sn: number) => `${base}/L${lvl}/${sn}`;
+  // Keyed by the variant's codec and height, not hls.js's level index: the
+  // index changes with what the browser can play, and the next-episode
+  // prefetch must produce the keys the player asks for later.
+  const keyOf = (lvl: number, sn: number) => `${base}/${variantTag(hls?.levels[lvl]?.videoCodec, hls?.levels[lvl]?.height)}/${sn}`;
   const source: PrefetchSource = {
     // Jellyfin copying the original video serves any segment at disk speed;
     // a re-encode restarts when requests jump ahead, so it gets one at a time.
@@ -156,10 +164,86 @@ export function hlsBufferCache(video: HTMLVideoElement, session: PlaybackSession
       void prefetch.start();
     },
     prebuffer: (maxMs: number) => prefetch.prebuffer(maxMs, durationSecOf(session, video), (have, want) => noteAttach(video, "prebuffer", `have=${have.toFixed(1)} want=${want}`)),
+    stats: () => prefetch.stats(),
     destroy() {
       prefetch.destroy();
     },
   };
+}
+
+const CODEC_FAMILIES: Record<string, string> = { avc1: "h264", avc3: "h264", hvc1: "hevc", hev1: "hevc", av01: "av1" };
+
+/** "hevc-2160": a variant's codec family and height, the stable part of a segment's cache key. */
+export function variantTag(codecs: string | undefined, height: number | undefined): string {
+  const first = (codecs ?? "").split(",").map((c) => c.trim().split(".")[0].toLowerCase()).find((c) => CODEC_FAMILIES[c]);
+  return `${first ? CODEC_FAMILIES[first] : "v"}-${height ?? 0}`;
+}
+
+type Variant = { uri: string; codecs: string; height: number };
+
+/** Variants of an HLS master playlist, in order. */
+export function parseMaster(text: string): Variant[] {
+  const lines = text.split(/\r?\n/);
+  const out: Variant[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith("#EXT-X-STREAM-INF:")) continue;
+    const attrs = lines[i];
+    const codecs = /CODECS="([^"]*)"/.exec(attrs)?.[1] ?? "";
+    const height = Number(/RESOLUTION=\d+x(\d+)/.exec(attrs)?.[1] ?? 0);
+    const uri = lines.slice(i + 1).find((l) => l && !l.startsWith("#"));
+    if (uri) out.push({ uri, codecs, height });
+  }
+  return out;
+}
+
+/** Segments of an HLS media playlist with hls.js's sequence numbers and start times. */
+export function parseMedia(text: string): { sn: number; start: number; duration: number; uri: string }[] {
+  const lines = text.split(/\r?\n/);
+  if (lines.some((l) => l.startsWith("#EXT-X-BYTERANGE"))) return [];
+  let sn = Number(/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text)?.[1] ?? 0);
+  let start = 0;
+  let duration = 0;
+  const out: { sn: number; start: number; duration: number; uri: string }[] = [];
+  for (const line of lines) {
+    if (line.startsWith("#EXTINF:")) duration = parseFloat(line.slice(8));
+    else if (line && !line.startsWith("#")) {
+      out.push({ sn, start, duration, uri: line });
+      start += duration;
+      sn++;
+      duration = 0;
+    }
+  }
+  return out;
+}
+
+/**
+ * prefetchOpening stores the first `seconds` of a prepared session's stream
+ * in its title's bucket, under the keys its player will ask for, so the
+ * next episode starts from local storage. Returns the bytes stored.
+ */
+export async function prefetchOpening(session: PlaybackSession, title: BufferCacheTitle, seconds: number, signal: AbortSignal): Promise<number> {
+  const master = sessionUrl(session.urls, "hls", "playlist", "index", "master");
+  if (!master || !bufferCacheEnabled(session, title)) return 0;
+  const abs = (uri: string, from: string) => new URL(uri, new URL(from, location.origin)).href;
+  const text = await (await fetch(master, { credentials: "include", signal })).text();
+  const variants = parseMaster(text);
+  const original = session.remote_video?.copy && session.remote_video.codec !== "h264" ? session.remote_video.codec : "";
+  const pick = variants.find((v) => !original || variantTag(v.codecs, v.height).startsWith(`${original}-`)) ?? variants[0];
+  const mediaUrl = pick ? abs(pick.uri, master) : master;
+  const media = parseMedia(await (await fetch(mediaUrl, { credentials: "include", signal })).text());
+  const name = streamCacheName(`${title.kind}-${title.id}`);
+  const base = streamKeyBase(variantOf(session, title));
+  const tag = pick ? variantTag(pick.codecs, pick.height) : "v-0";
+  const cache = await caches.open(name);
+  let bytes = 0;
+  for (const seg of media) {
+    if (seg.start >= seconds || signal.aborted) break;
+    const buf = await fetchBytes(abs(seg.uri, mediaUrl), signal);
+    await cache.put(`${base}/${tag}/${seg.sn}`, new Response(buf, { headers: { "X-VD-Size": String(buf.byteLength) } }));
+    bytes += buf.byteLength;
+    touchStreamCache(name, Date.now(), bytes);
+  }
+  return bytes;
 }
 
 function durationSecOf(session: PlaybackSession, video: HTMLVideoElement): number {
@@ -189,13 +273,15 @@ class DirectSource implements PrefetchSource {
     return { size: this.size, type: res.headers.get("Content-Type") || "video/mp4", chunk: DIRECT_CHUNK };
   }
 
-  spans(playhead: number): Span[] {
+  spans(playhead: number, win?: Window): Span[] {
     const dur = this.durationSec();
+    const ahead = win?.ahead ?? WINDOW_AHEAD_SEC;
+    const behind = win?.behind ?? WINDOW_SEC;
     if (!(this.size > 0) || !(dur > 0)) return [];
     const bps = this.size / dur;
     const last = Math.ceil(this.size / DIRECT_CHUNK) - 1;
-    const from = Math.max(0, Math.floor((Math.max(0, playhead - WINDOW_SEC - MARGIN_SEC) * bps) / DIRECT_CHUNK));
-    const to = Math.min(last, Math.floor(((playhead + WINDOW_AHEAD_SEC + MARGIN_SEC) * bps) / DIRECT_CHUNK));
+    const from = Math.max(0, Math.floor((Math.max(0, playhead - behind - MARGIN_SEC) * bps) / DIRECT_CHUNK));
+    const to = Math.min(last, Math.floor(((playhead + ahead + MARGIN_SEC) * bps) / DIRECT_CHUNK));
     const out: Span[] = [];
     for (let i = from; i <= to; i++) {
       out.push({ key: `${this.base}/${i}`, start: (i * DIRECT_CHUNK) / bps, end: Math.min((i + 1) * DIRECT_CHUNK, this.size) / bps });
@@ -244,6 +330,7 @@ export async function directBufferCache(video: HTMLVideoElement, session: Playba
   return {
     url,
     prebuffer: (maxMs: number) => prefetch.prebuffer(maxMs, durationSecOf(session, video)),
+    stats: () => prefetch.stats(),
     destroy: () => prefetch.destroy(),
   };
 }

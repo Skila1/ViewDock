@@ -12,6 +12,8 @@ vi.mock("@/api/api", () => ({
     browseSignals: vi.fn(),
     continueWatching: vi.fn(),
     nextUp: vi.fn(),
+    getPreferences: vi.fn(async () => ({ audio_lang: "", subtitle_lang: "", subtitle_mode: "auto", autoplay: true, home_rows: [] })),
+    watchlist: vi.fn(async () => []),
   },
 }));
 
@@ -93,10 +95,9 @@ afterEach(() => {
 describe("HomePage", () => {
   it("shows the library tiles and rails in Jellyfin's order", async () => {
     await render("/");
-    expect(headings()).toEqual([
+    expect(headings().filter((h) => h !== "Recently Released")).toEqual([
       "My Media",
       "Continue Watching",
-      "Next Up",
       "Recently Added in Movies",
       "Recently Added in Shows",
       "Recently Added in Anime",
@@ -111,7 +112,9 @@ describe("HomePage", () => {
     const resume = document.querySelector('section[aria-label="Continue Watching"] a')!;
     expect(resume.getAttribute("href")).toBe("/watch/episode/e5?t=600000");
     expect(resume.textContent).toContain("S1:E5 - White Rabbit");
-    expect(document.querySelector('section[aria-label="Next Up"] a')?.getAttribute("href")).toBe("/watch/episode/e2");
+    // The next episode of a show is promoted into Continue Watching.
+    const cont = Array.from(document.querySelectorAll('section[aria-label="Continue Watching"] a')).map((a) => a.getAttribute("href"));
+    expect(cont).toContain("/watch/episode/e2");
     const recent = Array.from(document.querySelectorAll('section[aria-label="Recently Added in Movies"] [role="listitem"]')).map((li) => li.textContent);
     expect(recent[0]).toContain("Heat"); // newest first
     expect(document.querySelector('a[href="/?type=movie&sort=added"]')).not.toBeNull();

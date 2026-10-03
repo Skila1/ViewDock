@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LINGER_MS, behindToEvict, cachedAhead, expiredStreamCaches, planWindow, prebufferTarget, streamCacheName, type Span } from "./streamCache";
+import { LINGER_MS, adaptiveWindow, behindToEvict, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
@@ -112,5 +112,44 @@ describe("expiredStreamCaches", () => {
 describe("streamCacheName", () => {
   it("keeps names to safe characters", () => {
     expect(streamCacheName("movie-ab/c d")).toBe("viewdock-stream-movie-ab_c_d");
+  });
+});
+
+describe("adaptiveWindow", () => {
+  const GB = 1024 ** 3;
+  it("keeps more ahead for a low bitrate title and what fits for a remux", () => {
+    expect(adaptiveWindow(500_000, 8 * GB, 3).ahead).toBe(1200); // 4 Mbps
+    const remux = adaptiveWindow(10_000_000, 8 * GB, 2); // 80 Mbps
+    expect(remux.ahead).toBeGreaterThanOrEqual(300);
+    expect(remux.ahead).toBeLessThan(700);
+    expect(remux.ahead + remux.behind).toBeLessThanOrEqual((8 * GB) / 10_000_000 + 1);
+  });
+  it("asks for more ahead when downloads barely keep up", () => {
+    expect(adaptiveWindow(10_000_000, 8 * GB, 1.05).ahead).toBeGreaterThan(adaptiveWindow(10_000_000, 8 * GB, 3).ahead);
+  });
+  it("uses the default window before the bitrate is known", () => {
+    expect(adaptiveWindow(undefined, 8 * GB, undefined)).toEqual({ ahead: 600, behind: 300 });
+  });
+});
+
+describe("overTotal", () => {
+  it("evicts idle buckets least recently used first, never active ones", () => {
+    const now = 10_000_000;
+    const reg = {
+      a: { seenAt: now - 600_000, bytes: 4 },
+      b: { seenAt: now - 300_000, bytes: 4 },
+      live: { seenAt: now - 5_000, bytes: 8 },
+    };
+    expect(overTotal(reg, 12, now)).toEqual(["a"]);
+    expect(overTotal(reg, 4, now)).toEqual(["a", "b"]);
+  });
+});
+
+describe("cachedRanges", () => {
+  it("merges adjacent stored spans", () => {
+    expect(cachedRanges(spans, new Set([...range(0, 3), ...range(5, 7)]))).toEqual([
+      [0, 18],
+      [30, 42],
+    ]);
   });
 });

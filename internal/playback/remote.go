@@ -18,6 +18,9 @@ import (
 // SourceLocal is the playback source id for files in local libraries.
 const SourceLocal = "local"
 
+// SourceRemote asks for any external source before the local file.
+const SourceRemote = "remote"
+
 // SourceOption is one selectable playback source for an item.
 type SourceOption struct {
 	ID    string `json:"id"`
@@ -38,6 +41,8 @@ type RemoteStream struct {
 	// source sends the original video instead of re-encoding it.
 	VideoCodec string
 	VideoCopy  bool
+	// Bitrate is the stream's video bitrate in bits per second, when known.
+	Bitrate int64
 }
 
 // ErrSourceUnavailable means the chosen external source cannot play now.
@@ -101,6 +106,13 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		return true, nil
 	}
 	stream, options, err := a.Sources.Resolve(WithStreamOwner(r.Context(), p.ID()), body.ItemKind, body.ItemID, body.Source, body.Quality, hasLocal, body.Client.WithUA(r.UserAgent()))
+	if err != nil && hasLocal && !errors.Is(err, library.ErrNotFound) {
+		// The external source failed but the file is here: play it instead.
+		if a.Log != nil {
+			a.Log.Warn("remote playback unavailable, playing the local file", "category", "playback", "item", body.ItemKind+"/"+body.ItemID, "err", err.Error())
+		}
+		return false, options
+	}
 	if err != nil {
 		if errors.Is(err, library.ErrNotFound) {
 			writeHidden(w, errHidden)
@@ -145,7 +157,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
 		Decision:    decision.Result{Delivery: stream.Delivery, Mode: "remote", Playback: "remote"},
 		Source:      stream.Source, SourceOptions: options, RemoteURL: stream.URL, RemoteQualities: stream.Qualities, remoteStop: stream.Stop,
-		RemoteVideoCodec: stream.VideoCodec, RemoteVideoCopy: stream.VideoCopy,
+		RemoteVideoCodec: stream.VideoCodec, RemoteVideoCopy: stream.VideoCopy, RemoteBitrate: stream.Bitrate,
 	}
 	a.Reg.Put(sess)
 	if a.Log != nil {

@@ -2,6 +2,8 @@ import { FormEvent, useState } from "react";
 import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/api";
+import { clearCodecFailures, failedCodecs } from "@/api/profile";
+import { cacheLimits, clearStreamCaches, DEFAULT_LIMITS, setCacheLimits, streamCacheUsage, type CacheLimits } from "@/playback/streamCache";
 import {
   ageLimitLabel,
   ageLimitOptions,
@@ -308,11 +310,63 @@ export function ProfilePage() {
               />
               Autoplay next episode
             </label>
+            <label className="block text-xs text-dim">
+              Up Next countdown (seconds, 0 waits for a click)
+              <input
+                type="number"
+                min={0}
+                max={60}
+                className="mt-1 w-full"
+                value={prefs.data?.upnext_seconds ?? 10}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, upnext_seconds: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })}
+              />
+            </label>
+            <label className="block text-xs text-dim">
+              Playback speed
+              <select
+                className="mt-1 w-full"
+                value={String(prefs.data?.playback_rate ?? 1)}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, playback_rate: Number(e.target.value) })}
+              >
+                {[0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
+                  <option key={r} value={String(r)}>
+                    {r === 1 ? "Normal" : `${r}x`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs text-dim">
+              Quality
+              <select
+                className="mt-1 w-full"
+                value={prefs.data?.quality || "auto"}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, quality: e.target.value })}
+              >
+                <option value="auto">Auto (original when this device can play it)</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+              </select>
+            </label>
+            <label className="block text-xs text-dim">
+              When a title is both local and on a media server
+              <select
+                className="mt-1 w-full"
+                value={prefs.data?.source_pref ?? ""}
+                onChange={(e) => qc.setQueryData(["prefs"], { ...prefs.data, source_pref: e.target.value })}
+              >
+                <option value="">Play the local file first</option>
+                <option value="remote">Play from the media server first</option>
+              </select>
+              <span className="mt-1 block text-[11px]">If the preferred copy is unavailable, the other one plays.</span>
+            </label>
             <button type="submit" className="btn-green rounded-full px-4 py-1.5 text-sm">
               Save playback
             </button>
           </form>
         </Card>
+
+        <PlaybackCacheCard />
 
         {localLogin ? (
           <Card
@@ -436,5 +490,90 @@ export function ProfilePage() {
         </ul>
       </Card>
     </div>
+  );
+}
+
+const GB = 1024 ** 3;
+
+/** This device's buffer cache: usage, limits and a way to clear it. Stored per device, since the cache is. */
+function PlaybackCacheCard() {
+  const [limits, setLimits] = useState(cacheLimits);
+  const [used, setUsed] = useState(streamCacheUsage);
+  const [note, setNote] = useState("");
+  const save = (next: CacheLimits) => {
+    setLimits(next);
+    setCacheLimits(next);
+    setNote("Saved for this device.");
+  };
+  return (
+    <Card
+      id="playback-cache"
+      title="Playback cache (this device)"
+      description="Media servers' streams are stored ahead of where you watch, then deleted a few minutes after you close the player."
+    >
+      <div className="space-y-3 text-xs">
+        <p className="text-dim">
+          In use now: <span className="text-ink">{(used / GB).toFixed(1)} GB</span>
+        </p>
+        <label className="block text-dim">
+          Most for all titles (GB)
+          <input
+            type="number"
+            min={1}
+            max={500}
+            className="mt-1 w-full"
+            value={Math.round(limits.total / GB)}
+            onChange={(e) => save({ ...limits, total: Math.max(1, Number(e.target.value) || 1) * GB })}
+          />
+        </label>
+        <label className="block text-dim">
+          Most per title (GB)
+          <input
+            type="number"
+            min={1}
+            max={100}
+            className="mt-1 w-full"
+            value={Math.round(limits.perTitle / GB)}
+            onChange={(e) => save({ ...limits, perTitle: Math.max(1, Number(e.target.value) || 1) * GB })}
+          />
+        </label>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="text-accent"
+            onClick={async () => {
+              await clearStreamCaches();
+              setUsed(streamCacheUsage());
+              setNote("Cache cleared.");
+            }}
+          >
+            Clear cache now
+          </button>
+          <button
+            type="button"
+            className="text-accent"
+            onClick={() => {
+              save(DEFAULT_LIMITS);
+              setNote("Limits reset.");
+            }}
+          >
+            Reset limits
+          </button>
+          {failedCodecs().size ? (
+            <button
+              type="button"
+              className="text-accent"
+              onClick={() => {
+                clearCodecFailures();
+                setNote("This device will try every codec it reports again.");
+              }}
+            >
+              Retry codecs this device failed ({[...failedCodecs()].join(", ").toUpperCase()})
+            </button>
+          ) : null}
+        </div>
+        {note ? <p className="text-dim">{note}</p> : null}
+      </div>
+    </Card>
   );
 }

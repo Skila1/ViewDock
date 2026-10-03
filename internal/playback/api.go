@@ -34,7 +34,7 @@ const (
 )
 
 // Deps is how cmd wires the playback engine. Locator and Gate are the
-// producer-owned types — do not invent a second MediaLocator or Gate.
+// producer-owned types: do not invent a second MediaLocator or Gate.
 type Deps struct {
 	Cfg      config.Config
 	DB       *sql.DB
@@ -195,6 +195,7 @@ func (a *API) sessionRoutes(r chi.Router) {
 		r.Get("/sessions/{id}/file", a.handleFile)
 		r.Put("/sessions/{id}/progress", a.handleProgress)
 		r.Post("/sessions/{id}/telemetry", a.handleTelemetry)
+		r.Post("/sessions/{id}/keepalive", a.handleKeepAlive)
 		r.Delete("/sessions/{id}", a.handleDelete)
 		r.Get("/sessions/{id}/subtitles", a.handleSubtitles)
 		r.Get("/sessions/{id}/download", a.handleDownload)

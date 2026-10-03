@@ -72,16 +72,29 @@ func (s *Service) Resolve(ctx context.Context, itemKind, itemID, pick, quality s
 		}
 	}
 	if chosen < 0 {
-		if hasLocal {
+		if hasLocal && pick != playback.SourceRemote {
 			return nil, options, nil
 		}
 		chosen = 0
 	}
-	stream, err := s.openStream(ctx, cands[chosen], quality, device)
-	if err != nil {
-		return nil, nil, err
+	// The picked copy first; when its server is down, the same title on
+	// another enabled server.
+	var firstErr error
+	for i := range cands {
+		c := cands[(chosen+i)%len(cands)]
+		stream, err := s.openStream(ctx, c, quality, device)
+		if err == nil {
+			return stream, options, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		var unavailable *playback.SourceUnavailable
+		if !errors.As(err, &unavailable) {
+			break
+		}
 	}
-	return stream, options, nil
+	return nil, nil, firstErr
 }
 
 // candidates lists the remote copies of an item: the item itself when it
@@ -257,7 +270,7 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string, d
 		Source: c.option.ID, DurationMS: it.durationMS(),
 		Qualities:  remoteQualities(ms, src.Policy.allows(opTranscode)),
 		Stop:       func() { s.revoke(tok) },
-		VideoCodec: plan.codec, VideoCopy: plan.copy,
+		VideoCodec: plan.codec, VideoCopy: plan.copy, Bitrate: planBitrate(plan, ms),
 	}
 	if direct {
 		out.Delivery = decision.DeliveryDirect

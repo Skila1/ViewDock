@@ -60,7 +60,7 @@ func (a *API) authorized(r *http.Request, s *Session, p *auth.Principal) bool {
 	s.mu.Lock()
 	ok := subtle.ConstantTimeCompare([]byte(tok), []byte(s.Stoken)) == 1 && time.Now().Before(s.StokenExp)
 	if ok {
-		// Sliding expiry — do not rotate. The player keeps the create-session URL.
+		// Sliding expiry, not rotated: the player keeps the create-session URL.
 		s.StokenExp = time.Now().Add(stokenTTL)
 	}
 	s.mu.Unlock()
@@ -116,11 +116,18 @@ func (a *API) handleProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	p := a.actor(r, s)
 	var body struct {
-		PositionMS int64  `json:"position_ms"`
-		DurationMS int64  `json:"duration_ms"`
-		Event      string `json:"event"`
+		PositionMS int64                  `json:"position_ms"`
+		DurationMS int64                  `json:"duration_ms"`
+		Event      string                 `json:"event"`
+		Stats      *inspector.ClientStats `json:"stats"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.Stats != nil {
+		body.Stats.At = time.Now().UTC().Format(time.RFC3339)
+		s.mu.Lock()
+		s.ClientStats = body.Stats
+		s.mu.Unlock()
+	}
 	if body.DurationMS <= 0 {
 		body.DurationMS = s.DurationMS
 	}
@@ -141,6 +148,14 @@ func (a *API) handleProgress(w http.ResponseWriter, r *http.Request) {
 		_ = a.Gate.Heartbeat(r.Context(), p.GuestSessionID)
 	}
 	httpapi.WriteOK(w)
+}
+
+// handleKeepAlive keeps a session that is not playing yet (a prepared next
+// episode) from expiring, without recording watch progress.
+func (a *API) handleKeepAlive(w http.ResponseWriter, r *http.Request) {
+	if a.live(w, r) != nil {
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +217,9 @@ func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progr
 	}
 	posters, _ := a.Catalog.(itemPoster)
 	carder, _ := a.Catalog.(itemCarder)
+	// One entry per show: the most recently watched episode (the list is
+	// newest first).
+	seenSeries := map[string]bool{}
 	for _, rec := range list {
 		if len(out) == continueLimit {
 			break
@@ -230,6 +248,12 @@ func (a *API) continueItems(ctx context.Context, p *auth.Principal, list []progr
 			if card, err := carder.ItemCard(ctx, rec.ItemKind, rec.ItemID); err == nil {
 				rec.Card = &card
 			}
+		}
+		if rec.Card != nil && rec.Card.SeriesID != "" {
+			if seenSeries[rec.Card.SeriesID] {
+				continue
+			}
+			seenSeries[rec.Card.SeriesID] = true
 		}
 		out = append(out, rec)
 	}
@@ -416,11 +440,22 @@ func (a *API) handleSegment(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAdminList(w http.ResponseWriter, r *http.Request) {
 	var rows []inspector.LiveRow
 	for _, s := range a.Reg.List() {
-		rows = append(rows, inspector.LiveRow{
+		s.mu.Lock()
+		row := inspector.LiveRow{
 			ID: s.ID, ItemKind: s.ItemKind, ItemID: s.ItemID,
 			Mode: s.Mode, Playback: s.Decision.Playback, Delivery: s.Delivery, Reasons: s.Reasons,
 			UserID: s.UserID, Guest: s.Kind != "user", DurationMS: s.DurationMS,
-		})
+			Source: s.Source, VideoCodec: s.RemoteVideoCodec, VideoCopy: s.RemoteVideoCopy,
+			BitrateBPS: s.RemoteBitrate, PositionMS: s.ResumeMS, Client: s.ClientStats,
+		}
+		s.mu.Unlock()
+		if a.Catalog != nil {
+			row.ItemTitle, _ = a.Catalog.ItemTitle(r.Context(), s.ItemKind, s.ItemID)
+		}
+		if a.DB != nil && s.UserID != "" {
+			_ = a.DB.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(display_name, ''), username) FROM users WHERE id = ?`, s.UserID).Scan(&row.Username)
+		}
+		rows = append(rows, row)
 	}
 	if rows == nil {
 		rows = []inspector.LiveRow{}

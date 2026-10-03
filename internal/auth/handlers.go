@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -192,26 +195,49 @@ type prefJSON struct {
 	SubtitleLang string `json:"subtitle_lang"`
 	SubtitleMode string `json:"subtitle_mode"`
 	Autoplay     bool   `json:"autoplay"`
+	// PlaybackRate, Quality and UpNextSeconds are the profile's player
+	// defaults; SourcePref is "", "local" or "remote"; HomeRows orders the
+	// home page rows (empty means the default set).
+	PlaybackRate  float64  `json:"playback_rate"`
+	Quality       string   `json:"quality"`
+	UpNextSeconds int      `json:"upnext_seconds"`
+	SourcePref    string   `json:"source_pref"`
+	HomeRows      []string `json:"home_rows"`
+}
+
+var homeRowID = regexp.MustCompile(`^[a-z0-9_:-]{1,64}$`)
+
+func defaultPrefs() prefJSON {
+	return prefJSON{SubtitleMode: "auto", Autoplay: true, PlaybackRate: 1, UpNextSeconds: 10, HomeRows: []string{}}
+}
+
+func (s *Service) loadPrefs(ctx context.Context, userID string) prefJSON {
+	pref := defaultPrefs()
+	var auto int
+	var rows string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT audio_lang, subtitle_lang, subtitle_mode, autoplay, playback_rate, quality, upnext_seconds, source_pref, home_rows
+		FROM user_preferences WHERE user_id = ?
+	`, userID).Scan(&pref.AudioLang, &pref.SubtitleLang, &pref.SubtitleMode, &auto, &pref.PlaybackRate, &pref.Quality, &pref.UpNextSeconds, &pref.SourcePref, &rows)
+	if err != nil {
+		return defaultPrefs()
+	}
+	pref.Autoplay = auto == 1
+	if rows != "" {
+		pref.HomeRows = strings.Split(rows, ",")
+	}
+	return pref
 }
 
 func (s *Service) handleGetPrefs(w http.ResponseWriter, r *http.Request) {
-	p := FromRequest(r)
-	var pref prefJSON
-	var auto int
-	err := s.DB.QueryRowContext(r.Context(), `
-		SELECT audio_lang, subtitle_lang, subtitle_mode, autoplay FROM user_preferences WHERE user_id = ?
-	`, p.UserID).Scan(&pref.AudioLang, &pref.SubtitleLang, &pref.SubtitleMode, &auto)
-	if err != nil {
-		pref = prefJSON{SubtitleMode: "auto", Autoplay: true}
-	} else {
-		pref.Autoplay = auto == 1
-	}
-	httpapi.WriteJSON(w, http.StatusOK, pref)
+	httpapi.WriteJSON(w, http.StatusOK, s.loadPrefs(r.Context(), FromRequest(r).UserID))
 }
 
+// handlePutPrefs merges the fields sent over the stored preferences, so a
+// client that knows only some of them does not reset the rest.
 func (s *Service) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 	p := FromRequest(r)
-	var pref prefJSON
+	pref := s.loadPrefs(r.Context(), p.UserID)
 	if err := json.NewDecoder(r.Body).Decode(&pref); err != nil {
 		httpapi.WriteErr(w, 400, "bad_request", "invalid json")
 		return
@@ -219,19 +245,56 @@ func (s *Service) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 	if pref.SubtitleMode == "" {
 		pref.SubtitleMode = "auto"
 	}
+	if pref.PlaybackRate < 0.25 || pref.PlaybackRate > 3 {
+		pref.PlaybackRate = 1
+	}
+	switch pref.Quality {
+	case "", "auto", "1080", "720", "480":
+	default:
+		httpapi.WriteErr(w, 400, "bad_request", "quality must be auto, 1080, 720 or 480")
+		return
+	}
+	if pref.UpNextSeconds < 0 || pref.UpNextSeconds > 60 {
+		httpapi.WriteErr(w, 400, "bad_request", "upnext_seconds must be between 0 and 60")
+		return
+	}
+	switch pref.SourcePref {
+	case "", "local", "remote":
+	default:
+		httpapi.WriteErr(w, 400, "bad_request", "source_pref must be local or remote")
+		return
+	}
+	if len(pref.HomeRows) > 30 {
+		httpapi.WriteErr(w, 400, "bad_request", "at most 30 home rows")
+		return
+	}
+	for _, id := range pref.HomeRows {
+		if !homeRowID.MatchString(id) {
+			httpapi.WriteErr(w, 400, "bad_request", "invalid home row id")
+			return
+		}
+	}
+	if pref.HomeRows == nil {
+		pref.HomeRows = []string{}
+	}
 	a := 0
 	if pref.Autoplay {
 		a = 1
 	}
 	_, err := s.DB.ExecContext(r.Context(), `
-		INSERT INTO user_preferences(user_id, audio_lang, subtitle_lang, subtitle_mode, autoplay)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO user_preferences(user_id, audio_lang, subtitle_lang, subtitle_mode, autoplay, playback_rate, quality, upnext_seconds, source_pref, home_rows)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			audio_lang=excluded.audio_lang,
 			subtitle_lang=excluded.subtitle_lang,
 			subtitle_mode=excluded.subtitle_mode,
-			autoplay=excluded.autoplay
-	`, p.UserID, pref.AudioLang, pref.SubtitleLang, pref.SubtitleMode, a)
+			autoplay=excluded.autoplay,
+			playback_rate=excluded.playback_rate,
+			quality=excluded.quality,
+			upnext_seconds=excluded.upnext_seconds,
+			source_pref=excluded.source_pref,
+			home_rows=excluded.home_rows
+	`, p.UserID, pref.AudioLang, pref.SubtitleLang, pref.SubtitleMode, a, pref.PlaybackRate, pref.Quality, pref.UpNextSeconds, pref.SourcePref, strings.Join(pref.HomeRows, ","))
 	if err != nil {
 		httpapi.WriteErr(w, 500, "prefs", err.Error())
 		return

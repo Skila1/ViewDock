@@ -25,6 +25,16 @@ func (s *Service) StartSync(id string) bool {
 	return true
 }
 
+// RefreshItem resyncs the source a catalogue title was imported from.
+func (s *Service) RefreshItem(ctx context.Context, itemKind, itemID string) error {
+	var sourceID string
+	if err := s.DB.QueryRowContext(ctx, `SELECT source_id FROM remote_items WHERE item_kind = ? AND item_id = ?`, itemKind, itemID).Scan(&sourceID); err != nil {
+		return fmt.Errorf("title is not from a media source: %w", err)
+	}
+	s.StartSync(sourceID)
+	return nil
+}
+
 // Sync imports the selected Jellyfin libraries of one source. Failures are
 // recorded on the source and never touch local libraries.
 func (s *Service) Sync(ctx context.Context, id string) {

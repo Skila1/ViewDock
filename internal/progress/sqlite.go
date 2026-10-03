@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,7 +65,8 @@ func (s *SQLite) Put(ctx context.Context, userID, itemKind, itemID, mediaFileID 
 			position_ms = excluded.position_ms,
 			duration_ms = excluded.duration_ms,
 			completed = excluded.completed,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			dismissed = 0
 	`, userID, itemKind, itemID, mediaFileID, positionMS, durationMS, di, now)
 	if err != nil {
 		return err
@@ -90,7 +92,7 @@ func (s *SQLite) Continue(ctx context.Context, userID string, limit int) ([]Reco
 		SELECT p.item_kind, p.item_id, p.media_file_id, p.position_ms, p.duration_ms, p.completed, p.updated_at
 		FROM playback_progress p`
 	args := []any{userID}
-	where := ` WHERE p.user_id = ? AND p.completed = 0 AND p.position_ms > 5000`
+	where := ` WHERE p.user_id = ? AND p.completed = 0 AND p.dismissed = 0 AND p.position_ms > 5000`
 	if clause, extra := rest.SQLFilter("COALESCE(m.rating_age, s.rating_age)"); clause != "" {
 		q += `
 		LEFT JOIN movies m ON p.item_kind = 'movie' AND m.id = p.item_id
@@ -126,14 +128,44 @@ func (s *SQLite) Continue(ctx context.Context, userID string, limit int) ([]Reco
 	return out, rows.Err()
 }
 
+var (
+	completePercent   atomic.Int64
+	completeRemaining atomic.Int64
+)
+
+func init() {
+	completePercent.Store(92)
+	completeRemaining.Store(180)
+}
+
+// SetCompletion sets when a title counts as finished: at percent of its
+// length, or with remainingSec or less left (end credits). The remaining
+// rule only applies to titles over ten times that long, so a short clip is
+// not finished as soon as it starts.
+func SetCompletion(percent, remainingSec int) {
+	if percent >= 50 && percent <= 100 {
+		completePercent.Store(int64(percent))
+	}
+	if remainingSec >= 0 {
+		completeRemaining.Store(int64(remainingSec))
+	}
+}
+
+// Completed reports whether a position counts as having finished the title.
+func Completed(pos, dur int64) bool { return completed(pos, dur) }
+
 func completed(pos, dur int64) bool {
 	if dur <= 0 || pos <= 0 {
 		return false
 	}
-	if dur-pos <= 30_000 {
+	left := dur - pos
+	if left <= 30_000 {
 		return true
 	}
-	return float64(pos)/float64(dur) >= 0.92
+	if rem := completeRemaining.Load() * 1000; rem > 0 && dur > 10*rem && left <= rem {
+		return true
+	}
+	return pos*100 >= dur*completePercent.Load()
 }
 
 func resumeMS(pos, dur int64, done bool) int64 {

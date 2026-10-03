@@ -96,3 +96,22 @@ func TestGuestNotInStore(t *testing.T) {
 		t.Fatalf("empty user must not write: %v", err)
 	}
 }
+
+func TestCompletionThreshold(t *testing.T) {
+	defer SetCompletion(92, 180)
+	SetCompletion(92, 180)
+	twoHours := int64(2 * 60 * 60 * 1000)
+	if !Completed(twoHours-170_000, twoHours) {
+		t.Fatal("a film in its last three minutes of credits is finished")
+	}
+	if Completed(twoHours/2, twoHours) {
+		t.Fatal("half a film is not finished")
+	}
+	if Completed(60_000, 15*60_000) || !Completed(14*60_000+40_000, 15*60_000) {
+		t.Fatal("short titles use the percent and the 30 second rule only")
+	}
+	SetCompletion(80, 0)
+	if !Completed(twoHours*81/100, twoHours) {
+		t.Fatal("a lower percent finishes earlier")
+	}
+}

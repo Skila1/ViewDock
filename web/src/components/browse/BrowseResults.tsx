@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { PosterCard } from "@/components/layout/PosterCard";
 import { PosterGrid } from "@/components/layout/PosterGrid";
+import { TitleMenu } from "@/components/media/TitleMenu";
 import { filenameTitle } from "@/lib/format";
 import type { BrowseItem, BrowseLayout } from "@/lib/browse";
 import type { BrowseSignals } from "@/types/api.gen";
@@ -15,7 +16,9 @@ export function BrowseResults({ items, layout, signals }: { items: BrowseItem[];
     return (
       <PosterGrid>
         {items.map((it) => (
-          <PosterCard key={it.key} to={it.href} title={it.title} posterUrl={it.posterUrl} unmatched={it.unmatched} />
+          <TitleMenu key={it.key} target={{ kind: it.kind, id: it.id }}>
+            <PosterCard to={it.href} title={it.title} posterUrl={it.posterUrl} unmatched={it.unmatched} />
+          </TitleMenu>
         ))}
       </PosterGrid>
     );
@@ -27,23 +30,25 @@ export function BrowseResults({ items, layout, signals }: { items: BrowseItem[];
         const views = signals?.views[it.key] ?? 0;
         return (
           <li key={it.key}>
-            <Link to={it.href} className="flex gap-3 p-2 hover:bg-overlay">
-              <div className="h-24 w-16 shrink-0 overflow-hidden rounded bg-raised">
-                {it.posterUrl ? <img src={it.posterUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
-              </div>
-              <div className="min-w-0 flex-1 space-y-1 py-0.5">
-                <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                  <span className="truncate font-medium text-ink">{filenameTitle(it.title)}</span>
-                  {it.year ? <span className="text-xs text-dim">{it.year}</span> : null}
-                </p>
-                <p className="text-xs text-dim">
-                  {[typeLabel(it), ...it.genres.slice(0, 3)].join(", ")}
-                  {views ? `. Watched by ${views} ${views === 1 ? "person" : "people"}` : ""}
-                  {watched.has(it.key) ? ". You started this" : ""}
-                </p>
-                {it.overview ? <p className="line-clamp-2 text-xs text-dim">{it.overview}</p> : null}
-              </div>
-            </Link>
+            <TitleMenu target={{ kind: it.kind, id: it.id }}>
+              <Link to={it.href} className="flex gap-3 p-2 hover:bg-overlay">
+                <div className="h-24 w-16 shrink-0 overflow-hidden rounded bg-raised">
+                  {it.posterUrl ? <img src={it.posterUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
+                </div>
+                <div className="min-w-0 flex-1 space-y-1 py-0.5">
+                  <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                    <span className="truncate font-medium text-ink">{filenameTitle(it.title)}</span>
+                    {it.year ? <span className="text-xs text-dim">{it.year}</span> : null}
+                  </p>
+                  <p className="text-xs text-dim">
+                    {[typeLabel(it), ...it.genres.slice(0, 3)].join(", ")}
+                    {views ? `. Watched by ${views} ${views === 1 ? "person" : "people"}` : ""}
+                    {watched.has(it.key) ? ". You started this" : ""}
+                  </p>
+                  {it.overview ? <p className="line-clamp-2 text-xs text-dim">{it.overview}</p> : null}
+                </div>
+              </Link>
+            </TitleMenu>
           </li>
         );
       })}

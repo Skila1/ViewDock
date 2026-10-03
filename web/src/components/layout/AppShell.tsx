@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
-import { ArrowLeft, Download, Home, PanelLeftClose, PanelLeftOpen, Settings, Shield } from "lucide-react";
+import { ArrowLeft, Bookmark, Download, Home, PanelLeftClose, PanelLeftOpen, Settings, Shield } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { useAuth } from "@/store/auth";
 import { cn } from "@/lib/cn";
@@ -14,6 +14,7 @@ const sideLink = "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-dim 
 
 const nav = [
   { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/my-list", label: "My List", icon: Bookmark },
   { to: "/offline", label: "Offline", icon: Download },
 ];
 

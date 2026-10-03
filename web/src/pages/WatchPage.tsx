@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/api";
+import { useBrowseData } from "@/components/browse/useBrowse";
+import { relatedTitles } from "@/lib/browse";
 import { Player } from "@/components/player/Player";
 import type { NowPlayingInfo } from "@/components/player/PauseOverlay";
 import { ResumeChoice } from "@/components/player/ResumeChoice";
@@ -65,6 +67,11 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
     };
   }, [kind, movie.data, episode.data, series.data]);
 
+  const browse = useBrowseData();
+  const related = useMemo(
+    () => (kind === "movie" ? relatedTitles(browse.items, `movie:${id}`, 6).map((it) => ({ key: it.key, title: it.title, href: it.href, posterUrl: it.posterUrl })) : []),
+    [browse.items, kind, id],
+  );
   const saved = (cont.data ?? []).find((p) => p.item_kind === kind && p.item_id === id);
   const resumeMs = saved?.resume_ms ?? saved?.position_ms ?? 0;
 
@@ -121,6 +128,7 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
         }
       }}
       onClose={close}
+      related={related}
     />
   );
 }

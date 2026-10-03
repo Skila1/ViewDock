@@ -49,18 +49,18 @@ type GPU struct {
 }
 
 type DTO struct {
-	ID            string             `json:"id"`
-	Source        Source             `json:"source"`
-	Client        capability.Profile `json:"client"`
-	Decision      DecisionCol        `json:"decision"`
-	GPU           *GPU               `json:"gpu"`
-	VODOnDemand   bool               `json:"vod_ondemand,omitempty"`
-	VODPlanKind   string             `json:"vod_plan_kind,omitempty"`
-	GenStartSeg   int                `json:"gen_start_seg,omitempty"`
-	GenerationID  int                `json:"generation_id,omitempty"`
-	HLSAttach     string             `json:"hls_attach,omitempty"`
-	SeekableFrom  int64              `json:"seekable_from_ms,omitempty"`
-	OriginMS      int64              `json:"origin_ms"`
+	ID           string             `json:"id"`
+	Source       Source             `json:"source"`
+	Client       capability.Profile `json:"client"`
+	Decision     DecisionCol        `json:"decision"`
+	GPU          *GPU               `json:"gpu"`
+	VODOnDemand  bool               `json:"vod_ondemand,omitempty"`
+	VODPlanKind  string             `json:"vod_plan_kind,omitempty"`
+	GenStartSeg  int                `json:"gen_start_seg,omitempty"`
+	GenerationID int                `json:"generation_id,omitempty"`
+	HLSAttach    string             `json:"hls_attach,omitempty"`
+	SeekableFrom int64              `json:"seekable_from_ms,omitempty"`
+	OriginMS     int64              `json:"origin_ms"`
 }
 
 type Input struct {
@@ -189,6 +189,29 @@ type LiveRow struct {
 	UserID     string   `json:"user_id,omitempty"`
 	Guest      bool     `json:"guest"`
 	DurationMS int64    `json:"duration_ms"`
+	Username   string   `json:"username,omitempty"`
+	ItemTitle  string   `json:"item_title,omitempty"`
+	Source     string   `json:"source,omitempty"`
+	// VideoCodec and VideoCopy describe an external source stream.
+	VideoCodec string `json:"video_codec,omitempty"`
+	VideoCopy  bool   `json:"video_copy,omitempty"`
+	BitrateBPS int64  `json:"bitrate_bps,omitempty"`
+	PositionMS int64  `json:"position_ms"`
+	// Client is what the player last reported about its buffers.
+	Client *ClientStats `json:"client,omitempty"`
+}
+
+// ClientStats is the player's own view of a session, sent with progress.
+type ClientStats struct {
+	Paused        bool    `json:"paused"`
+	BufferAheadMS int64   `json:"buffer_ahead_ms"`
+	CacheAheadMS  int64   `json:"cache_ahead_ms"`
+	CacheBehindMS int64   `json:"cache_behind_ms"`
+	CacheBytes    int64   `json:"cache_bytes"`
+	CacheHitRate  float64 `json:"cache_hit_rate"`
+	ThroughputBPS int64   `json:"throughput_bps"`
+	DroppedFrames int64   `json:"dropped_frames"`
+	At            string  `json:"at,omitempty"`
 }
 
 type Stats struct {

@@ -8,13 +8,15 @@ import { inspectPlaylistBody, playlistReadiness } from "@/playback/playlistInspe
 import { eventPlaylistHlsSync } from "@/playback/hlsLiveSync";
 import { captureSeekHold, seekHoldAction, shouldReplaceForGenerated } from "@/playback/seekHold";
 import { nativeGeneratedEndSec } from "./seekWindow";
-import { bufferCacheEnabled, directBufferCache, hlsBufferCache, type BufferCacheTitle } from "./bufferCache";
+import { bufferCacheEnabled, directBufferCache, hlsBufferCache, type BufferCacheTitle, type CacheStats } from "./bufferCache";
 import type { PlaybackSession } from "@/types/api.gen";
 
 export type AttachHandle = {
   engine: PlaybackEngine;
   /** Waits until enough is cached ahead to start without stalling (buffer cache sessions). */
   prebuffer?: (maxMs: number) => Promise<void>;
+  /** The buffer cache's state, for the stats overlay and the seek bar. */
+  stats?: () => CacheStats;
   generatedEndSec?: () => number | undefined;
   destroy: () => void;
 };
@@ -75,6 +77,7 @@ export async function attachSession(
     return {
       engine: "direct",
       prebuffer: buffer?.prebuffer,
+      stats: buffer?.stats,
       destroy() {
         aborted = true;
         buffer?.destroy();
@@ -404,7 +407,7 @@ async function attachWithHls(
   video.addEventListener("durationchange", onDurPin);
   video.addEventListener("loadedmetadata", () => noteAttach(video, "video:loadedmetadata", `duration=${video.duration}`), { once: true });
   // MMS sourceopen requires disableRemotePlayback. Do not add an HLS
-  // <source> sibling — Safari plays that inline and fights hls.js.
+  // <source> sibling: Safari plays that inline and fights hls.js.
   disableRemotePlaybackForMms(video);
   setAttachMeta(video, { airplayPolicy: "skipped_intentional_dual_owner" });
   noteAttach(video, "disableRemotePlayback", "true");
@@ -439,6 +442,7 @@ async function attachWithHls(
   return {
     engine: "hlsjs",
     prebuffer: buffer?.prebuffer,
+    stats: buffer?.stats,
     generatedEndSec: () => playlistEdge,
     destroy() {
       stopHoldPoll();

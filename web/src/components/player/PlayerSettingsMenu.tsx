@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { Captions, Check, ChevronLeft, ChevronRight, Gauge, Server, Settings, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { Activity, AudioLines, Captions, Check, ChevronLeft, ChevronRight, Gauge, Server, Settings, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export type MenuOption<T> = { value: T; label: string; hint?: string };
@@ -14,7 +14,7 @@ export type MenuGroup<T> = {
   disabled?: string;
 };
 
-type View = "root" | "quality" | "server" | "subtitles" | "speed";
+type View = "root" | "quality" | "server" | "audio" | "subtitles" | "speed";
 
 /** Any group, with its value type erased for the shared row and option rendering. */
 type ErasedGroup = {
@@ -32,12 +32,17 @@ type Props = {
   server: MenuGroup<string> | null;
   subtitles: MenuGroup<number | null>;
   speed: MenuGroup<number>;
+  /** Audio tracks, when the title has more than one. */
+  audio?: MenuGroup<number> | null;
+  /** Opens the stats overlay. */
+  onStats?: () => void;
   buttonClassName: string;
 };
 
 const TITLES: Record<Exclude<View, "root">, string> = {
   quality: "Quality",
   server: "Server",
+  audio: "Audio",
   subtitles: "Subtitles",
   speed: "Playback speed",
 };
@@ -51,7 +56,7 @@ function focusItems(root: HTMLElement | null): HTMLButtonElement[] {
   return root ? Array.from(root.querySelectorAll<HTMLButtonElement>("[data-menu-item]:not([disabled])")) : [];
 }
 
-export function PlayerSettingsMenu({ open, onOpenChange, quality, server, subtitles, speed, buttonClassName }: Props) {
+export function PlayerSettingsMenu({ open, onOpenChange, quality, server, subtitles, speed, audio, onStats, buttonClassName }: Props) {
   const [view, setView] = useState<View>("root");
   const wrapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -102,6 +107,7 @@ export function PlayerSettingsMenu({ open, onOpenChange, quality, server, subtit
   const rows: { view: Exclude<View, "root">; icon: LucideIcon; group: ErasedGroup | null }[] = [
     { view: "quality", icon: SlidersHorizontal, group: quality },
     { view: "server", icon: Server, group: server },
+    { view: "audio", icon: AudioLines, group: audio ?? null },
     { view: "subtitles", icon: Captions, group: subtitles },
     { view: "speed", icon: Gauge, group: speed },
   ];
@@ -134,6 +140,22 @@ export function PlayerSettingsMenu({ open, onOpenChange, quality, server, subtit
             </button>
           ) : null,
         )}
+        {onStats ? (
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item
+            onClick={() => {
+              close(false);
+              onStats();
+            }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[14px] text-white/90 outline-none transition-colors hover:bg-white/[0.07] focus-visible:bg-white/[0.09]"
+          >
+            <Activity size={18} strokeWidth={1.8} className="shrink-0 text-white/70" aria-hidden />
+            <span className="flex-1 font-medium">Stats for nerds</span>
+            <span className="text-[13px] text-white/50">I</span>
+          </button>
+        ) : null}
       </div>
     );
   } else {

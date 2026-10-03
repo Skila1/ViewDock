@@ -183,6 +183,18 @@ func negotiate(ms mediaSource, client capability.Profile, quality string, transc
 	return p
 }
 
+// planBitrate is the video bitrate the player receives: the source's when
+// copied, the encoder's target when re-encoded.
+func planBitrate(p streamPlan, ms mediaSource) int64 {
+	if p.copy || p.direct {
+		if r := videoRateOf(ms); r != copyMaxBitrate/2 {
+			return r
+		}
+		return 0
+	}
+	return p.videoRate
+}
+
 func videoRateOf(ms mediaSource) int64 {
 	var rate int64
 	for _, st := range ms.MediaStreams {

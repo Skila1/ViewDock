@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useBrowseData } from "@/components/browse/useBrowse";
 import { PosterCard } from "@/components/layout/PosterCard";
 import { relatedTitles } from "@/lib/browse";
+import { TitleMenu } from "./TitleMenu";
 
 /** A "More like this" strip for a title page, drawn from the viewer's catalogue. */
 export function RelatedTitles({ kind, id }: { kind: "movie" | "series"; id: string }) {
@@ -16,7 +17,9 @@ export function RelatedTitles({ kind, id }: { kind: "movie" | "series"; id: stri
       <div className="continue-slip">
         {related.map((it) => (
           <div key={it.key} className="w-[132px] shrink-0">
-            <PosterCard to={it.href} title={it.title} posterUrl={it.posterUrl} unmatched={it.unmatched} />
+            <TitleMenu target={{ kind: it.kind, id: it.id }}>
+              <PosterCard to={it.href} title={it.title} posterUrl={it.posterUrl} unmatched={it.unmatched} />
+            </TitleMenu>
           </div>
         ))}
       </div>
