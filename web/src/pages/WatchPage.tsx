@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -35,6 +35,18 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
     queryFn: () => api.getSeries(seriesId),
     enabled: kind === "episode" && Boolean(seriesId),
   });
+  // ?t is where to start this time, not where the viewer is. Once the
+  // player has it, it leaves the address bar, so a reload or a browser that
+  // restores its tabs resumes from the saved position instead of jumping
+  // back to where this visit began. The router keeps its own copy, so the
+  // player is not remounted.
+  useEffect(() => {
+    if (!hasStart) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("t")) return;
+    url.searchParams.delete("t");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  }, [hasStart, id]);
   const cont = useQuery({
     queryKey: ["continue"],
     queryFn: api.continueWatching,

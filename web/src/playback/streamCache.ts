@@ -136,13 +136,18 @@ export function overTotal(reg: Registry, total: number, now: number): string[] {
 }
 
 /**
- * behindToEvict picks cached spans furthest behind the playhead (never the
- * last 30 seconds) until bytes fits the budget, so a bucket over budget keeps
- * what is ahead.
+ * evictForBudget picks cached spans furthest from the playhead until bytes
+ * fits the budget: behind it (never the last 30 seconds), and ahead of it
+ * past `needStart`, the next span the player is missing. A bucket filled far
+ * ahead by an earlier visit otherwise stops every download while the player
+ * waits at a gap in front of it.
  */
-export function behindToEvict(spans: Span[], sizes: Map<string, number>, playhead: number, bytes: number, budget: number): string[] {
+export function evictForBudget(spans: Span[], sizes: Map<string, number>, playhead: number, bytes: number, budget: number, needStart = Number.POSITIVE_INFINITY): string[] {
   const out: string[] = [];
-  const behind = spans.filter((s) => sizes.has(s.key) && s.end < playhead - EVICT_MARGIN_SEC).sort((a, b) => a.start - b.start);
+  const distance = (s: Span) => (s.end <= playhead ? playhead - s.end : s.start - playhead);
+  const behind = spans
+    .filter((s) => sizes.has(s.key) && (s.end < playhead - EVICT_MARGIN_SEC || s.start > needStart))
+    .sort((a, b) => distance(b) - distance(a));
   for (const s of behind) {
     if (bytes <= budget) break;
     out.push(s.key);
@@ -689,7 +694,12 @@ export class StreamPrefetcher {
       const back = !this.source.encodes;
       let plan = planWindow(spans, taken(), playhead, back ? this.lastDir : "forward", win, back);
       const evict = plan.evict.filter((key) => this.cached.has(key));
-      if (this.bytes >= this.budget) evict.push(...behindToEvict(spans, this.sizes, playhead, this.bytes, this.budget * 0.9));
+      if (this.bytes >= this.budget) {
+        const need = planWindow(spans, taken(), playhead, "forward", win, false).next;
+        for (const key of evictForBudget(spans, this.sizes, playhead, this.bytes, this.budget * 0.9, need?.start)) {
+          if (!evict.includes(key)) evict.push(key);
+        }
+      }
       if (evict.length > 0) {
         for (const key of evict) {
           this.cached.delete(key);

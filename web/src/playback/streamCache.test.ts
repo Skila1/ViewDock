@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LINGER_MS, adaptiveWindow, behindToEvict, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, StreamPrefetcher, type PrefetchSource, type Span } from "./streamCache";
+import { LINGER_MS, adaptiveWindow, evictForBudget, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, StreamPrefetcher, type PrefetchSource, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
@@ -83,17 +83,24 @@ describe("prebuffer", () => {
   });
 });
 
-describe("behindToEvict", () => {
+describe("evictForBudget", () => {
   it("drops the oldest spans behind the playhead until the budget fits", () => {
     const sizes = new Map([...range(50, 110)].map((k) => [k, 10] as [string, number]));
     // 60 spans of 10 bytes, budget 450: drop 15, oldest first, never the 30s behind the playhead.
-    const out = behindToEvict(spans, sizes, 600, 600, 450);
+    const out = evictForBudget(spans, sizes, 600, 600, 450);
     expect(out).toEqual(Array.from({ length: 15 }, (_, i) => `s${50 + i}`));
   });
 
   it("keeps the last 30 seconds even when over budget", () => {
     const sizes = new Map([...range(96, 110)].map((k) => [k, 10] as [string, number]));
-    expect(behindToEvict(spans, sizes, 600, 140, 0)).toEqual([]);
+    expect(evictForBudget(spans, sizes, 600, 140, 0)).toEqual([]);
+  });
+
+  it("drops spans far ahead to fill a gap in front of the playhead", () => {
+    // Cached: 30s behind, then nothing until 60s ahead, then two minutes more.
+    const sizes = new Map([...range(95, 100), ...range(110, 130)].map((k) => [k, 10] as [string, number]));
+    const out = evictForBudget(spans, sizes, 600, 250, 200, 600);
+    expect(out).toEqual(["s129", "s128", "s127", "s126", "s125"]);
   });
 });
 
