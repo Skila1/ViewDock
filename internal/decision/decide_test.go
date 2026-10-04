@@ -255,3 +255,21 @@ func TestNeedsVideoSlotMatrix(t *testing.T) {
 		t.Fatal("direct/remux must not take a video slot")
 	}
 }
+
+func TestCopiesOfExternalTitlesKeepTheOriginalOnAuto(t *testing.T) {
+	uhd := &ffmpeg.MediaInfo{VideoCodec: "hevc", AudioCodec: "aac", Container: "mkv", Width: 3840, Height: 2160, HDR: "hdr10", BitDepth: 10,
+		Streams: []ffmpeg.Stream{{Kind: "video", Codec: "hevc", Width: 3840, Height: 2160, HDR: "hdr10", BitDepth: 10}, {Kind: "audio", Codec: "aac"}}}
+	client := capability.Profile{UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36", HEVCMain10: capability.Ptr(true), ViewportH: 1080}
+	got := Decide(Input{Info: uhd, Client: client, Quality: "auto", LAN: false, Original: true})
+	if !got.CopyVideo || got.NeedVideoXcode || got.Height != 2160 || got.Refuse != "" {
+		t.Fatalf("copy on auto: copy=%v xcode=%v height=%d refuse=%q %v", got.CopyVideo, got.NeedVideoXcode, got.Height, got.Refuse, got.Reasons)
+	}
+	// A size the viewer picks is still honoured.
+	if got := Decide(Input{Info: uhd, Client: client, Quality: "1080", LAN: false, Original: true}); got.CopyVideo || got.Height != 1080 {
+		t.Fatalf("copy at 1080: copy=%v height=%d", got.CopyVideo, got.Height)
+	}
+	// Local files keep their usual sizing.
+	if got := Decide(Input{Info: uhd, Client: client, Quality: "auto", LAN: false}); got.CopyVideo {
+		t.Fatalf("local 4K on auto over the internet was not resized: %v", got.Reasons)
+	}
+}

@@ -166,6 +166,7 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 		Info: info, Client: body.Client, Quality: body.Quality,
 		LAN: lan, ShareMaxH: shareH, RemoteBitrate: a.Lim.RemoteBitrate,
 		AudioIndex: body.AudioIndex, SubtitleIndex: body.SubtitleIndex, HW: a.HW,
+		Original: loc.Copy,
 	})
 	if dec.Refuse != "" {
 		httpapi.WriteErr(w, http.StatusConflict, dec.Refuse, "cannot transcode 4K HDR without zscale")

@@ -43,6 +43,8 @@ type LocatedFile struct {
 	Width        int
 	Height       int
 	Availability string
+	// Copy marks this server's copy of a title from an external source.
+	Copy bool
 }
 
 type MediaLocator interface {

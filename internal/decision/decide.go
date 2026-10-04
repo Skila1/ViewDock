@@ -18,6 +18,10 @@ type Input struct {
 	AudioIndex    int
 	SubtitleIndex *int
 	HW            hwaccel.Info
+	// Original keeps the source's size on auto quality, whatever the network
+	// or viewport. Copies of external titles use it: they were streamed at
+	// their original size, and re-encoding them here would be slower.
+	Original bool
 }
 
 type Result struct {
@@ -73,6 +77,9 @@ func Decide(in Input) Result {
 		srcH = v.Height
 	}
 	r.Height = PickHeight(srcH, in.Client.ViewportH, in.LAN, in.Quality, in.ShareMaxH, in.Info, in.RemoteBitrate)
+	if in.Original && in.ShareMaxH == 0 && (in.Quality == "" || strings.EqualFold(in.Quality, "auto")) {
+		r.Height = srcH
+	}
 
 	vcodec := ""
 	if v != nil {

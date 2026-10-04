@@ -70,19 +70,26 @@ func (s *Service) LocateItem(ctx context.Context, itemKind, itemID string) (*Loc
 }
 
 // locateRemote places an item that only exists on an enabled external media
-// source. The result has no file path; playback streams it from the source.
+// source. Without a copy on this server the result has no file path, and
+// playback streams it from the source; with one, it plays the copy.
 func (s *Service) locateRemote(ctx context.Context, itemKind, itemID string) (*LocatedFile, error) {
-	var libID string
+	var libID, sourceID, remoteID string
 	var dur int64
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT ms.library_id, ri.duration_ms FROM remote_items ri
+		SELECT ms.library_id, ri.duration_ms, ri.source_id, ri.remote_id FROM remote_items ri
 		JOIN media_sources ms ON ms.id = ri.source_id
 		WHERE ri.item_kind = ? AND ri.item_id = ? AND ms.enabled = 1 LIMIT 1
-	`, itemKind, itemID).Scan(&libID, &dur)
+	`, itemKind, itemID).Scan(&libID, &dur, &sourceID, &remoteID)
 	if err != nil {
 		return nil, ErrNotFound
 	}
-	return &LocatedFile{LibraryID: libID, ItemKind: itemKind, ItemID: itemID, DurationMS: dur, Availability: "remote"}, nil
+	loc := &LocatedFile{LibraryID: libID, ItemKind: itemKind, ItemID: itemID, DurationMS: dur, Availability: "remote"}
+	if s.RemoteCopy != nil {
+		if path, container, size, ok := s.RemoteCopy(ctx, sourceID, remoteID); ok {
+			loc.AbsPath, loc.Container, loc.Size, loc.Availability, loc.Copy = path, container, size, "online", true
+		}
+	}
+	return loc, nil
 }
 
 func (s *Service) LocateAlternatives(ctx context.Context, itemKind, itemID, excludeID string) ([]*LocatedFile, error) {

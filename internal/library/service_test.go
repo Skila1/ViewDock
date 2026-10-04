@@ -105,3 +105,31 @@ func TestGrantedFilterNilListsAll(t *testing.T) {
 		t.Fatalf("ctx grants: %d %v", len(got), err)
 	}
 }
+
+func TestRemoteTitlesPlayTheirCopyOnThisServer(t *testing.T) {
+	svc, _ := testDB(t)
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO libraries(id, name, root_path, content_type, uploads_enabled, created_at, updated_at) VALUES ('jf', 'Jellyfin', '', 'movies', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO media_sources(id, library_id, name, url, username, created_at, updated_at) VALUES ('src', 'jf', 'JF', 'http://jf', 'u', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO remote_items(source_id, remote_id, item_kind, item_id, duration_ms) VALUES ('src', 'r1', 'movie', 'm1', 6000000)`,
+	} {
+		if _, err := svc.DB.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	loc, err := svc.LocateItem(ctx, "movie", "m1")
+	if err != nil || loc.AbsPath != "" || loc.Availability != "remote" {
+		t.Fatalf("without a copy: %+v %v", loc, err)
+	}
+	svc.RemoteCopy = func(_ context.Context, sourceID, remoteID string) (string, string, int64, bool) {
+		if sourceID != "src" || remoteID != "r1" {
+			return "", "", 0, false
+		}
+		return "/cache/jellyfin-media/abc.media", "mkv", 42, true
+	}
+	loc, err = svc.LocateItem(ctx, "movie", "m1")
+	if err != nil || loc.AbsPath != "/cache/jellyfin-media/abc.media" || loc.Container != "mkv" || loc.Size != 42 || loc.Availability != "online" || loc.DurationMS != 6000000 {
+		t.Fatalf("with a copy: %+v %v", loc, err)
+	}
+}

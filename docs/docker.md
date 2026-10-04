@@ -31,9 +31,17 @@ curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | s
 | Host | Container | Notes |
 |------|-----------|--------|
 | `./config` | `/config` | SQLite only |
-| `./cache` | `/cache` | artwork, HLS, and Jellyfin segments shared by viewers of the same title (up to 6 GB, cleared after 20 minutes) |
+| `./cache` | `/cache` | artwork, HLS, and copies of Jellyfin titles (see below) |
 | `./transcode` | `/transcode` | in-flight jobs |
 | media folder | `/media` | writable: ViewDock creates library folders here, and uploads and moves write here |
+
+### Jellyfin copies
+
+The first time a Jellyfin title is played, ViewDock copies the original file into `/cache/jellyfin-media` while it streams from Jellyfin. Once the copy is complete, the title plays from ViewDock at its original quality, for every viewer, without Jellyfin. A copy is deleted three days after the title was last started. While someone is streaming live from the same Jellyfin server the copy downloads at up to 40 Mbps, so it does not compete with that stream.
+
+Copies of remuxes are large (often 30 to 80 GB). ViewDock always leaves at least 20 GB or 5% of the volume free, whichever is larger, and deletes the least recently played copies to make room; a copy started within the last 12 hours is never deleted for space. Give `/cache` a volume with room for the titles you expect to be watched within three days.
+
+Viewers of the same Jellyfin title who stream at the same time, such as a watch party, share one Jellyfin stream; its segments are kept in `/cache/jellyfin-relay` for 20 minutes, up to 6 GB.
 
 ## User and folder permissions
 

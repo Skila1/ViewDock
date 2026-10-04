@@ -35,11 +35,9 @@ type grant struct {
 	direct           bool
 	deviceID, playID string
 	owner            string
-	// planKey is what the stream asks Jellyfin for, without its session;
-	// lastSeg is the segment its Jellyfin session last served (see relay.go).
+	// planKey is what the stream asks Jellyfin for, without its session
+	// (see relay.go).
 	planKey          string
-	lastSeg          int
-	lastSegAt        time.Time
 	created, lastHit time.Time
 	expires          time.Time
 }
@@ -78,6 +76,7 @@ func (s *Service) Resolve(ctx context.Context, itemKind, itemID, pick, quality s
 	}
 	if chosen < 0 {
 		if hasLocal && pick != playback.SourceRemote {
+			s.copyPlayed(cands)
 			return nil, options, nil
 		}
 		chosen = 0
@@ -258,6 +257,7 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string, d
 	if err := s.claimSlot(ctx, src, tok, g); err != nil {
 		return nil, err
 	}
+	s.startCopy(src, cl.token, c.remoteID, mediaSourceID, ms.Container, ms.Size, true)
 	mode := "hls"
 	switch {
 	case direct:

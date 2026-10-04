@@ -15,21 +15,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // A watch party used to open one Jellyfin remux per member, each reading
-// the same file and sending the same segments. The relay sends viewers of
-// the same item and stream plan through one Jellyfin play session and keeps
-// each segment on disk briefly, so Jellyfin produces and sends it once.
+// the same file and sending the same segments. The relay sends every live
+// stream of the same item and stream plan through one Jellyfin play session,
+// the one opened first, and keeps each segment on disk briefly, so Jellyfin
+// produces and sends it once. Party members stay in sync, so they ask for the
+// same segments.
 const (
-	// relayBehind and relayAhead bound how far a viewer may be from the
-	// session it borrows. Behind is mostly served from disk; ahead would
-	// make Jellyfin restart that session's remux, so the viewer uses its own.
-	relayBehind = 60
-	relayAhead  = 4
 	// relayTTL and relayMaxBytes bound the segments kept on disk.
 	relayTTL      = 20 * time.Minute
 	relayMaxBytes = 6 << 30
@@ -68,23 +64,14 @@ func (s *Service) serveShared(w http.ResponseWriter, r *http.Request, g *grant, 
 	if m == nil || g.direct || g.planKey == "" || s.CacheDir == "" {
 		return false
 	}
-	seg, _ := strconv.Atoi(m[1])
 	now := time.Now()
 	s.mu.Lock()
 	// Every viewer of the group goes through the relay, the one whose session
-	// serves it included, so each segment leaves Jellyfin once.
+	// serves it included, so each segment leaves Jellyfin once. Choosing by
+	// position split a party onto two sessions whenever it seeked.
 	lead, peers := g, false
 	for _, o := range s.grants {
-		if o == g || o.direct || o.sourceID != g.sourceID || o.remoteID != g.remoteID || o.planKey != g.planKey {
-			continue
-		}
-		// A stream that has not used its own session yet just joined or
-		// borrows one: it belongs to the group but cannot lead it.
-		if o.lastSegAt.IsZero() {
-			peers = true
-			continue
-		}
-		if now.Sub(o.lastSegAt) > pingIdleLimit || seg < o.lastSeg-relayBehind || seg > o.lastSeg+relayAhead {
+		if o == g || o.direct || o.sourceID != g.sourceID || o.remoteID != g.remoteID || o.planKey != g.planKey || now.After(o.expires) {
 			continue
 		}
 		peers = true
@@ -92,13 +79,6 @@ func (s *Service) serveShared(w http.ResponseWriter, r *http.Request, g *grant, 
 			lead = o
 		}
 	}
-	// Record where the serving session's remux is: a viewer's own request
-	// moves it anywhere (a seek), a borrowed one only ever forward.
-	shared := lead != g
-	if !shared || seg > lead.lastSeg {
-		lead.lastSeg = seg
-	}
-	lead.lastSegAt = now
 	l := *lead
 	s.mu.Unlock()
 	if !peers && !s.relayHas(clean, q, l) {

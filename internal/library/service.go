@@ -42,8 +42,11 @@ type Service struct {
 	// folders are validated against it and created by ViewDock itself; with
 	// no roots configured no library can be created or re-pointed.
 	Storage mediafs.Roots
-	scan    ScanStart
-	moves   moveState
+	// RemoteCopy finds a finished copy of an external source's title on
+	// this server. Such a title then plays like a local file.
+	RemoteCopy func(ctx context.Context, sourceID, remoteID string) (path, container string, size int64, ok bool)
+	scan       ScanStart
+	moves      moveState
 }
 
 // NewService constructs a library Service. grants, prober, and thumber may be nil.

@@ -74,6 +74,10 @@ type Service struct {
 	grants  map[string]*grant
 	// relayInflight holds the segment downloads viewers share (relay.go).
 	relayInflight map[string]*relayFetch
+	// copyMu guards the copies of titles to ViewDock (mediacopy.go).
+	copyMu    sync.Mutex
+	copying   map[string]bool
+	copySlots map[string]chan struct{}
 }
 
 func New(db *sql.DB, cipher func() *secrets.Cipher, cacheDir string, log *slog.Logger) *Service {
@@ -86,6 +90,7 @@ func New(db *sql.DB, cipher func() *secrets.Cipher, cacheDir string, log *slog.L
 			MaxIdleConnsPerHost:   16,
 		}},
 		syncing: map[string]bool{}, grants: map[string]*grant{}, relayInflight: map[string]*relayFetch{},
+		copying: map[string]bool{}, copySlots: map[string]chan struct{}{},
 	}
 }
 
@@ -279,6 +284,7 @@ func (s *Service) Start(ctx context.Context) {
 			case <-tick.C:
 				s.pingGrants(ctx)
 				s.sweepRelay()
+				s.sweepCopies()
 			}
 		}
 	}()
@@ -293,6 +299,7 @@ func (s *Service) Start(ctx context.Context) {
 			}
 			s.syncDue(ctx)
 			s.sweepGrants()
+			s.resumeCopies(ctx)
 			timer.Reset(syncCheckInterval)
 		}
 	}()

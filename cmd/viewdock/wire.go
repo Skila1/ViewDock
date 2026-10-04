@@ -262,9 +262,18 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		srv.FrameAncestors = authSvc.FrameAncestors
 	}
 
+	// meshPlayback reports whether sessions may run on worker nodes, which do
+	// not have this server's copies of Jellyfin titles.
+	meshPlayback := func() bool { return false }
 	if controlPlane {
 		sources := jellyfin.New(sqlDB, kv.Cipher, cfg.CacheDir, logger)
 		sources.Audit, sources.Cfg = aud, cfg
+		libs.RemoteCopy = func(ctx context.Context, sourceID, remoteID string) (string, string, int64, bool) {
+			if meshPlayback() {
+				return "", "", 0, false
+			}
+			return sources.LocalCopy(ctx, sourceID, remoteID)
+		}
 		meta.RefreshRemote = sources.RefreshItem
 		play.Sources = sources
 		sources.Start(context.Background())
@@ -328,6 +337,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		dispatcher.Ranker = tracker
 		control := cfg.Role == config.RoleControl
 		dispatcher.Enabled = func() bool { return control || rc.Bool(cfgMeshPlayback) }
+		meshPlayback = dispatcher.Enabled
 		play.Remote = dispatcher
 		play.RemoteDiag = dispatcher
 		resil := resilience.New(resilience.Deps{
