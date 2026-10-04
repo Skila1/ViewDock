@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- party members share one Jellyfin stream, and downloads rest three minutes ahead
+
 ## 0.4.4
 
 - offer an update only once its image is published
