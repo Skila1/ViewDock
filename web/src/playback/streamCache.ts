@@ -19,6 +19,14 @@ export const STREAM_CACHE_PROTOCOL = 1;
 const REGISTRY_KEY = "viewdock:stream-cache";
 const HEARTBEAT_MS = 30_000;
 const IDLE_POLL_MS = 5_000;
+/**
+ * Downloads rest once this much is cached gaplessly ahead of the playhead
+ * and start again below LEAD_RESUME_SEC. A viewer minutes ahead gains
+ * nothing from more, and the source's bandwidth is shared: in a watch party
+ * it starved the member who had only seconds.
+ */
+export const LEAD_MAX_SEC = 180;
+export const LEAD_RESUME_SEC = 90;
 /** Spans this far past the window are kept, so the playhead moving does not evict at once. */
 const EVICT_MARGIN_SEC = 30;
 /** Backfilling behind the playhead stops when less than this is cached ahead. */
@@ -396,6 +404,8 @@ export class StreamPrefetcher {
    * restarts the remux, so the two segments come from runs that do not line up.
    */
   private warm = false;
+  /** Enough is cached ahead: no new downloads until the lead runs down. */
+  private resting = false;
   private retryAt = 0;
   private wakeUp: (() => void) | null = null;
   /** Downloads run from the start; only a pause after playback began stops them. */
@@ -710,6 +720,10 @@ export class StreamPrefetcher {
         this.full = false;
         plan = planWindow(spans, taken(), playhead, back ? this.lastDir : "forward", win, back);
       }
+      const lead = cachedAhead(spans, this.cached, playhead);
+      if (lead >= LEAD_MAX_SEC) this.resting = true;
+      else if (lead < LEAD_RESUME_SEC) this.resting = false;
+      if (this.resting) plan = { ...plan, next: null };
       // Near the budget only what is ahead is fetched.
       if (this.bytes >= this.budget * 0.8) plan = planWindow(spans, taken(), playhead, "forward", win, false);
       if (this.bytes >= this.budget) plan = { ...plan, next: null };

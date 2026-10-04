@@ -35,6 +35,11 @@ type grant struct {
 	direct           bool
 	deviceID, playID string
 	owner            string
+	// planKey is what the stream asks Jellyfin for, without its session;
+	// lastSeg is the segment its Jellyfin session last served (see relay.go).
+	planKey          string
+	lastSeg          int
+	lastSegAt        time.Time
 	created, lastHit time.Time
 	expires          time.Time
 }
@@ -278,7 +283,11 @@ func (s *Service) openStream(ctx context.Context, c candidate, quality string, d
 		return out, nil
 	}
 	out.Delivery = decision.DeliveryHLS
-	out.URL = prefix + "master.m3u8?" + hlsQuery(mediaSourceID, g.playID, g.deviceID, plan).Encode()
+	q := hlsQuery(mediaSourceID, g.playID, g.deviceID, plan)
+	s.mu.Lock()
+	g.planKey = planKey(q)
+	s.mu.Unlock()
+	out.URL = prefix + "master.m3u8?" + q.Encode()
 	return out, nil
 }
 
@@ -546,6 +555,15 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 	if strings.ContainsAny(rest, "%\\") || clean != "/"+rest || !allowed {
 		httpapi.WriteErr(w, http.StatusNotFound, "not_found", "not found")
 		return
+	}
+	if !g.direct {
+		q := r.URL.Query()
+		for _, k := range []string{"api_key", "ApiKey", "X-Emby-Token", "userId", "UserId"} {
+			q.Del(k)
+		}
+		if s.serveShared(w, r, g, clean, q) {
+			return
+		}
 	}
 	target := g.base + clean
 	if r.URL.RawQuery != "" {

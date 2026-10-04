@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LINGER_MS, adaptiveWindow, evictForBudget, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, prebufferTarget, streamCacheName, StreamPrefetcher, type PrefetchSource, type Span } from "./streamCache";
+import { LINGER_MS, adaptiveWindow, evictForBudget, cachedAhead, cachedRanges, expiredStreamCaches, overTotal, planWindow, LEAD_MAX_SEC, prebufferTarget, streamCacheName, StreamPrefetcher, type PrefetchSource, type Span } from "./streamCache";
 
 // 6 second segments covering a 20 minute title.
 const spans: Span[] = Array.from({ length: 200 }, (_, i) => ({ key: `s${i}`, start: i * 6, end: (i + 1) * 6 }));
@@ -222,5 +222,34 @@ describe("StreamPrefetcher", () => {
     p.destroy();
     vi.unstubAllGlobals();
     expect(asked.every((start) => start >= 300)).toBe(true);
+  });
+
+  it("rests once three minutes are cached ahead", async () => {
+    const store = new Map<string, Response>();
+    const bucket = {
+      keys: async () => [],
+      match: async (k: string) => store.get(k),
+      put: async (k: string, r: Response) => void store.set(k, r),
+      delete: async (k: string) => store.delete(k),
+    };
+    vi.stubGlobal("caches", { open: async () => bucket, keys: async () => [], delete: async () => true });
+    const video = document.createElement("video");
+    Object.defineProperty(video, "paused", { value: false });
+    const asked: number[] = [];
+    const source: PrefetchSource = {
+      parallel: 2,
+      spans: () => spans,
+      fetch: async (span) => {
+        asked.push(span.start);
+        return new ArrayBuffer(4);
+      },
+    };
+    const p = new StreamPrefetcher({ video, cacheName: "vd-test", keyBase: "/k", source });
+    await p.start();
+    await vi.waitFor(() => expect(Math.max(...asked)).toBeGreaterThanOrEqual(LEAD_MAX_SEC - 6));
+    await new Promise((r) => setTimeout(r, 100));
+    p.destroy();
+    vi.unstubAllGlobals();
+    expect(Math.max(...asked)).toBeLessThan(LEAD_MAX_SEC + 12);
   });
 });

@@ -72,6 +72,8 @@ type Service struct {
 	mu      sync.Mutex
 	syncing map[string]bool
 	grants  map[string]*grant
+	// relayInflight holds the segment downloads viewers share (relay.go).
+	relayInflight map[string]*relayFetch
 }
 
 func New(db *sql.DB, cipher func() *secrets.Cipher, cacheDir string, log *slog.Logger) *Service {
@@ -83,7 +85,7 @@ func New(db *sql.DB, cipher func() *secrets.Cipher, cacheDir string, log *slog.L
 			IdleConnTimeout:       90 * time.Second,
 			MaxIdleConnsPerHost:   16,
 		}},
-		syncing: map[string]bool{}, grants: map[string]*grant{},
+		syncing: map[string]bool{}, grants: map[string]*grant{}, relayInflight: map[string]*relayFetch{},
 	}
 }
 
@@ -276,6 +278,7 @@ func (s *Service) Start(ctx context.Context) {
 				return
 			case <-tick.C:
 				s.pingGrants(ctx)
+				s.sweepRelay()
 			}
 		}
 	}()

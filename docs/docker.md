@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/main/install.sh | s
 | Host | Container | Notes |
 |------|-----------|--------|
 | `./config` | `/config` | SQLite only |
-| `./cache` | `/cache` | artwork + HLS |
+| `./cache` | `/cache` | artwork, HLS, and Jellyfin segments shared by viewers of the same title (up to 6 GB, cleared after 20 minutes) |
 | `./transcode` | `/transcode` | in-flight jobs |
 | media folder | `/media` | writable: ViewDock creates library folders here, and uploads and moves write here |
 
