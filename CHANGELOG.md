@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6
+
+- copy Jellyfin titles to ViewDock and play them locally
+
 ## 0.4.5
 
 - party members share one Jellyfin stream, and downloads rest three minutes ahead
