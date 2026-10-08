@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0
+
+- Public release under the PolyForm Noncommercial License 1.0.0.
+
 ## 0.5.5
 
 - preview frames when hovering over the seek bar
