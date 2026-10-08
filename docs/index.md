@@ -85,4 +85,4 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Skila1/ViewDock/mai
 - Source code and issues: [github.com/Skila1/ViewDock](https://github.com/Skila1/ViewDock)
 - Project website: [viewdock.dev](https://viewdock.dev)
 
-ViewDock is licensed under the GNU Affero General Public License v3.0 or later.
+ViewDock is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Copyright 2026 ViewDock. Commercial use is not permitted.

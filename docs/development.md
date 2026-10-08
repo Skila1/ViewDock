@@ -1,6 +1,6 @@
 # Development
 
-ViewDock is a Go server with a React web app, released under the GNU AGPL v3.0 or later. This page covers building it from source, the repository layout, tests and how to contribute.
+ViewDock is a Go server with a React web app, licensed under the PolyForm Noncommercial License 1.0.0. This page covers building it from source, the repository layout, tests and how to contribute.
 
 ## Requirements
 
