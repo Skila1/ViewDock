@@ -1,0 +1,303 @@
+package library
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+)
+
+func (s *Service) Contains(libraryID, absPath string) error {
+	// A copy of an external source's title lives in the copy folder, not
+	// in a library folder; it belongs to a library of that source.
+	if s.RemoteCopyDir != "" && ContainsPath(s.RemoteCopyDir, absPath) == nil {
+		var n int
+		if err := s.DB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM media_sources WHERE library_id = ?`, libraryID).Scan(&n); err == nil && n > 0 {
+			return nil
+		}
+	}
+	lib, err := s.Get(context.Background(), libraryID)
+	if err != nil {
+		return err
+	}
+	return ContainsPath(lib.RootPath, absPath)
+}
+
+func (s *Service) LocateFile(ctx context.Context, mediaFileID string) (*LocatedFile, error) {
+	var f LocatedFile
+	var movieID, extraKind sql.NullString
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT id, library_id, abs_path, rel_path, kind, COALESCE(movie_id, ''), size_bytes,
+		       duration_ms, container, video_codec, audio_codec, width, height, availability
+		FROM media_files WHERE id = ?
+	`, mediaFileID).Scan(
+		&f.ID, &f.LibraryID, &f.AbsPath, &f.RelPath, &f.ItemKind, &movieID,
+		&f.Size, &f.DurationMS, &f.Container, &f.VideoCodec, &f.AudioCodec,
+		&f.Width, &f.Height, &f.Availability,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if movieID.Valid {
+		f.MovieID = movieID.String
+	}
+	if f.ItemKind == "movie" {
+		f.ItemID = f.MovieID
+	} else if f.ItemKind == "episode" {
+		var epID string
+		_ = s.DB.QueryRowContext(ctx, `
+			SELECT episode_id FROM media_file_episodes WHERE media_file_id = ? LIMIT 1
+		`, mediaFileID).Scan(&epID)
+		f.ItemID = epID
+	}
+	_ = extraKind
+	f.AbsPath = filepath.Clean(f.AbsPath)
+	return &f, nil
+}
+
+func (s *Service) LocateItem(ctx context.Context, itemKind, itemID string) (*LocatedFile, error) {
+	var loc *LocatedFile
+	var err error
+	switch itemKind {
+	case "movie":
+		loc, err = s.locateMovieFile(ctx, itemID)
+	case "episode":
+		loc, err = s.locateEpisodeFile(ctx, itemID)
+	default:
+		return nil, ErrNotFound
+	}
+	if errors.Is(err, ErrNotFound) {
+		return s.locateRemote(ctx, itemKind, itemID)
+	}
+	return loc, err
+}
+
+// locateRemote places an item that only exists on an enabled external media
+// source. Without a copy on this server the result has no file path, and
+// playback streams it from the source; with one, it plays the copy.
+func (s *Service) locateRemote(ctx context.Context, itemKind, itemID string) (*LocatedFile, error) {
+	var libID, sourceID, remoteID string
+	var dur int64
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT ms.library_id, ri.duration_ms, ri.source_id, ri.remote_id FROM remote_items ri
+		JOIN media_sources ms ON ms.id = ri.source_id
+		WHERE ri.item_kind = ? AND ri.item_id = ? AND ms.enabled = 1 LIMIT 1
+	`, itemKind, itemID).Scan(&libID, &dur, &sourceID, &remoteID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	loc := &LocatedFile{LibraryID: libID, ItemKind: itemKind, ItemID: itemID, DurationMS: dur, Availability: "remote"}
+	if s.RemoteCopy != nil {
+		if path, container, size, ok := s.RemoteCopy(ctx, sourceID, remoteID); ok {
+			loc.AbsPath, loc.Container, loc.Size, loc.Availability, loc.Copy = path, container, size, "online", true
+		}
+	}
+	return loc, nil
+}
+
+func (s *Service) LocateAlternatives(ctx context.Context, itemKind, itemID, excludeID string) ([]*LocatedFile, error) {
+	var rows *sql.Rows
+	var err error
+	switch itemKind {
+	case "movie":
+		rows, err = s.DB.QueryContext(ctx, `SELECT id FROM media_files WHERE movie_id = ? AND id <> ? AND extra_kind = '' AND kind = 'movie' ORDER BY CASE availability WHEN 'online' THEN 0 ELSE 1 END, size_bytes DESC`, itemID, excludeID)
+	case "episode":
+		rows, err = s.DB.QueryContext(ctx, `SELECT mf.id FROM media_files mf JOIN media_file_episodes mfe ON mfe.media_file_id = mf.id WHERE mfe.episode_id = ? AND mf.id <> ? ORDER BY CASE mf.availability WHEN 'online' THEN 0 ELSE 1 END, mf.size_bytes DESC`, itemID, excludeID)
+	default:
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*LocatedFile
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		loc, err := s.LocateFile(ctx, id)
+		if err == nil {
+			out = append(out, loc)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) locateMovieFile(ctx context.Context, movieID string) (*LocatedFile, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT id FROM media_files
+		WHERE movie_id = ? AND extra_kind = '' AND kind = 'movie'
+		ORDER BY CASE availability WHEN 'online' THEN 0 ELSE 1 END, size_bytes DESC
+		LIMIT 1
+	`, movieID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.LocateFile(ctx, id)
+}
+
+func (s *Service) locateEpisodeFile(ctx context.Context, episodeID string) (*LocatedFile, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT mf.id FROM media_files mf
+		JOIN media_file_episodes mfe ON mfe.media_file_id = mf.id
+		WHERE mfe.episode_id = ?
+		ORDER BY CASE mf.availability WHEN 'online' THEN 0 ELSE 1 END, mf.size_bytes DESC
+		LIMIT 1
+	`, episodeID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.LocateFile(ctx, id)
+}
+
+func (s *Service) Open(ctx context.Context, mediaFileID string) (*os.File, error) {
+	loc, err := s.LocateFile(ctx, mediaFileID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Contains(loc.LibraryID, loc.AbsPath); err != nil {
+		return nil, err
+	}
+	return os.Open(loc.AbsPath)
+}
+
+func (s *Service) ItemTitle(ctx context.Context, itemKind, itemID string) (string, error) {
+	var title string
+	var err error
+	switch itemKind {
+	case "movie":
+		err = s.DB.QueryRowContext(ctx, `SELECT title FROM movies WHERE id = ?`, itemID).Scan(&title)
+	case "series":
+		err = s.DB.QueryRowContext(ctx, `SELECT title FROM series WHERE id = ?`, itemID).Scan(&title)
+	case "episode":
+		err = s.DB.QueryRowContext(ctx, `
+			SELECT COALESCE(NULLIF(e.title, ''), s.title || ' S' || printf('%02d', e.season) || 'E' || printf('%02d', e.number))
+			FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.id = ?
+		`, itemID).Scan(&title)
+	default:
+		return "", ErrNotFound
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return title, err
+}
+
+// ItemPoster returns the artwork URL shown for an item in lists: the movie or
+// series poster, and for an episode its thumbnail or else its series poster.
+func (s *Service) ItemPoster(ctx context.Context, itemKind, itemID string) *string {
+	switch itemKind {
+	case "movie", "series":
+		return s.artworkURL(ctx, "poster", itemKind, itemID)
+	case "episode":
+		if u := s.artworkURL(ctx, "thumb", "episode", itemID); u != nil {
+			return u
+		}
+		var seriesID string
+		if err := s.DB.QueryRowContext(ctx, `SELECT series_id FROM episodes WHERE id = ?`, itemID).Scan(&seriesID); err != nil {
+			return nil
+		}
+		return s.artworkURL(ctx, "poster", "series", seriesID)
+	}
+	return nil
+}
+
+func (s *Service) Exists(ctx context.Context, itemKind, itemID string) bool {
+	var n int
+	var err error
+	switch itemKind {
+	case "movie":
+		err = s.DB.QueryRowContext(ctx, `SELECT 1 FROM movies WHERE id = ?`, itemID).Scan(&n)
+	case "series":
+		err = s.DB.QueryRowContext(ctx, `SELECT 1 FROM series WHERE id = ?`, itemID).Scan(&n)
+	case "episode":
+		err = s.DB.QueryRowContext(ctx, `SELECT 1 FROM episodes WHERE id = ?`, itemID).Scan(&n)
+	default:
+		return false
+	}
+	return err == nil && n == 1
+}
+
+func (s *Service) LibraryIDForItem(ctx context.Context, itemKind, itemID string) (string, error) {
+	var id string
+	var err error
+	switch itemKind {
+	case "movie":
+		err = s.DB.QueryRowContext(ctx, `SELECT library_id FROM movies WHERE id = ?`, itemID).Scan(&id)
+	case "series":
+		err = s.DB.QueryRowContext(ctx, `SELECT library_id FROM series WHERE id = ?`, itemID).Scan(&id)
+	case "episode":
+		err = s.DB.QueryRowContext(ctx, `
+			SELECT s.library_id FROM episodes e JOIN series s ON s.id = e.series_id WHERE e.id = ?
+		`, itemID).Scan(&id)
+	default:
+		return "", ErrNotFound
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
+// DeleteUserOwned implements CollectionAdmin. Collections have no owner column
+// in 0010, so this is a no-op until a later schema can record ownership.
+func (s *Service) DeleteUserOwned(ctx context.Context, userID string) error {
+	return nil
+}
+
+// UpsertFTS inserts or replaces a media_fts row.
+func (s *Service) UpsertFTS(ctx context.Context, itemKind, itemID, title string, year int, extra string) error {
+	return UpsertFTS(ctx, s.DB, itemKind, itemID, title, year, extra)
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func UpsertFTS(ctx context.Context, db execer, itemKind, itemID, title string, year int, extra string) error {
+	_, _ = db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = ? AND item_id = ?`, itemKind, itemID)
+	y := ""
+	if year > 0 {
+		y = itoa(year)
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO media_fts(item_kind, item_id, title, year, extra) VALUES (?, ?, ?, ?, ?)
+	`, itemKind, itemID, title, y, extra)
+	return err
+}
+
+func DeleteFTS(ctx context.Context, db execer, itemKind, itemID string) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = ? AND item_id = ?`, itemKind, itemID)
+	return err
+}
+
+// DeleteLibraryFTS removes the search rows of every title in a library, for
+// use before the library itself is deleted.
+func DeleteLibraryFTS(ctx context.Context, db execer, libraryID string) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = 'movie' AND item_id IN (SELECT id FROM movies WHERE library_id = ?)`, libraryID); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `DELETE FROM media_fts WHERE item_kind = 'series' AND item_id IN (SELECT id FROM series WHERE library_id = ?)`, libraryID)
+	return err
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}

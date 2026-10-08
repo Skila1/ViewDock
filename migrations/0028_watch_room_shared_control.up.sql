@@ -1,0 +1,1 @@
+ALTER TABLE watch_rooms ADD COLUMN shared_control INTEGER NOT NULL DEFAULT 0;

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'" />
+    <title>ViewDock</title>
+    <link rel="stylesheet" href="pages.css" />
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <img src="icon.png" alt="" />
+        <h1>Cannot reach ViewDock</h1>
+      </div>
+      <p>The server at <code id="server"></code> did not answer. Check your connection, or that the server is running.</p>
+      <p id="detail"></p>
+      <div class="row">
+        <button id="change" type="button">Change server</button>
+        <button id="retry" class="primary" type="button">Try again</button>
+      </div>
+    </main>
+    <script src="offline.js"></script>
+  </body>
+</html>

@@ -1,0 +1,119 @@
+# Builds and publishes ghcr.io/skila1/viewdock from https://github.com/Skila1/ViewDock.
+# Runs on github.com only, so Actions-compatible runners on other forges never
+# build or push images (github.server_url is not github.com there).
+#
+# A push to main builds only when its latest commit message starts with
+# "DEPLOY:". Version tags and manual runs always build.
+#
+# A DEPLOY: push is also a release: unless the push already changed VERSION,
+# the patch version goes up, the "## Unreleased" changelog heading becomes the
+# new version, the Windows app's desktop/VERSION goes up when the push changed
+# desktop/, and a "Release X.Y.Z" commit is pushed to main before the image
+# is built from it. Admin, Updates reads VERSION from main but offers a version
+# only once the registry has its image tag; until then it shows the release as
+# being built. Pushes made with GITHUB_TOKEN
+# do not start workflows, so the release commit does not loop.
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: >-
+      github.server_url == 'https://github.com' &&
+      (github.event_name != 'push' ||
+       startsWith(github.ref, 'refs/tags/') ||
+       startsWith(github.event.head_commit.message, 'DEPLOY:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Release version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          BEFORE: ${{ github.event.before }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          AUTHOR_NAME: ${{ github.event.head_commit.author.name }}
+          AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
+        run: |
+          notes="$(printf '%s\n' "$MESSAGE" | head -n 1 | sed -E 's/^DEPLOY:[[:space:]]*//')"
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null && ! git diff --quiet "$BEFORE" HEAD -- VERSION; then
+            version="$(python3 scripts/release_version.py --notes "$notes")"
+          else
+            version="$(python3 scripts/release_version.py --bump --notes "$notes")"
+          fi
+          # The Windows app has its own version, raised when the push changed it.
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "Windows app $(python3 scripts/desktop_version.py --since "$BEFORE")"
+          fi
+          if git diff --quiet; then
+            echo "Releasing $version (VERSION and CHANGELOG.md already up to date)"
+            exit 0
+          fi
+          git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" commit -q -am "Release $version"
+          git push origin HEAD:main
+          echo "Released $version as $(git rev-parse --short=7 HEAD)"
+      - uses: docker/setup-buildx-action@v3
+        id: buildx
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        run: |
+          echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+          echo "SHA=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          echo "REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      # BuildKit cache mounts (Go modules, Go build cache, npm) live in the
+      # throwaway builder, so they are carried between runs through
+      # actions/cache. The key changes every run so the newest cache is saved;
+      # restore-keys picks up the most recent one.
+      - uses: actions/cache@v4
+        with:
+          path: buildkit-mounts
+          key: buildkit-mounts-${{ github.sha }}
+          restore-keys: buildkit-mounts-
+      - uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: buildkit-mounts
+          cache-map: |
+            {
+              "go-mod": "/go/pkg/mod",
+              "go-build": "/root/.cache/go-build",
+              "npm": "/root/.npm"
+            }
+      # One BuildKit graph: npm, Vite, Go warmup, and apt overlap when they
+      # do not depend on each other. Layer cache lives in the registry
+      # (:buildcache), which does not expire like the Actions cache.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:${{ env.SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.REVISION }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true

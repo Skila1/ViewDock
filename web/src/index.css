@@ -1,0 +1,478 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: var(--vd-bg);
+  --color-raised: var(--vd-surface-1);
+  --color-overlay: var(--vd-surface-2);
+  --color-line: var(--vd-border);
+  --color-ink: var(--vd-text);
+  --color-dim: var(--vd-text-2);
+  --color-accent: var(--vd-accent);
+  --color-accent-dim: var(--vd-accent-hover);
+  --color-warn: var(--vd-warning);
+  --color-danger: var(--vd-destructive);
+  --color-ok: var(--vd-success);
+  --font-sans: Outfit, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+  --vd-bg: #05070c;
+  --vd-surface-1: #0c121c;
+  --vd-surface-2: #121a28;
+  --vd-surface-3: #1a2434;
+  --vd-border: rgba(232, 238, 245, 0.08);
+  --vd-text: #eef3f8;
+  --vd-text-2: #9aa8b6;
+  --vd-text-3: #6b7a88;
+  --vd-accent: #0084fc;
+  --vd-accent-hover: #00a8ff;
+  --vd-destructive: #f07187;
+  --vd-warning: #e3b341;
+  --vd-success: #38bdf8;
+  --vd-ring: #0084fc;
+  --chip: #0d1a2e;
+  --chip-text: #7ec8ff;
+  --poster-ratio: 2 / 3;
+  --radius: 12px;
+  --nav-h: 56px;
+  --tab-h: 56px;
+  --gap: 10px;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  min-height: 100dvh;
+  background: var(--vd-bg);
+  color: var(--vd-text);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  background:
+    radial-gradient(900px 420px at 0% -10%, rgba(0, 132, 252, 0.12), transparent 55%),
+    var(--vd-bg);
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* No visible scrollbars anywhere; scrolling itself still works. */
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+input:not([type="range"]),
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Layered so utility classes such as h-9, px-0 or border-0 can override them. */
+@layer base {
+  input:not([type="range"]),
+  select,
+  textarea {
+    background: var(--vd-surface-1);
+    border: 1px solid var(--vd-border);
+    border-radius: 12px;
+    padding: 0.65rem 0.85rem;
+  }
+
+  /* Vertical padding on a fixed-height select clips its text. Selects centre
+     their label natively, so only horizontal padding applies. */
+  select {
+    height: 2.75rem;
+    padding-block: 0;
+    line-height: 1.25;
+  }
+
+  input:not([type="range"]):focus,
+  select:focus,
+  textarea:focus {
+    outline: 2px solid var(--vd-ring);
+    outline-offset: 1px;
+  }
+}
+
+/* Player sliders: no form padding. Thumb travel is the full track. */
+.player-range {
+  --player-range-pct: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  accent-color: var(--vd-accent);
+  cursor: pointer;
+  overflow: visible;
+}
+
+.player-range:focus {
+  outline: none;
+}
+
+.player-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--vd-accent) 0,
+    var(--vd-accent) var(--player-range-pct),
+    rgb(255 255 255 / 22%) var(--player-range-pct),
+    rgb(255 255 255 / 22%) 100%
+  );
+}
+
+.player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
+  box-shadow: none;
+}
+
+.player-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 22%);
+}
+
+.player-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--vd-accent);
+}
+
+.player-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
+}
+
+/* Player seek bar: thin at rest, thicker with a thumb on hover, with a buffered segment. */
+.player-seek {
+  --player-range-pct: 0%;
+  --player-buffer-pct: 0%;
+  /* Ranges stored in the buffer cache, as a gradient set by the player. */
+  --player-cache-bg: linear-gradient(transparent, transparent);
+  --seek-h: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.player-seek:focus {
+  outline: none;
+}
+
+.player-seek-wrap:hover .player-seek,
+.player-seek:focus-visible {
+  --seek-h: 6px;
+}
+
+.player-seek::-webkit-slider-runnable-track {
+  height: var(--seek-h);
+  border-radius: 999px;
+  /* Top to bottom: progress, the player's own buffer, the cache, the track. */
+  background:
+    linear-gradient(to right, var(--vd-accent) 0, var(--vd-accent) var(--player-range-pct), transparent var(--player-range-pct)),
+    linear-gradient(to right, rgb(255 255 255 / 42%) 0, rgb(255 255 255 / 42%) var(--player-buffer-pct), transparent var(--player-buffer-pct)),
+    var(--player-cache-bg),
+    rgb(255 255 255 / 20%);
+  transition: height 120ms ease-out;
+}
+
+.player-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: calc((var(--seek-h) - 15px) / 2);
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
+  box-shadow: 0 0 0 4px rgb(0 0 0 / 25%);
+  transform: scale(0);
+  transition: transform 120ms ease-out;
+}
+
+.player-seek-wrap:hover .player-seek::-webkit-slider-thumb,
+.player-seek:focus-visible::-webkit-slider-thumb,
+.player-seek:active::-webkit-slider-thumb {
+  transform: scale(1);
+}
+
+.player-seek::-moz-range-track {
+  height: var(--seek-h);
+  border-radius: 999px;
+  background:
+    linear-gradient(to right, rgb(255 255 255 / 42%) 0, rgb(255 255 255 / 42%) var(--player-buffer-pct), transparent var(--player-buffer-pct)),
+    var(--player-cache-bg),
+    rgb(255 255 255 / 20%);
+}
+
+.player-seek::-moz-range-progress {
+  height: var(--seek-h);
+  border-radius: 999px;
+  background: var(--vd-accent);
+}
+
+.player-seek::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vd-accent);
+  transform: scale(0);
+  transition: transform 120ms ease-out;
+}
+
+.player-seek-wrap:hover .player-seek::-moz-range-thumb,
+.player-seek:focus-visible::-moz-range-thumb {
+  transform: scale(1);
+}
+
+@keyframes vd-menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vd-menu-forward {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vd-menu-back {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vd-nudge {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+}
+
+.vd-menu-pop {
+  animation: vd-menu-pop 170ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+.vd-menu-forward {
+  animation: vd-menu-forward 180ms ease-out;
+}
+
+.vd-menu-back {
+  animation: vd-menu-back 180ms ease-out;
+}
+
+.vd-nudge {
+  animation: vd-nudge 650ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vd-menu-pop,
+  .vd-menu-forward,
+  .vd-menu-back,
+  .vd-nudge {
+    animation-duration: 1ms;
+  }
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: var(--gap);
+}
+
+@media (min-width: 640px) {
+  .poster-grid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  .poster-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+}
+
+.poster-tile {
+  aspect-ratio: var(--poster-ratio);
+}
+
+.continue-slip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrim {
+  background: linear-gradient(to top, rgb(0 0 0 / 78%), rgb(0 0 0 / 8%) 55%, transparent);
+}
+
+.btn-green {
+  background: var(--vd-accent);
+  color: #fff;
+  font-weight: 650;
+}
+
+.btn-green:hover {
+  background: var(--vd-accent-hover);
+}
+
+.tap {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.h-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.player-page-fs {
+  position: fixed !important;
+  inset: 0;
+  z-index: 80;
+  width: 100vw;
+  height: 100dvh;
+}
+
+@media (min-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+/* Home page rails: horizontal scroll without a visible scrollbar, snapping to cards. */
+.rail-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.rail-wide {
+  width: min(78vw, 300px);
+}
+
+.rail-poster {
+  width: min(38vw, 150px);
+}
+
+@media (min-width: 1280px) {
+  .rail-wide {
+    width: 340px;
+  }
+
+  .rail-poster {
+    width: 172px;
+  }
+}
+
+.home-card {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 120ms;
+}
+
+a:hover > .home-card,
+a.home-card:hover,
+a:focus-visible > .home-card,
+a.home-card:focus-visible {
+  outline-color: var(--color-accent);
+}

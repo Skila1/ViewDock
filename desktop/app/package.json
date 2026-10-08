@@ -1,0 +1,9 @@
+{
+  "name": "viewdock-desktop",
+  "productName": "ViewDock",
+  "version": "1.0.0",
+  "description": "ViewDock for Windows",
+  "main": "main.js",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE"
+}

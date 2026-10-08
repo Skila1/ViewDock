@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS guest_sessions;
+DROP TABLE IF EXISTS shares;

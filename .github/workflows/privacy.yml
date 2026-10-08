@@ -1,0 +1,29 @@
+# Rejects internal documents (agent context, working notes, plans, progress
+# reports, handovers), private details and secrets in tracked files on every
+# push and pull request, not only documentation changes.
+name: privacy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Scanner tests
+        run: python -m unittest discover -s scripts -p "test_*.py"
+      - name: Privacy check
+        run: python scripts/docs_privacy_check.py

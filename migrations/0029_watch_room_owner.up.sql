@@ -1,0 +1,1 @@
+ALTER TABLE watch_rooms ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';

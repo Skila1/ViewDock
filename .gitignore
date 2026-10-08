@@ -1,0 +1,33 @@
+# Root data dirs only. Bare "config/" also matches internal/config and
+# those packages never get pushed, which breaks the GitHub image build.
+/config/
+/cache/
+/transcode/
+/media/
+*.db
+*.db-wal
+*.db-shm
+.env
+web/node_modules/
+web/dist/assets/
+bin/
+/site/
+.idea/
+.vscode/
+*.exe
+*.test
+*.out
+# Private agent context and working notes. Keep them outside this public
+# repository; scripts/docs_privacy_check.py rejects them in CI.
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.claude/
+VIEWDOCK_*.md
+/docs/integration/
+*overhaul*.md
+*handover*.md
+*handoff*.md
+__pycache__/
+desktop/node_modules/

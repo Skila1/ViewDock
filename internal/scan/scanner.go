@@ -1,0 +1,727 @@
+package scan
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/viewdock/viewdock/internal/ffmpeg"
+	"github.com/viewdock/viewdock/internal/library"
+	"strconv"
+
+	"github.com/viewdock/viewdock/internal/media"
+)
+
+// SizeStable is how long a file's size must hold still before probe.
+// Tests may set this to 0.
+var SizeStable = 30 * time.Second
+
+// PollInterval is used when fsnotify is unavailable or the path looks remote.
+var PollInterval = 120 * time.Second
+
+const catalogueBatch = 24
+
+type Scanner struct {
+	DB     *sql.DB
+	Libs   *library.Service
+	Prober ffmpeg.Prober
+	// OnIdle runs after a library scan finishes (success or failure).
+	OnIdle func()
+
+	mu   sync.Mutex
+	runs map[string]bool
+	// cataloguing marks libraries whose files are being walked and written
+	// to the catalogue; probing afterwards does not count.
+	cataloguing map[string]bool
+}
+
+// New constructs a Scanner. libs may be nil only in parser-only tests.
+func New(db *sql.DB, libs *library.Service, prober ffmpeg.Prober) *Scanner {
+	return &Scanner{DB: db, Libs: libs, Prober: prober, runs: map[string]bool{}, cataloguing: map[string]bool{}}
+}
+
+var _ library.ScanStart = (*Scanner)(nil)
+
+// ErrMoveRunning is returned instead of scanning a library that a move is
+// changing, so a scan never catalogues a half-moved title.
+var ErrMoveRunning = errors.New("titles are being moved in or out of this library; scan again when the move finishes")
+
+// ErrWrongKind rejects a file the library's content type does not accept:
+// an episode in a Movies library, or a movie in a TV Shows library.
+var ErrWrongKind = errors.New("this file does not match the library type")
+
+// Scanning reports whether a scan is cataloguing libraryID right now. A
+// move waits for that; the slower probing that follows does not block it.
+func (s *Scanner) Scanning(libraryID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cataloguing[libraryID]
+}
+
+func (s *Scanner) setCataloguing(libraryID string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cataloguing == nil {
+		s.cataloguing = map[string]bool{}
+	}
+	if on {
+		s.cataloguing[libraryID] = true
+	} else {
+		delete(s.cataloguing, libraryID)
+	}
+}
+
+func (s *Scanner) StartScan(ctx context.Context, libraryID string) (string, error) {
+	if s.Libs != nil {
+		if _, err := s.Libs.Get(ctx, libraryID); err != nil {
+			return "", err
+		}
+		if s.Libs.MoveBusy(libraryID) {
+			return "", ErrMoveRunning
+		}
+	} else if err := s.libraryExists(ctx, libraryID); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	if s.runs[libraryID] {
+		s.mu.Unlock()
+		var existing string
+		_ = s.DB.QueryRowContext(ctx, `
+			SELECT id FROM scan_runs WHERE library_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1
+		`, libraryID).Scan(&existing)
+		if existing != "" {
+			return existing, nil
+		}
+	}
+	s.runs[libraryID] = true
+	s.mu.Unlock()
+
+	id := uuid.NewString()
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO scan_runs(id, library_id, status, started_at, files_seen, files_added, error)
+		VALUES (?, ?, 'running', ?, 0, 0, '')
+	`, id, libraryID, now)
+	if err != nil {
+		s.mu.Lock()
+		delete(s.runs, libraryID)
+		s.mu.Unlock()
+		return "", err
+	}
+	go s.runScan(libraryID, id)
+	return id, nil
+}
+
+func (s *Scanner) libraryExists(ctx context.Context, id string) error {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM libraries WHERE id = ?`, id).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return library.ErrNotFound
+	}
+	return err
+}
+
+func (s *Scanner) runScan(libraryID, runID string) {
+	ctx := context.Background()
+	defer func() {
+		s.mu.Lock()
+		delete(s.runs, libraryID)
+		s.mu.Unlock()
+	}()
+	seen, added, err := s.scanLibrary(ctx, libraryID)
+	status, errText := "ok", ""
+	if err != nil {
+		status, errText = "failed", err.Error()
+	}
+	_, _ = s.DB.ExecContext(ctx, `
+		UPDATE scan_runs SET status = ?, finished_at = ?, files_seen = ?, files_added = ?, error = ?
+		WHERE id = ?
+	`, status, time.Now().UTC().Format(time.RFC3339), seen, added, errText, runID)
+	if s.OnIdle != nil {
+		s.OnIdle()
+	}
+}
+
+func (s *Scanner) scanLibrary(ctx context.Context, libraryID string) (seen, added int, err error) {
+	root, contentType, err := s.libraryInfo(ctx, libraryID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := os.Stat(root); err != nil {
+		s.markLibraryOffline(ctx, libraryID)
+		return 0, 0, err
+	}
+	nested := s.nestedRoots(ctx, libraryID, root)
+	s.setCataloguing(libraryID, true)
+	cataloguing := true
+	defer func() {
+		if cataloguing {
+			s.setCataloguing(libraryID, false)
+		}
+	}()
+
+	var files []foundFile
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel != "." && ShouldSkip(rel) {
+				return filepath.SkipDir
+			}
+			if strings.EqualFold(d.Name(), ".viewdock-staging") {
+				return filepath.SkipDir
+			}
+			if nested[filepath.Clean(path)] {
+				return filepath.SkipDir // another library's folder; that library owns it
+			}
+			return nil
+		}
+		if ShouldSkip(rel) || !IsVideo(rel) {
+			return nil
+		}
+		if err := library.ContainsPath(root, path); err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		files = append(files, foundFile{abs: path, rel: rel, info: info})
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	seenRel := map[string]bool{}
+	rejected := 0
+	for i := 0; i < len(files); i += catalogueBatch {
+		end := i + catalogueBatch
+		if end > len(files) {
+			end = len(files)
+		}
+		n, r, err := s.catalogueBatch(ctx, libraryID, root, contentType, files[i:end])
+		added += n
+		rejected += r
+		if err != nil {
+			return seen, added, err
+		}
+		for _, f := range files[i:end] {
+			seenRel[f.rel] = true
+		}
+	}
+	seen = len(files)
+	if rejected > 0 {
+		slog.Warn("files skipped because they do not match the library type", "category", "scan",
+			"library", libraryID, "content_type", contentType, "files", rejected,
+			"hint", "move them to a Mixed library or one of the matching type")
+	}
+	s.markUnseen(ctx, libraryID, root, seenRel)
+	s.setCataloguing(libraryID, false)
+	cataloguing = false
+
+	for _, f := range files {
+		s.probeWhenStable(ctx, libraryID, f.abs, f.rel)
+	}
+	return seen, added, nil
+}
+
+type foundFile struct {
+	abs, rel string
+	info     os.FileInfo
+}
+
+func (s *Scanner) catalogueBatch(ctx context.Context, libraryID, root, contentType string, files []foundFile) (int, int, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	added, rejected := 0, 0
+	for _, f := range files {
+		n, err := s.upsertFile(ctx, tx, libraryID, root, contentType, f.abs, f.rel, f.info)
+		if errors.Is(err, ErrWrongKind) {
+			rejected++
+			continue
+		}
+		if err != nil {
+			return added, rejected, err
+		}
+		added += n
+	}
+	return added, rejected, tx.Commit()
+}
+
+// kindFits reports whether a Movies, TV Shows or Mixed library accepts a
+// file of kind. Extras belong to movies, but a TV library keeps them as
+// plain extras rather than inventing movies for them.
+func kindFits(contentType, kind string) bool {
+	switch contentType {
+	case "movies":
+		return kind != KindEpisode
+	case "tv":
+		return kind == KindEpisode || kind == KindExtra
+	}
+	return true
+}
+
+func (s *Scanner) upsertFile(ctx context.Context, tx *sql.Tx, libraryID, root, contentType, abs, rel string, info os.FileInfo) (int, error) {
+	parsed := Parse(rel)
+	now := time.Now().UTC().Format(time.RFC3339)
+	mtime := info.ModTime().UTC().Format(time.RFC3339)
+	kind := parsed.Kind
+	if kind == KindUnknown && !parsed.Skip {
+		kind = KindMovie
+		if parsed.Confidence == "" {
+			parsed.Confidence = ConfLow
+		}
+	}
+	if parsed.Skip {
+		return 0, nil
+	}
+
+	var existing, existingMovieID string
+	_ = tx.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&existing)
+	if existing != "" {
+		_ = tx.QueryRowContext(ctx, `SELECT COALESCE(movie_id, '') FROM media_files WHERE id = ?`, existing).Scan(&existingMovieID)
+	}
+	// Files already catalogued keep working whatever the library type; new
+	// files must match it.
+	if existing == "" && !kindFits(contentType, kind) {
+		return 0, ErrWrongKind
+	}
+	added := 0
+	fileID := existing
+	if fileID == "" {
+		fileID = uuid.NewString()
+		added = 1
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO media_files(id, library_id, rel_path, abs_path, size_bytes, inode, mtime, kind,
+				extra_kind, probe_status, probe_error, probed_at, availability, duration_ms, container,
+				video_codec, audio_codec, width, height, created_at, updated_at, identity_hint, parse_confidence)
+			VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, 'pending', '', '', 'online', 0, '', '', '', 0, 0, ?, ?, ?, ?)
+		`, fileID, libraryID, rel, abs, info.Size(), mtime, kind, parsed.ExtraKind, now, now, parsed.Hint, parsed.Confidence)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE media_files SET abs_path = ?, size_bytes = ?, mtime = ?, kind = ?, extra_kind = ?,
+				identity_hint = ?, parse_confidence = ?, availability = 'online', updated_at = ?
+			WHERE id = ?
+		`, abs, info.Size(), mtime, kind, parsed.ExtraKind, parsed.Hint, parsed.Confidence, now, fileID)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	switch kind {
+	case KindMovie:
+		movieID, err := s.ensureMovie(ctx, tx, libraryID, parsed, now, existingMovieID)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE media_files SET movie_id = ? WHERE id = ?`, movieID, fileID); err != nil {
+			return 0, err
+		}
+	case KindEpisode:
+		if err := s.ensureEpisodes(ctx, tx, libraryID, fileID, parsed, now); err != nil {
+			return 0, err
+		}
+	case KindExtra:
+		if contentType == "tv" {
+			break
+		}
+		if movieID, err := s.guessExtraMovie(ctx, tx, libraryID, rel, parsed, now); err == nil && movieID != "" {
+			_, _ = tx.ExecContext(ctx, `UPDATE media_files SET movie_id = ? WHERE id = ?`, movieID, fileID)
+		}
+	}
+	s.enqueueMatch(ctx, tx, kind, libraryID, parsed)
+	return added, nil
+}
+
+func (s *Scanner) ensureMovie(ctx context.Context, tx *sql.Tx, libraryID string, p ParseResult, now, existingID string) (string, error) {
+	if existingID != "" {
+		s.refreshFilenameMovie(ctx, tx, existingID, p, now)
+		return existingID, nil
+	}
+	var id string
+	q := `SELECT id FROM movies WHERE library_id = ? AND lower(title) = lower(?)`
+	args := []any{libraryID, p.Title}
+	if p.Year > 0 {
+		q += ` AND year = ?`
+		args = append(args, p.Year)
+	} else {
+		q += ` AND year IS NULL`
+	}
+	err := tx.QueryRowContext(ctx, q, args...).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	id = uuid.NewString()
+	review := boolInt(p.NeedsReview)
+	var year any
+	if p.Year > 0 {
+		year = p.Year
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO movies(id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, hint_mismatch, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', 'filename', 1, ?, 0, ?, ?)
+	`, id, libraryID, p.Title, year, sortTitle(p.Title), review, now, now)
+	if err != nil {
+		return "", err
+	}
+	_ = library.UpsertFTS(ctx, tx, "movie", id, p.Title, p.Year, "")
+	return id, nil
+}
+
+func (s *Scanner) refreshFilenameMovie(ctx context.Context, tx *sql.Tx, id string, p ParseResult, now string) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE movies SET title = ?, year = ?, sort_title = ?, updated_at = ?
+		WHERE id = ? AND metadata_source = 'filename' AND unmatched = 1
+	`, p.Title, nullYear(p.Year), sortTitle(p.Title), now, id)
+	if err != nil {
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		_ = library.UpsertFTS(ctx, tx, "movie", id, p.Title, p.Year, "")
+	}
+}
+
+func (s *Scanner) ensureEpisodes(ctx context.Context, tx *sql.Tx, libraryID, fileID string, p ParseResult, now string) error {
+	var seriesID string
+	q := `SELECT id FROM series WHERE library_id = ? AND lower(title) = lower(?)`
+	args := []any{libraryID, p.Title}
+	if p.Year > 0 {
+		q += ` AND year = ?`
+		args = append(args, p.Year)
+	}
+	err := tx.QueryRowContext(ctx, q, args...).Scan(&seriesID)
+	if errors.Is(err, sql.ErrNoRows) {
+		seriesID = uuid.NewString()
+		var year any
+		if p.Year > 0 {
+			year = p.Year
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO series(id, library_id, title, year, sort_title, overview, metadata_source, unmatched, needs_review, hint_mismatch, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, '', 'filename', 1, ?, 0, ?, ?)
+		`, seriesID, libraryID, p.Title, year, sortTitle(p.Title), boolInt(p.NeedsReview), now, now)
+		if err != nil {
+			return err
+		}
+		_ = library.UpsertFTS(ctx, tx, "series", seriesID, p.Title, p.Year, "")
+	} else if err != nil {
+		return err
+	}
+
+	season := p.Season
+	var seasonID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM seasons WHERE series_id = ? AND number = ?`, seriesID, season).Scan(&seasonID)
+	if errors.Is(err, sql.ErrNoRows) {
+		seasonID = uuid.NewString()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO seasons(id, series_id, number, title) VALUES (?, ?, ?, '')`, seasonID, seriesID, season); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+
+	eps := p.Episodes
+	if len(eps) == 0 {
+		eps = []int{0}
+	}
+	for _, n := range eps {
+		var epID string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM episodes WHERE series_id = ? AND season = ? AND number = ?`, seriesID, season, n).Scan(&epID)
+		if errors.Is(err, sql.ErrNoRows) {
+			epID = uuid.NewString()
+			title := "Episode " + itoa(n)
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO episodes(id, series_id, season_id, season, number, title, overview, intro_source)
+				VALUES (?, ?, ?, ?, ?, ?, '', '')
+			`, epID, seriesID, seasonID, season, n, title); err != nil {
+				return err
+			}
+			_ = library.UpsertFTS(ctx, tx, "episode", epID, p.Title+" "+title, p.Year, "")
+		} else if err != nil {
+			return err
+		}
+		_, _ = tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO media_file_episodes(media_file_id, episode_id) VALUES (?, ?)
+		`, fileID, epID)
+	}
+	return nil
+}
+
+func (s *Scanner) guessExtraMovie(ctx context.Context, tx *sql.Tx, libraryID, rel string, p ParseResult, now string) (string, error) {
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	for dir != "" && dir != "." {
+		base := filepath.Base(dir)
+		if extraFolders[strings.ToLower(base)] != "" {
+			dir = filepath.ToSlash(filepath.Dir(dir))
+			continue
+		}
+		parent := Parse(base + ".mkv")
+		if parent.Title != "" && parent.Year > 0 {
+			return s.ensureMovie(ctx, tx, libraryID, parent, now, "")
+		}
+		break
+	}
+	if p.Title != "" && p.Year > 0 {
+		return s.ensureMovie(ctx, tx, libraryID, ParseResult{Title: p.Title, Year: p.Year, Confidence: p.Confidence}, now, "")
+	}
+	return "", nil
+}
+
+func (s *Scanner) enqueueMatch(ctx context.Context, tx *sql.Tx, kind, libraryID string, p ParseResult) {
+	if p.ExtraKind != "" || kind == KindExtra {
+		return
+	}
+	itemKind, itemID := "", ""
+	switch kind {
+	case KindMovie:
+		var id string
+		q := `SELECT id FROM movies WHERE library_id = ? AND lower(title) = lower(?)`
+		args := []any{libraryID, p.Title}
+		if p.Year > 0 {
+			q += ` AND year = ?`
+			args = append(args, p.Year)
+		}
+		if tx.QueryRowContext(ctx, q, args...).Scan(&id) == nil {
+			itemKind, itemID = "movie", id
+		}
+	case KindEpisode:
+		var id string
+		q := `SELECT id FROM series WHERE library_id = ? AND lower(title) = lower(?)`
+		args := []any{libraryID, p.Title}
+		if p.Year > 0 {
+			q += ` AND year = ?`
+			args = append(args, p.Year)
+		}
+		if tx.QueryRowContext(ctx, q, args...).Scan(&id) == nil {
+			itemKind, itemID = "series", id
+		}
+	}
+	if itemKind == "" || itemID == "" {
+		return
+	}
+	_, _ = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO match_queue(id, item_kind, item_id, query, year, attempts, last_error, created_at)
+		VALUES (?, ?, ?, ?, ?, 0, '', ?)
+	`, uuid.NewString(), itemKind, itemID, p.Title, nullYear(p.Year), time.Now().UTC().Format(time.RFC3339))
+}
+
+func (s *Scanner) probeWhenStable(ctx context.Context, libraryID, abs, rel string) {
+	if s.Prober == nil {
+		return
+	}
+	waitSizeStable(abs)
+	var fileID string
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&fileID)
+	if err != nil {
+		return
+	}
+	_ = media.PersistProbe(ctx, s.DB, s.Prober, fileID)
+}
+
+func waitSizeStable(path string) {
+	if SizeStable <= 0 {
+		return
+	}
+	poll := SizeStable / 2
+	if poll < time.Second {
+		poll = time.Second
+	}
+	var last int64 = -1
+	stableSince := time.Time{}
+	deadline := time.Now().Add(SizeStable * 20)
+	for time.Now().Before(deadline) {
+		st, err := os.Stat(path)
+		if err != nil {
+			time.Sleep(poll)
+			continue
+		}
+		sz := st.Size()
+		if sz == last {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= SizeStable {
+				return
+			}
+		} else {
+			last = sz
+			stableSince = time.Time{}
+		}
+		time.Sleep(poll)
+	}
+}
+
+func (s *Scanner) markUnseen(ctx context.Context, libraryID, root string, seen map[string]bool) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, rel_path, abs_path FROM media_files WHERE library_id = ?`, libraryID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	type row struct{ id, rel, abs string }
+	var all []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.rel, &r.abs); err == nil {
+			all = append(all, r)
+		}
+	}
+	for _, r := range all {
+		if seen[r.rel] {
+			continue
+		}
+		_, err := os.Stat(r.abs)
+		avail := media.ClassifyAvailability(r.abs, root, err)
+		_, _ = s.DB.ExecContext(ctx, `UPDATE media_files SET availability = ?, updated_at = ? WHERE id = ?`,
+			avail, time.Now().UTC().Format(time.RFC3339), r.id)
+	}
+}
+
+func (s *Scanner) markLibraryOffline(ctx context.Context, libraryID string) {
+	_, _ = s.DB.ExecContext(ctx, `UPDATE media_files SET availability = 'offline', updated_at = ? WHERE library_id = ?`,
+		time.Now().UTC().Format(time.RFC3339), libraryID)
+}
+
+func (s *Scanner) rootOf(ctx context.Context, libraryID string) (string, error) {
+	if s.Libs != nil {
+		lib, err := s.Libs.Get(ctx, libraryID)
+		if err != nil {
+			return "", err
+		}
+		return lib.RootPath, nil
+	}
+	var root string
+	err := s.DB.QueryRowContext(ctx, `SELECT root_path FROM libraries WHERE id = ?`, libraryID).Scan(&root)
+	return root, err
+}
+
+// libraryInfo returns a library's folder and content type.
+func (s *Scanner) libraryInfo(ctx context.Context, libraryID string) (string, string, error) {
+	if s.Libs != nil {
+		lib, err := s.Libs.Get(ctx, libraryID)
+		if err != nil {
+			return "", "", err
+		}
+		return lib.RootPath, lib.ContentType, nil
+	}
+	var root, ct string
+	err := s.DB.QueryRowContext(ctx, `SELECT root_path, content_type FROM libraries WHERE id = ?`, libraryID).Scan(&root, &ct)
+	return root, ct, err
+}
+
+// nestedRoots lists other libraries' folders inside root. A scan skips
+// them so one file is never catalogued by two libraries, which also lets a
+// new library live inside an older, broader one while titles move over.
+func (s *Scanner) nestedRoots(ctx context.Context, libraryID, root string) map[string]bool {
+	out := map[string]bool{}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, root_path FROM libraries WHERE id <> ?`, libraryID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	clean := filepath.Clean(root)
+	for rows.Next() {
+		var id, other string
+		if rows.Scan(&id, &other) != nil || other == "" {
+			continue
+		}
+		other = filepath.Clean(other)
+		if rel, err := filepath.Rel(clean, other); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+			out[other] = true
+		}
+	}
+	return out
+}
+
+// IngestFile catalogues a single new file (upload / watch) then probes it.
+func (s *Scanner) IngestFile(ctx context.Context, libraryID, absPath string) error {
+	root, contentType, err := s.libraryInfo(ctx, libraryID)
+	if err != nil {
+		return err
+	}
+	if err := library.ContainsPath(root, absPath); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, absPath)
+	if err != nil {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	if ShouldSkip(rel) || !IsVideo(rel) {
+		return nil
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := s.upsertFile(ctx, tx, libraryID, root, contentType, absPath, rel, info); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if s.Prober != nil {
+		var fileID string
+		if err := s.DB.QueryRowContext(ctx, `SELECT id FROM media_files WHERE library_id = ? AND rel_path = ?`, libraryID, rel).Scan(&fileID); err == nil {
+			_ = media.PersistProbe(ctx, s.DB, s.Prober, fileID)
+		}
+	}
+	if s.OnIdle != nil {
+		s.OnIdle()
+	}
+	return nil
+}
+
+func sortTitle(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, p := range []string{"the ", "a ", "an "} {
+		if strings.HasPrefix(s, p) {
+			return strings.TrimSpace(s[len(p):]) + ", " + strings.TrimSpace(p)
+		}
+	}
+	return s
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+func nullYear(y int) any {
+	if y <= 0 {
+		return nil
+	}
+	return y
+}

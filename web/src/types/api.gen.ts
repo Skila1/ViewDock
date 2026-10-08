@@ -1,0 +1,936 @@
+/** Hand-written types matching openapi/openapi.yaml plus inferred request/response bodies. */
+
+export type ContentType = "movies" | "tv" | "mixed";
+export type ItemKind = "movie" | "episode";
+export type Delivery = "direct" | "hls";
+export type HlsAttach = "native" | "mse";
+export type PrincipalKind = "user" | "guest_share";
+
+export interface ErrorBody {
+  code: string;
+  message: string;
+}
+
+export interface SystemInfo {
+  name: string;
+  version: string;
+  api_version: string;
+  tmdb_configured: boolean;
+  setup_needed: boolean;
+  media_dir?: string;
+  discord_login?: boolean;
+  discord_configured?: boolean;
+  local_login_disabled?: boolean;
+  public_url?: string;
+  features?: { watch_together?: boolean; downloads?: boolean };
+}
+
+export type ConfigKind = "string" | "url" | "int" | "bool" | "secret" | "enum";
+
+export interface ConfigSetting {
+  key: string;
+  label: string;
+  help?: string;
+  category: string;
+  kind: ConfigKind;
+  default: string;
+  min?: number;
+  max?: number;
+  options?: string[];
+  restart: boolean;
+  value?: string;
+  set: boolean;
+  source: "database" | "environment" | "default";
+}
+
+export interface ConfigState {
+  version: number;
+  settings: ConfigSetting[];
+  master_key_id?: string;
+}
+
+export interface ConfigHistoryEntry {
+  version: number;
+  key: string;
+  value?: string;
+  secret: boolean;
+  reset: boolean;
+  actor_id: string;
+  note?: string;
+  changed_at: string;
+}
+
+export interface CsrfResponse {
+  token: string;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface Me {
+  id: string;
+  username: string;
+  display_name: string;
+  is_admin: boolean;
+  is_superadmin?: boolean;
+  kind: PrincipalKind;
+  pin_locked: boolean;
+  can_download?: boolean;
+  has_password?: boolean;
+  has_pin?: boolean;
+  permissions?: string[];
+  roles?: string[];
+}
+
+export interface SessionRow {
+  id: string;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+export interface IdentityRow {
+  provider: string;
+  provider_user_id: string;
+  provider_username: string;
+  avatar_hash?: string;
+  linked_at: string;
+}
+
+export interface RoleRow {
+  id: string;
+  name: string;
+  description?: string;
+  is_system?: boolean;
+  member_count?: number;
+  permissions?: string[];
+}
+
+export interface PermissionRow {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface SiteSettings {
+  public_url: string;
+  tmdb_configured: boolean;
+  tmdb_api_key_set: boolean;
+}
+
+export interface DiscordSettings {
+  login_enabled: boolean;
+  client_id: string;
+  client_secret_set: boolean;
+  registration_enabled: boolean;
+  admin_discord_ids: string;
+  superadmin_discord_id?: string;
+  redirect_uri: string;
+  registration_guild_enabled?: boolean;
+  registration_guild_id?: string;
+  registration_role_enabled?: boolean;
+  registration_role_id?: string;
+}
+
+export interface UpdateChangelogEntry {
+  version: string;
+  notes: string[];
+}
+
+export interface UpdateProgress {
+  percent: number;
+  stage: string;
+  detail: string;
+  log?: string;
+}
+
+export interface UpdateStatus {
+  auto_enabled: boolean;
+  helper_ok: boolean;
+  socket_ok: boolean;
+  can_apply: boolean;
+  available: boolean;
+  version: string;
+  latest_version: string;
+  /** A release announced in the repository whose image is still being built. */
+  pending_version?: string;
+  image: string;
+  current_digest?: string;
+  latest_digest?: string;
+  changelog?: UpdateChangelogEntry[];
+  progress?: UpdateProgress | null;
+  last_check_at?: string | null;
+  last_applied_at?: string | null;
+  last_status?: string;
+  last_error?: string;
+  last_applied_by?: string;
+  checking?: boolean;
+  updating?: boolean;
+  apply_reason?: string;
+}
+
+export interface LibraryGrantUser {
+  user_id: string;
+  username: string;
+  display_name: string;
+  can_download: boolean;
+}
+
+export interface LibraryGrantRole {
+  role_id: string;
+  name: string;
+  can_download: boolean;
+}
+
+export interface UserGrant {
+  library_id: string;
+  name: string;
+  can_download: boolean;
+}
+
+export interface Preferences {
+  audio_lang: string;
+  subtitle_lang: string;
+  subtitle_mode: string;
+  autoplay: boolean;
+  /** Player defaults for this profile. */
+  playback_rate?: number;
+  quality?: string;
+  /** Seconds the Up Next countdown runs before the next episode; 0 waits for a click. */
+  upnext_seconds?: number;
+  /** "" (local first), "local" or "remote" (Jellyfin first). */
+  source_pref?: string;
+  /** Home rows in order; empty means the default set. */
+  home_rows?: string[];
+}
+
+export interface ListEntry {
+  kind: "movie" | "series";
+  id: string;
+  added_at: string;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  items: ListEntry[];
+}
+
+export interface HistoryEntry {
+  id: string;
+  item_kind: "movie" | "episode";
+  item_id: string;
+  title: string;
+  series_id?: string;
+  season?: number;
+  number?: number;
+  watched_at: string;
+  position_ms: number;
+  duration_ms: number;
+  completed: boolean;
+}
+
+export interface SetupStatus {
+  needed: boolean;
+  step: string;
+  media_dir?: string;
+  bootstrap_required?: boolean;
+}
+
+export interface SetupAdminRequest {
+  username: string;
+  password: string;
+  display_name?: string;
+  bootstrap_token?: string;
+}
+
+export interface SetupLibraryRequest {
+  name: string;
+  /** Empty lets ViewDock create and manage <media folder>/<name>. */
+  path: string;
+  content_type: ContentType;
+}
+
+export interface SetupTmdbRequest {
+  api_key?: string;
+  skip: boolean;
+}
+
+export interface SetupScanRequest {
+  library_id: string;
+}
+
+export interface SetupScanResponse {
+  scan_run_id: string;
+}
+
+export interface DetectResult {
+  ffmpeg: string;
+  ffprobe: string;
+  version: string;
+  encoders: string[];
+  filters: string[];
+  hwaccel: string[];
+  zscale: boolean;
+}
+
+export interface Library {
+  id: string;
+  name: string;
+  path: string;
+  /** The folder as the host sees it, for a library in a folder of the host. */
+  host_path?: string;
+  content_type: ContentType;
+  uploads_enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** A movie, or a show with all its seasons and episodes. */
+export type MoveItemKind = "movie" | "series";
+
+export interface MoveItemRef {
+  kind: MoveItemKind;
+  id: string;
+}
+
+export interface MoveRequest {
+  source_library_id?: string;
+  destination_library_id: string;
+  items?: MoveItemRef[];
+  all?: boolean;
+}
+
+export type MoveReason =
+  | "incompatible"
+  | "same_library"
+  | "duplicate"
+  | "remote"
+  | "not_found"
+  | "no_files"
+  | "missing_files"
+  | "unsafe_path"
+  | "interrupted";
+
+export interface MovePlanItem {
+  kind: MoveItemKind;
+  id: string;
+  title: string;
+  year?: number;
+  source_library_id?: string;
+  files: number;
+  bytes: number;
+  target?: string;
+  renamed?: boolean;
+  reason?: MoveReason;
+  message?: string;
+}
+
+export interface MovePlan {
+  destination: Library;
+  eligible: MovePlanItem[];
+  ineligible: MovePlanItem[];
+  eligible_bytes: number;
+}
+
+export type MoveItemStatus = "pending" | "moving" | "fs_done" | "moved" | "skipped" | "failed" | "rolled_back";
+
+export interface MoveJobItem {
+  kind: MoveItemKind;
+  id: string;
+  title: string;
+  source_library_id?: string;
+  status: MoveItemStatus;
+  reason?: MoveReason;
+  message?: string;
+  target?: string;
+}
+
+export interface MoveJob {
+  id: string;
+  source_library_id?: string;
+  destination_library_id: string;
+  status: "running" | "done" | "failed" | "interrupted";
+  total: number;
+  moved: number;
+  skipped: number;
+  failed: number;
+  created_at: string;
+  finished_at?: string;
+  items: MoveJobItem[];
+  /** While running: bytes moved out of the total, the title being moved, and the average speed. */
+  bytes_total?: number;
+  bytes_done?: number;
+  current?: string;
+  bytes_per_second?: number;
+}
+
+export interface Movie {
+  id: string;
+  title: string;
+  year: number | null;
+  poster_url: string | null;
+  unmatched: boolean;
+  metadata_source: string;
+  overview?: string;
+  library_id?: string;
+  backdrop_url?: string | null;
+  content_rating?: string;
+  /** Minimum viewer age; null when unrated. */
+  rating_age?: number | null;
+  rating_source?: string;
+  genres?: string[];
+  anime?: boolean;
+  added_at?: string;
+}
+
+export interface Series {
+  id: string;
+  title: string;
+  year: number | null;
+  poster_url: string | null;
+  backdrop_url?: string | null;
+  unmatched: boolean;
+  metadata_source: string;
+  overview?: string;
+  library_id?: string;
+  season_count?: number;
+  episode_count?: number;
+  content_rating?: string;
+  /** Minimum viewer age; null when unrated. */
+  rating_age?: number | null;
+  rating_source?: string;
+  genres?: string[];
+  anime?: boolean;
+  added_at?: string;
+}
+
+/** Per-viewer browse facts; keys are "movie:<id>" or "series:<id>". */
+export interface BrowseSignals {
+  views: Record<string, number>;
+  watched: string[];
+  /** Titles marked or played to the end ("movie:<id>", "series:<id>" when every episode is). */
+  finished?: string[];
+  liked?: string[];
+  disliked?: string[];
+  not_interested?: string[];
+  /** The profile's My List. */
+  watchlist?: string[];
+  recommended: string[];
+}
+
+export interface Episode {
+  id: string;
+  series_id?: string;
+  season: number;
+  number: number;
+  title: string;
+  overview?: string;
+  poster_url?: string | null;
+  unmatched?: boolean;
+  duration_ms?: number;
+  intro_start_ms?: number | null;
+  intro_end_ms?: number | null;
+}
+
+export interface Season {
+  id?: string;
+  number: number;
+  title?: string;
+  episodes: Episode[];
+}
+
+export interface MediaFile {
+  id: string;
+  filename?: string;
+  rel_path?: string;
+  duration_ms?: number;
+  container?: string;
+  video_codec?: string;
+  audio_codec?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface MovieDetail extends Movie {
+  files?: MediaFile[];
+  progress?: ProgressRecord | null;
+}
+
+export interface SeriesDetail extends Series {
+  seasons: Season[];
+  progress?: ProgressRecord | null;
+}
+
+export interface SearchHit {
+  item_kind: "movie" | "series" | "episode";
+  item_id: string;
+  title: string;
+  year?: number | null;
+  poster_url?: string | null;
+  unmatched?: boolean;
+}
+
+export interface SearchResponse {
+  movies?: Movie[];
+  series?: Series[];
+  episodes?: Episode[];
+  items?: SearchHit[];
+}
+
+export interface DecodingInfo {
+  [key: string]: unknown;
+}
+
+export interface ClientProfile {
+  user_agent: string;
+  mse: boolean;
+  hls_native: boolean;
+  ass_js: boolean;
+  hdr: boolean;
+  viewport_w: number;
+  viewport_h: number;
+  hevc: boolean;
+  hevc_main10?: boolean;
+  av1: boolean;
+  ac3: boolean;
+  eac3: boolean;
+  truehd: boolean;
+  decoding_info?: DecodingInfo;
+  /** Video codecs the device decodes well, measured with MediaCapabilities. */
+  codecs?: Record<string, CodecCap>;
+}
+
+export interface CodecCap {
+  /** Tallest picture decoded smoothly; 2160 only with a hardware decoder. */
+  max_height: number;
+  hardware: boolean;
+  ten_bit: boolean;
+}
+
+export interface CreateSession {
+  item_kind: ItemKind;
+  item_id: string;
+  media_file_id?: string;
+  start_ms?: number;
+  quality?: string;
+  audio_index?: number;
+  subtitle_index?: number | null;
+  client: ClientProfile;
+  replace_session_id?: string;
+  /** "local", a source option id, or omitted to prefer local files. */
+  source?: string;
+}
+
+export interface SessionTrack {
+  index?: number;
+  language?: string;
+  title?: string;
+  codec?: string;
+  [key: string]: unknown;
+}
+
+export interface PlaybackStreamAction {
+  codec?: string;
+  action?: string;
+  to?: string;
+  reason?: string;
+}
+
+export interface PlaybackDecision {
+  reasons?: string[];
+  mode?: string;
+  playback?: string;
+  video?: PlaybackStreamAction;
+  audio?: PlaybackStreamAction;
+  container?: PlaybackStreamAction;
+  hardware?: string;
+  encoder?: string;
+  encoder_type?: "cpu" | "nvidia_nvenc";
+}
+
+export interface PlaybackSession {
+  id: string;
+  delivery: Delivery;
+  hls_attach?: HlsAttach;
+  urls: Record<string, string>;
+  qualities?: string[];
+  audio?: SessionTrack[];
+  subtitles?: SessionTrack[];
+  decision?: PlaybackDecision;
+  intro?: { start_ms?: number; end_ms?: number } | null;
+  next_episode?: { id: string; title?: string } | null;
+  duration_ms?: number;
+  start_ms?: number;
+  seekable_from_ms?: number;
+  vod_ondemand?: boolean;
+  vod_plan_kind?: string;
+  gen_start_seg?: number;
+  generation_id?: number;
+  stoken?: string;
+  node?: { id: string; name: string; region?: string } | null;
+  source_selection?: { media_file_id: string; score: number; reasons: string[]; standby_media_file_id?: string } | null;
+  /** Playback sources for the item, present when an external media source also has it. */
+  sources?: { id: string; label: string }[];
+  source?: string;
+  /** External sources: the video codec sent, and whether it is the original rather than a re-encode. */
+  remote_video?: { codec: string; copy: boolean };
+  /** External sources: the video bitrate in bits per second, when known. */
+  bitrate?: number;
+  /** Tracks and quality the session uses, including ones the profile chose. */
+  audio_index?: number;
+  subtitle_index?: number | null;
+  quality?: string;
+}
+
+export interface ProgressPut {
+  position_ms: number;
+  duration_ms: number;
+}
+
+export interface ProgressRecord {
+  item_kind: ItemKind | string;
+  item_id: string;
+  media_file_id?: string;
+  position_ms: number;
+  duration_ms: number;
+  completed?: boolean;
+  resume_ms?: number;
+  updated_at?: string;
+  title?: string;
+  poster_url?: string | null;
+  unmatched?: boolean;
+  /** How the home page names the item and which artwork it can use. */
+  card?: HomeCard;
+}
+
+/** A movie or episode as the home page rails show it. */
+export interface HomeCard {
+  kind: "movie" | "episode";
+  id: string;
+  /** The movie, or the episode's show. */
+  title: string;
+  /** "S1:E5 - Chapter 5" for an episode, the year for a movie. */
+  subtitle?: string;
+  year?: number;
+  series_id?: string;
+  season?: number;
+  number?: number;
+  episode_title?: string;
+  poster_url?: string | null;
+  backdrop_url?: string | null;
+  thumb_url?: string | null;
+}
+
+export interface ShareMeta {
+  item_kind: ItemKind | string;
+  item_id?: string;
+  needs_password: boolean;
+  title?: string;
+  allow_download?: boolean;
+}
+
+export interface ShareUnlockRequest {
+  password?: string;
+}
+
+export interface ShareUnlockResponse {
+  ok: boolean;
+  item_kind: ItemKind | string;
+  item_id: string;
+}
+
+export interface CreateShareRequest {
+  item_kind: ItemKind | string;
+  item_id: string;
+  password?: string;
+  quality?: string;
+  max_concurrent?: number;
+  allow_download?: boolean;
+  hours?: number;
+}
+
+export interface CreateShareResponse {
+  id: string;
+  token: string;
+}
+
+export interface ShareRow {
+  id: string;
+  item_kind: string;
+  item_id: string;
+  revoked?: boolean;
+  created_at?: string;
+}
+
+export interface CreateUploadRequest {
+  library_id: string;
+  filename: string;
+  size: number;
+  size_bytes?: number;
+  mime?: string;
+}
+
+export interface UploadSession {
+  id: string;
+  library_id: string;
+  filename: string;
+  size: number;
+  offset: number;
+  status: string;
+  item_kind?: string;
+  item_id?: string;
+  media_file_id?: string;
+  error?: string;
+  expires_at?: string;
+}
+
+export interface WTRoom {
+  id: string;
+  code?: string;
+  invite_code?: string;
+  item_kind: ItemKind | string;
+  item_id: string;
+  title?: string;
+}
+
+export interface WTInvite {
+  code: string;
+  room_id?: string;
+  id?: string;
+  item_kind: ItemKind | string;
+  item_id: string;
+  title?: string;
+  host?: string;
+}
+
+export interface WTJoinRequest {
+  code: string;
+  display_name?: string;
+}
+
+export interface WTJoinResponse {
+  room_id: string;
+  role?: string;
+  item_kind?: ItemKind | string;
+  item_id?: string;
+}
+
+export interface WTTicket {
+  ticket?: string;
+  url?: string;
+  ws_url?: string;
+  member_id?: string;
+}
+
+export interface StreamRow {
+  id: string;
+  duration_ms?: number;
+  source?: string;
+  video_codec?: string;
+  video_copy?: boolean;
+  bitrate_bps?: number;
+  position_ms?: number;
+  /** The player's last report of its buffers and network. */
+  client?: {
+    paused: boolean;
+    buffer_ahead_ms: number;
+    cache_ahead_ms: number;
+    cache_behind_ms: number;
+    cache_bytes: number;
+    cache_hit_rate: number;
+    throughput_bps: number;
+    dropped_frames: number;
+    at?: string;
+  };
+  session_id?: string;
+  user?: string;
+  username?: string;
+  item_title?: string;
+  title?: string;
+  item_kind?: string;
+  item_id?: string;
+  delivery?: string;
+  quality?: string;
+  started_at?: string;
+  client_ip?: string;
+  user_id?: string;
+  guest?: boolean;
+  mode?: string;
+  playback?: string;
+  reasons?: string[];
+}
+
+export interface InspectorSource {
+  path?: string;
+  filename?: string;
+  container?: string;
+  video_codec?: string;
+  audio_codec?: string;
+  width?: number;
+  height?: number;
+  bit_depth?: number;
+  duration_ms?: number;
+  hdr?: string;
+  size?: number;
+  size_bytes?: number;
+  [key: string]: unknown;
+}
+
+export interface InspectorClient extends Partial<ClientProfile> {
+  [key: string]: unknown;
+}
+
+export interface InspectorGPU {
+  available: boolean;
+  vendor?: string;
+  encoder?: string;
+  gpu_used: boolean;
+  fallback?: boolean;
+  fallback_reason?: string;
+  detection_reason?: string;
+  vaapi?: boolean;
+  nvenc?: boolean;
+  hwaccel?: string;
+}
+
+export interface InspectorDecision {
+  mode?: string;
+  playback?: string;
+  delivery?: string;
+  quality?: string;
+  height?: number;
+  reasons?: string[];
+  hardware?: string;
+  encoder?: string;
+  encoder_type?: "cpu" | "nvidia_nvenc";
+  video?: PlaybackStreamAction;
+  audio?: PlaybackStreamAction;
+  container?: PlaybackStreamAction;
+}
+
+export interface Inspector {
+  id?: string;
+  session_id?: string;
+  source?: InspectorSource | null;
+  client?: InspectorClient | null;
+  decision?: InspectorDecision | null;
+  gpu?: InspectorGPU | null;
+  vod_ondemand?: boolean;
+  vod_plan_kind?: string;
+  gen_start_seg?: number;
+  generation_id?: number;
+  hls_attach?: string;
+  seekable_from_ms?: number;
+  origin_ms?: number;
+}
+
+export interface UserRow {
+  id: string;
+  username: string;
+  display_name: string;
+  is_admin: boolean;
+  is_superadmin?: boolean;
+  protected?: boolean;
+  disabled?: boolean;
+  roles?: string[];
+  role_ids?: string[];
+  grants?: UserGrant[];
+  discord_id?: string;
+  /** When the account was created, and when it linked Discord. */
+  created_at?: string;
+  discord_linked_at?: string;
+  content_age_limit?: number;
+  household?: { id: string; name: string; role: string };
+}
+
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  display_name?: string;
+  admin?: boolean;
+  role_ids?: string[];
+}
+
+export interface InviteRow {
+  id: string;
+  expires_at?: string;
+  used?: boolean;
+  is_admin?: boolean;
+}
+
+export interface CreateInviteRequest {
+  days?: number;
+  is_admin?: boolean;
+  library_ids?: string[];
+  can_download?: boolean;
+}
+
+export interface CreateInviteResponse {
+  id: string;
+  token: string;
+}
+
+export interface OkResponse {
+  ok?: boolean;
+}
+
+export interface ClientLogEvent {
+  name: string;
+  t?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface ClientLogsRequest {
+  events: ClientLogEvent[];
+}
+
+export interface LogEntry {
+  id: string;
+  created_at: string;
+  level: string;
+  category: string;
+  message: string;
+  details?: Record<string, unknown>;
+  actor_id?: string;
+}
+
+export interface LogsResponse {
+  items: LogEntry[];
+  next?: string;
+}
+
+export interface ErrorReportRequest {
+  message: string;
+  code?: string;
+  stage?: string;
+  context?: Record<string, string | number | boolean>;
+  trace?: string;
+}
+
+export interface ErrorReportResponse {
+  id: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  at: string;
+  actor_id?: string;
+  actor_username?: string;
+  action: string;
+  target?: string;
+  ip?: string;
+  detail?: string;
+}
+
+export interface AuditResponse {
+  items: AuditEvent[];
+  next?: string;
+}

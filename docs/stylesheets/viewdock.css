@@ -1,0 +1,169 @@
+/* ViewDock brand colours, matching viewdock.dev. */
+:root {
+  --vd-blue: #0084fc;
+  --vd-blue-light: #3aa0ff;
+  --vd-blue-deep: #0054f0;
+  --md-primary-fg-color: var(--vd-blue);
+  --md-primary-fg-color--light: var(--vd-blue-light);
+  --md-primary-fg-color--dark: var(--vd-blue-deep);
+  --md-accent-fg-color: #00a8ff;
+  --md-accent-fg-color--transparent: rgba(0, 168, 255, 0.1);
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-bg-color: #ffffff;
+  --md-typeset-a-color: var(--vd-blue-deep);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 215;
+  --md-default-bg-color: #070b12;
+  --md-default-bg-color--light: rgba(7, 11, 18, 0.54);
+  --md-default-fg-color: rgba(238, 243, 248, 0.92);
+  --md-default-fg-color--light: rgba(238, 243, 248, 0.64);
+  --md-default-fg-color--lighter: rgba(238, 243, 248, 0.32);
+  --md-default-fg-color--lightest: rgba(238, 243, 248, 0.1);
+  --md-code-bg-color: #0d141f;
+  --md-code-fg-color: #dbe4ee;
+  --md-footer-bg-color: #05070c;
+  --md-footer-bg-color--dark: #030509;
+  --md-typeset-a-color: var(--vd-blue-light);
+  --md-typeset-table-color: rgba(238, 243, 248, 0.1);
+}
+
+/* Header and tabs: dark glass in both schemes so the brand reads the same. */
+.md-header,
+.md-tabs {
+  background-color: #05070c;
+  color: #eef3f8;
+}
+
+.md-header {
+  border-bottom: 1px solid rgba(238, 243, 248, 0.06);
+}
+
+.md-tabs {
+  border-bottom: 1px solid rgba(238, 243, 248, 0.08);
+}
+
+.md-tabs__link {
+  font-weight: 500;
+  opacity: 0.72;
+}
+
+.md-tabs__item--active .md-tabs__link,
+.md-tabs__link:hover {
+  color: var(--vd-blue-light);
+  opacity: 1;
+}
+
+.md-header__button.md-logo img {
+  height: 1.6rem;
+}
+
+/* A wider, more prominent search bar on desktop. */
+@media screen and (min-width: 76.25em) {
+  .md-search__inner {
+    width: 17rem;
+  }
+
+  .md-search__form {
+    border-radius: 0.5rem;
+    background-color: rgba(238, 243, 248, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(238, 243, 248, 0.08);
+  }
+
+  .md-search__form:hover {
+    background-color: rgba(238, 243, 248, 0.12);
+  }
+
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__inner {
+    width: 36rem;
+  }
+}
+
+/* Typography */
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset code {
+  border-radius: 0.3rem;
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+
+.md-nav__link {
+  font-weight: 450;
+}
+
+/* Landing page */
+.vd-hero {
+  margin: 1.5rem 0 2.5rem;
+  padding: 2.5rem 2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  background:
+    radial-gradient(600px 300px at 10% -20%, rgba(0, 132, 252, 0.28), transparent 60%),
+    radial-gradient(500px 260px at 100% 0%, rgba(0, 168, 255, 0.12), transparent 55%),
+    var(--md-code-bg-color);
+}
+
+.vd-hero img {
+  width: 4rem;
+  height: 4rem;
+  margin-bottom: 0.5rem;
+}
+
+.md-typeset .vd-hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: 2.2rem;
+  font-weight: 700;
+}
+
+.md-typeset .vd-hero .vd-tagline {
+  margin: 0 0 1.25rem;
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .vd-hero .md-button {
+  margin: 0.25rem 0.5rem 0.25rem 0;
+}
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border-radius: 0.75rem;
+  transition: border-color 150ms, box-shadow 150ms, transform 150ms;
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:hover {
+  border-color: var(--vd-blue);
+  box-shadow: 0 0 0 1px var(--vd-blue), 0 8px 24px rgba(0, 132, 252, 0.15);
+  transform: translateY(-1px);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .vd-hero {
+    padding: 1.75rem 1.25rem;
+  }
+
+  .md-typeset .vd-hero h1 {
+    font-size: 1.7rem;
+  }
+}
