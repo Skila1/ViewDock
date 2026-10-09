@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- keep operational logs until pruned and add log management to admin
+
 ## 1.0.0
 
 - Public release under the PolyForm Noncommercial License 1.0.0.
