@@ -85,6 +85,7 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	sc := scan.New(sqlDB, libs, ff)
 	libs.SetScan(sc)
 	logs := oplog.New(sqlDB)
+	logs.ClientIP = func(r *http.Request) string { return httpapi.ClientIPString(r, cfg) }
 	art := artwork.New(sqlDB, cfg.CacheDir, ff, metadata.NewClient(kv))
 	meta := metadata.New(sqlDB, kv, art)
 	worker := cfg.Role == config.RoleWorker

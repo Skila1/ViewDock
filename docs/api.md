@@ -22,6 +22,8 @@ Cookie CSRF is not required when a `vd_` key is used.
 | GET | `/api/v1/system` | none |
 | GET | `/healthz` | none |
 | GET | `/api/v1/admin/logs?level=error&category=playback&limit=100` | `admin` or `logs.read` |
+| GET | `/api/v1/admin/logs/stats` | `admin` or `logs.read` |
+| DELETE | `/api/v1/admin/logs?before=2026-10-01T00:00:00Z` or `?all=true` | `settings.manage` |
 | GET | `/api/v1/admin/audit?action=api_key.&limit=100` | `admin` or `logs.read` |
 | GET | `/api/v1/admin/api-keys` | `admin` |
 | GET | `/api/v1/admin/watch-parties` | `admin` or `users.manage` |
@@ -180,7 +182,7 @@ curl -s -H "Authorization: Bearer vd_YOUR_SECRET" \
   "https://viewdock.example.com/api/v1/admin/logs?category=playback&limit=50"
 ```
 
-Operational logs keep 14 days by default (the `logs.retention_days` setting, capped in size). Tokens, `stoken` query values, media source stream grants, and secrets are redacted before storage.
+Operational logs are kept until an administrator deletes them, under **Admin → Logs** or with `DELETE /api/v1/admin/logs`: `?before=<RFC 3339 time>` deletes the entries written before that time, `?all=true` deletes every entry, and the response is `{"deleted": n}`. Each delete is recorded in the audit log as `logs.prune`. `GET /api/v1/admin/logs/stats` returns `rows`, `bytes` (the text stored), `oldest`, `newest` and `retention_days`. Setting `logs.retention_days` above 0 deletes older entries automatically instead. Tokens, `stoken` query values, media source stream grants, and secrets are redacted before storage.
 
 ### Error reports and audit trail
 

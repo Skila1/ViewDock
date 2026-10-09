@@ -2,8 +2,10 @@ package oplog
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -12,9 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/viewdock/viewdock/internal/db"
 )
-
-const retain = 14 * 24 * time.Hour
-const maxRows = 20000
 
 type Entry struct {
 	ID        string         `json:"id"`
@@ -38,17 +37,54 @@ type Filter struct {
 type Store struct {
 	DB db.Queryer
 	ch chan Entry
-	// retainDays overrides the default retention when positive.
+	// retainDays deletes logs older than that many days when positive.
+	// Zero, the default, keeps them until an administrator prunes them.
 	retainDays atomic.Int64
+	// ClientIP names the caller in the audit log of a prune.
+	ClientIP func(*http.Request) string
 }
 
 func (s *Store) SetRetentionDays(days int) { s.retainDays.Store(int64(days)) }
 
-func (s *Store) retention() time.Duration {
-	if d := s.retainDays.Load(); d > 0 {
-		return time.Duration(d) * 24 * time.Hour
+// Stats is how much the operational log holds.
+type Stats struct {
+	Rows   int64  `json:"rows"`
+	Bytes  int64  `json:"bytes"`
+	Oldest string `json:"oldest,omitempty"`
+	Newest string `json:"newest,omitempty"`
+	// RetentionDays is the automatic cleanup; 0 keeps logs forever.
+	RetentionDays int64 `json:"retention_days"`
+}
+
+func (s *Store) Stats(ctx context.Context) (Stats, error) {
+	var st Stats
+	var oldest, newest sql.NullString
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+			COALESCE(SUM(LENGTH(id) + LENGTH(created_at) + LENGTH(level) + LENGTH(category) + LENGTH(message) + LENGTH(details) + COALESCE(LENGTH(actor_id), 0)), 0),
+			MIN(created_at), MAX(created_at)
+		FROM operational_logs
+	`).Scan(&st.Rows, &st.Bytes, &oldest, &newest)
+	st.Oldest, st.Newest = oldest.String, newest.String
+	st.RetentionDays = s.retainDays.Load()
+	return st, err
+}
+
+// Prune deletes the logs written before the given time, or every log when
+// before is zero, and returns how many it removed.
+func (s *Store) Prune(ctx context.Context, before time.Time) (int64, error) {
+	var res sql.Result
+	var err error
+	if before.IsZero() {
+		res, err = s.DB.ExecContext(ctx, `DELETE FROM operational_logs`)
+	} else {
+		res, err = s.DB.ExecContext(ctx, `DELETE FROM operational_logs WHERE created_at < ?`, before.UTC().Format(time.RFC3339Nano))
 	}
-	return retain
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func New(database db.Queryer) *Store {
@@ -153,21 +189,17 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Entry, error) {
 	return out, rows.Err()
 }
 
+// Sweep applies the automatic cleanup, when one is set. Logs are otherwise
+// kept until an administrator prunes them.
 func (s *Store) Sweep(ctx context.Context) {
 	if s == nil || s.DB == nil {
 		return
 	}
-	cut := time.Now().UTC().Add(-s.retention()).Format(time.RFC3339)
-	_, _ = s.DB.ExecContext(ctx, `DELETE FROM operational_logs WHERE created_at < ?`, cut)
-	var n int
-	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM operational_logs`).Scan(&n)
-	if n > maxRows {
-		_, _ = s.DB.ExecContext(ctx, `
-			DELETE FROM operational_logs WHERE id IN (
-				SELECT id FROM operational_logs ORDER BY created_at ASC LIMIT ?
-			)
-		`, n-maxRows)
+	days := s.retainDays.Load()
+	if days <= 0 {
+		return
 	}
+	_, _ = s.Prune(ctx, time.Now().Add(-time.Duration(days)*24*time.Hour))
 }
 
 func (s *Store) FromRecord(r slog.Record) {

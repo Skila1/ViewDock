@@ -446,6 +446,10 @@ export const api = {
     if (q.after) p.set("after", q.after);
     return request<{ items: LogRow[]; next?: string }>(`/api/v1/admin/logs?${p.toString()}`);
   },
+  logStats: () => request<LogStats>("/api/v1/admin/logs/stats"),
+  /** Deletes logs written before `before` (an ISO time), or every log when it is omitted. */
+  pruneLogs: (before?: string) =>
+    request<{ deleted: number }>(`/api/v1/admin/logs?${before ? `before=${encodeURIComponent(before)}` : "all=true"}`, { method: "DELETE" }),
   listAudit: (q: { action?: string; actor?: string; q?: string; limit?: number; before?: string } = {}) => {
     const p = new URLSearchParams();
     if (q.action) p.set("action", q.action);
@@ -588,6 +592,15 @@ export type WatchPartyRoom = {
   members: WatchPartyMember[];
   discord_channel_id?: string;
   discord_guild_id?: string;
+};
+
+export type LogStats = {
+  rows: number;
+  bytes: number;
+  oldest?: string;
+  newest?: string;
+  /** Automatic cleanup in days; 0 keeps logs until they are pruned. */
+  retention_days: number;
 };
 
 export type LogRow = {

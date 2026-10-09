@@ -112,7 +112,7 @@ func configDefs(cfg config.Config) []runtimecfg.Def {
 		{Key: cfgGuestHours, Label: "Longest guest account lifetime (hours)", Category: "Accounts", Kind: runtimecfg.KindInt,
 			Default: "720", Min: 1, Max: 720},
 		{Key: cfgLogRetention, Label: "Operational log retention (days)", Category: "Operations", Kind: runtimecfg.KindInt,
-			Default: "14", Min: 1, Max: 365},
+			Default: "0", Min: 0, Max: 3650, Help: "Deletes logs older than this many days. 0 keeps them until you prune them under Admin, Logs."},
 		{Key: cfgFlightRetention, Label: "Playback timeline retention (hours)", Category: "Operations", Kind: runtimecfg.KindInt,
 			Default: "24", Min: 1, Max: 168, Help: "How long playback timelines stay in server memory after the last event."},
 		{Key: cfgTelemetryBudget, Label: "Client telemetry per session (events per minute)", Category: "Operations", Kind: runtimecfg.KindInt,
