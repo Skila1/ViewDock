@@ -67,6 +67,31 @@ func TestBuildArgs_CopiedVideoStartsAudioAtItsKeyframe(t *testing.T) {
 	}
 }
 
+func TestBuildArgs_CopiedAudioStartsWithEncodedVideo(t *testing.T) {
+	args, err := BuildArgs(Opts{
+		AbsPath: "/media/x.mp4", SessionDir: "/cache/s1", StartMS: 974319,
+		CopyVideo: false, CopyAudio: true, SrcHeight: 2160, Height: 720,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSeq(args, "-c:a", "copy", "-copypriorss:a", "0") {
+		t.Fatalf("copied audio before the start must be dropped: %v", args)
+	}
+	for _, o := range []Opts{
+		{AbsPath: "/media/x.mp4", SessionDir: "/cache/s1", CopyVideo: false, CopyAudio: true, SrcHeight: 2160, Height: 720},
+		{AbsPath: "/media/x.mkv", SessionDir: "/cache/s1", StartMS: 974319, CopyVideo: true, CopyAudio: true, SrcHeight: 1080},
+	} {
+		args, err := BuildArgs(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hasSeq(args, "-copypriorss:a") {
+			t.Fatalf("only needed when encoded video starts after copied audio: %v", args)
+		}
+	}
+}
+
 func TestBuildArgs_HEVCTranscodeAACCopy(t *testing.T) {
 	args, err := BuildArgs(Opts{
 		AbsPath: "/media/x.mkv", SessionDir: "/cache/s1",

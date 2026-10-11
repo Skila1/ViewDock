@@ -126,6 +126,13 @@ func BuildArgs(opt Opts) ([]string, error) {
 	}
 	if opt.CopyAudio {
 		args = append(args, "-c:a", "copy")
+		// Encoded video starts exactly at the start point, but copied audio
+		// would start at the keyframe before it, up to seconds earlier. The
+		// first segment then carried audio the playlist had no slot for and
+		// the player drifted out of sync, so drop the audio before the start.
+		if !copyV && opt.StartMS > 0 {
+			args = append(args, "-copypriorss:a", "0")
+		}
 	} else {
 		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "160k")
 	}
