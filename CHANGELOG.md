@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- start copied audio with encoded video when resuming
+
 ## 1.0.1
 
 - keep operational logs until pruned and add log management to admin
