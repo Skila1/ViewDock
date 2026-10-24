@@ -6,7 +6,6 @@ import {
   Pause,
   Play,
   Radio,
-  SkipForward,
   Volume2,
   VolumeX,
   X,
@@ -29,7 +28,7 @@ import { attachSession, CodecFallbackError, SessionGoneError, type AttachHandle 
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { StatsOverlay } from "./StatsOverlay";
-import { EndCard, UpNextCard, type EndCardTitle } from "./UpNext";
+import { EndCard, NextEpisodePrompt, SkipIntroButton, type EndCardTitle } from "./UpNext";
 import { prepareNext, takePrepared } from "./nextEpisode";
 import type { CacheStats } from "./bufferCache";
 import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
@@ -57,7 +56,8 @@ type Props = {
   togetherCode?: string;
   shareToken?: string;
   guestItem?: { kind: string; id: string };
-  onEnded?: () => void;
+  /** Playback finished or the viewer asked for the next episode, which the session names when there is one. */
+  onEnded?: (nextEpisodeId?: string) => void;
   onClose?: () => void;
   /** Leaves the watch party; when set, the party panel offers "Leave party". */
   onLeaveParty?: () => void;
@@ -102,6 +102,22 @@ function qualityLabel(q: string): string {
 function withStoken(url: string, stoken?: string): string {
   if (!stoken || /[?&]stoken=/.test(url)) return url;
   return `${url}${url.includes("?") ? "&" : "?"}stoken=${encodeURIComponent(stoken)}`;
+}
+
+/**
+ * Where the Next Episode prompt appears: when the end credits start, if they
+ * were detected and leave the story most of the runtime, otherwise shortly
+ * before the end.
+ */
+export function nextPromptAtMs(creditsStartMs: number | null | undefined, durationMs: number, upNextSeconds: number): number | null {
+  if (durationMs <= 60_000) return null;
+  if (creditsStartMs != null && creditsStartMs >= durationMs * 0.5 && creditsStartMs < durationMs - 5000) return creditsStartMs;
+  return durationMs - Math.max(25_000, upNextSeconds * 1000 + 5000);
+}
+
+function nextEpisodeLabel(next: { title?: string; season?: number; number?: number }): string {
+  const code = next.season != null && next.number != null ? `S${next.season}:E${next.number}` : "";
+  return [code, next.title].filter(Boolean).join(" ");
 }
 
 const ctrlBtn =
@@ -204,6 +220,14 @@ export function Player({
     const id = window.setInterval(() => void telemetry.flush(), 12_000);
     return () => window.clearInterval(id);
   }, [telemetry]);
+
+  // The player stays mounted from one episode to the next (so fullscreen
+  // holds); per-title prompts start over.
+  useEffect(() => {
+    setUpNextDismissed(false);
+    setMovieEnded(false);
+    nextPreparedRef.current = false;
+  }, [itemKind, itemId]);
 
   useEffect(() => {
     setJourneyContext({ item_kind: itemKind, item_id: itemId });
@@ -720,10 +744,10 @@ export function Player({
     const onVideoEnded = () => {
       bump("ENDED");
       checkpoint("ended");
-      const next = Boolean(sessionRef.current?.next_episode);
+      const next = sessionRef.current?.next_episode?.id;
       if (itemKind === "movie") setMovieEnded(true);
-      // Without autoplay the Up Next card waits for a click.
-      if (!next || autoplayRef.current) onEnded?.();
+      // Without autoplay the Next Episode prompt waits for a click.
+      if (!next || autoplayRef.current) onEnded?.(next);
     };
     const domEv = [
       "play", "playing", "pause", "waiting", "stalled", "seeking", "seeked",
@@ -1341,9 +1365,9 @@ export function Player({
       else if (tracks.length) changeSubtitle(lastSubtitleRef.current ?? (tracks[0].index as number));
     } else if (key === "i") {
       setStatsOpen((s) => !s);
-    } else if (key === "n" && sessionRef.current?.next_episode) {
+    } else if (key === "n" && sessionRef.current?.next_episode?.id) {
       handled();
-      onEnded?.();
+      onEnded?.(sessionRef.current.next_episode.id);
     } else if (/^[0-9]$/.test(key) && duration > 0) {
       handled();
       seek((Number(key) / 10) * duration, "keyboard");
@@ -1387,6 +1411,12 @@ export function Player({
 
   const applePlayer = isIOSDevice();
   const duration = movieDurationMs(session, movieDurRef.current || dur);
+  const upNextSeconds = prefs.data?.upnext_seconds ?? 10;
+  const intro = session?.intro;
+  const showSkipIntro =
+    !inParty && intro?.start_ms != null && intro.end_ms != null && intro.end_ms - intro.start_ms >= 5000 && pos >= intro.start_ms && pos < intro.end_ms - 1500;
+  const nextPromptAt = nextPromptAtMs(session?.credits?.start_ms, duration, upNextSeconds);
+  const showNextPrompt = Boolean(session?.next_episode?.id) && !inParty && !upNextDismissed && nextPromptAt != null && pos >= nextPromptAt;
   const seekMax = Math.max(1, duration);
   const seekValue = Math.min(pos, duration);
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (seekValue / seekMax) * 100)) : 0;
@@ -1507,11 +1537,17 @@ export function Player({
 
       {statsOpen ? <StatsOverlay video={videoRef.current} session={session} engine={engine ?? ""} stats={cacheStats} onClose={() => setStatsOpen(false)} /> : null}
 
-      {session?.next_episode && !inParty && !upNextDismissed && duration > 60_000 && duration - pos <= Math.max(25_000, (prefs.data?.upnext_seconds ?? 10) * 1000 + 5000) ? (
-        <UpNextCard
-          title={session.next_episode.title}
-          seconds={autoplayRef.current && (prefs.data?.upnext_seconds ?? 10) > 0 ? (prefs.data?.upnext_seconds ?? 10) : null}
-          onPlay={() => onEnded?.()}
+      {showSkipIntro && session?.intro?.end_ms ? (
+        <SkipIntroButton raised={showUi} onSkip={() => seek(session.intro!.end_ms!, "skip_intro")} />
+      ) : null}
+
+      {showNextPrompt && session?.next_episode?.id ? (
+        <NextEpisodePrompt
+          key={session.next_episode.id}
+          raised={showUi}
+          label={nextEpisodeLabel(session.next_episode)}
+          seconds={autoplayRef.current && upNextSeconds > 0 ? upNextSeconds : null}
+          onPlay={() => onEnded?.(session.next_episode!.id)}
           onDismiss={() => setUpNextDismissed(true)}
         />
       ) : null}
@@ -1722,17 +1758,6 @@ export function Player({
               </span>
 
               <div className="ml-auto flex items-center gap-0.5 sm:gap-1.5">
-                {session?.next_episode ? (
-                  <button
-                    type="button"
-                    className="tap mr-1 hidden h-9 items-center gap-1.5 rounded-full bg-white/[0.12] px-3.5 text-[13px] font-semibold text-white outline-none transition hover:bg-white/[0.2] focus-visible:ring-2 focus-visible:ring-white/70 sm:flex"
-                    onClick={() => onEnded?.()}
-                    title={session.next_episode.title ? `Next: ${session.next_episode.title}` : "Next episode"}
-                  >
-                    <SkipForward size={15} fill="currentColor" strokeWidth={0} aria-hidden />
-                    Next episode
-                  </button>
-                ) : null}
                 {canTogglePanel ? (
                   <button
                     type="button"

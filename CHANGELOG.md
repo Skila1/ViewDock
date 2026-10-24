@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- fix the Next Episode button doing nothing partway through an episode
+- detect episode intros and end credits from chapters or audio shared across a series; Skip Intro and Next Episode prompts appear over the player
+
 ## 1.0.2
 
 - start copied audio with encoded video when resuming

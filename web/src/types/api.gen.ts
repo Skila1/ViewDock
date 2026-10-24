@@ -565,8 +565,11 @@ export interface PlaybackSession {
   audio?: SessionTrack[];
   subtitles?: SessionTrack[];
   decision?: PlaybackDecision;
+  /** Detected intro of an episode. */
   intro?: { start_ms?: number; end_ms?: number } | null;
-  next_episode?: { id: string; title?: string } | null;
+  /** Where an episode's end credits start, when detected. */
+  credits?: { start_ms?: number } | null;
+  next_episode?: { id: string; title?: string; season?: number; number?: number } | null;
   duration_ms?: number;
   start_ms?: number;
   seekable_from_ms?: number;

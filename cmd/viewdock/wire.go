@@ -28,6 +28,7 @@ import (
 	"github.com/viewdock/viewdock/internal/httpapi"
 	"github.com/viewdock/viewdock/internal/jellyfin"
 	"github.com/viewdock/viewdock/internal/library"
+	"github.com/viewdock/viewdock/internal/markers"
 	"github.com/viewdock/viewdock/internal/mediafs"
 	"github.com/viewdock/viewdock/internal/mesh"
 	"github.com/viewdock/viewdock/internal/metadata"
@@ -93,12 +94,17 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 	// workers and not a separate party coordinator.
 	controlPlane := !worker && cfg.Role != config.RoleCoordinator
 	remoteParties := controlPlane && cfg.CoordinatorURL != ""
-	sc.OnIdle = func() { go func() { _ = meta.RunOnce(context.Background()) }() }
+	markerSvc := markers.New(sqlDB, ff, logger)
+	sc.OnIdle = func() {
+		go func() { _ = meta.RunOnce(context.Background()) }()
+		markerSvc.Kick()
+	}
 	if controlPlane {
 		// Finish or roll back any move a restart interrupted before new
 		// moves, scans or uploads can touch the same folders.
 		libs.RecoverMoves(context.Background())
 		meta.Start(context.Background())
+		markerSvc.Start(context.Background())
 	}
 	up := upload.New(sqlDB, libs, sc, ff, filepath.Join(cfg.ConfigDir, "uploads"))
 	srch := search.New(sqlDB)

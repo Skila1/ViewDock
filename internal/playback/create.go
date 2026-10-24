@@ -217,6 +217,7 @@ func (a *API) createLocal(w http.ResponseWriter, r *http.Request) {
 		Client: body.Client, Info: info, Located: loc, Standby: standby, Decision: dec,
 		SlotHeld: needSlot, Created: time.Now(), LastPing: time.Now(),
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
+		Credits:     a.credits(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
 		HW:          a.HW, SourceOptions: sourceOptions,
 	}
@@ -554,7 +555,7 @@ func (a *API) sessionJSON(s *Session) map[string]any {
 			"video": s.Decision.Video, "audio": s.Decision.Audio, "container": s.Decision.Container,
 			"hardware": s.Decision.Hardware, "encoder": s.Encoder, "encoder_type": s.EncoderType,
 		},
-		"intro": s.Intro, "next_episode": s.NextEpisode,
+		"intro": s.Intro, "credits": s.Credits, "next_episode": s.NextEpisode,
 		"duration_ms": s.DurationMS, "seekable_from_ms": s.SeekableFromMS, "start_ms": s.StartMS,
 	}
 	if s.Delivery == decision.DeliveryDirect {

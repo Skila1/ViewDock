@@ -154,6 +154,7 @@ func (a *API) createRemote(w http.ResponseWriter, r *http.Request, p *auth.Princ
 		StartMS: start, ResumeMS: start, DurationMS: stream.DurationMS,
 		Client: body.Client, Created: time.Now(), LastPing: time.Now(),
 		SeekableFromMS: start, Intro: a.intro(r.Context(), body.ItemKind, body.ItemID),
+		Credits:     a.credits(r.Context(), body.ItemKind, body.ItemID),
 		NextEpisode: a.nextEpisode(r.Context(), body.ItemKind, body.ItemID),
 		Decision:    decision.Result{Delivery: stream.Delivery, Mode: "remote", Playback: "remote"},
 		Source:      stream.Source, SourceOptions: options, RemoteURL: stream.URL, RemoteQualities: stream.Qualities, remoteStop: stream.Stop,

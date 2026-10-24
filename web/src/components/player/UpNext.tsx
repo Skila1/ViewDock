@@ -1,43 +1,93 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { SkipForward, X } from "lucide-react";
+import { ChevronsRight, SkipForward } from "lucide-react";
+import { cn } from "@/lib/cn";
+
+/** Bottom-right corner above the control bar, lower while the controls are hidden. */
+function corner(raised: boolean) {
+  return cn(
+    "pointer-events-auto absolute right-4 z-20 flex items-center gap-2 transition-[bottom] duration-200 sm:right-8",
+    raised ? "bottom-28 sm:bottom-32" : "bottom-8 sm:bottom-10",
+  );
+}
+
+/** Shown while the intro plays; skips to where it ends. */
+export function SkipIntroButton({ raised, onSkip }: { raised: boolean; onSkip: () => void }) {
+  return (
+    <div className={corner(raised)} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={onSkip}
+        className="vd-menu-pop flex h-11 items-center gap-2 rounded-md border-2 border-white/80 bg-black/55 px-5 text-[15px] font-semibold text-white shadow-2xl backdrop-blur-sm outline-none transition hover:bg-white hover:text-black focus-visible:ring-2 focus-visible:ring-white/70"
+      >
+        <ChevronsRight size={18} aria-hidden />
+        Skip Intro
+      </button>
+    </div>
+  );
+}
 
 /**
- * Up Next card near the end of an episode. With a countdown it plays the next
- * episode when it reaches zero; without one it waits for a click.
+ * Next Episode prompt once the episode's story ends (its credits, when they
+ * are known). With a countdown the button fills and plays the next episode
+ * when it runs out; without one it waits for a click. Watch Credits hides it.
  */
-export function UpNextCard({ title, seconds, onPlay, onDismiss }: { title?: string; seconds: number | null; onPlay: () => void; onDismiss: () => void }) {
-  const [left, setLeft] = useState(seconds);
+export function NextEpisodePrompt({
+  raised,
+  label,
+  seconds,
+  onPlay,
+  onDismiss,
+}: {
+  raised: boolean;
+  label?: string;
+  seconds: number | null;
+  onPlay: () => void;
+  onDismiss: () => void;
+}) {
+  const [filled, setFilled] = useState(false);
+  const playRef = useRef(onPlay);
+  playRef.current = onPlay;
   useEffect(() => {
     if (seconds == null) return;
-    setLeft(seconds);
-    const id = window.setInterval(() => setLeft((s) => (s == null ? s : s - 1)), 1000);
-    return () => window.clearInterval(id);
+    const raf = window.requestAnimationFrame(() => setFilled(true));
+    const id = window.setTimeout(() => playRef.current(), seconds * 1000);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(id);
+    };
   }, [seconds]);
-  useEffect(() => {
-    if (left != null && left <= 0) onPlay();
-  }, [left, onPlay]);
 
   return (
-    <div
-      className="pointer-events-auto absolute right-4 bottom-28 z-20 w-72 rounded-lg bg-black/85 p-3 text-white shadow-2xl ring-1 ring-white/15 sm:right-8"
-      role="dialog"
-      aria-label="Up next"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[11px] tracking-wide text-white/60 uppercase">Up next</p>
-          <p className="truncate text-sm font-semibold">{title || "Next episode"}</p>
-        </div>
-        <button type="button" aria-label="Dismiss" onClick={onDismiss} className="text-white/60 hover:text-white">
-          <X size={16} />
+    <div className={cn(corner(raised), "flex-col items-end")} role="dialog" aria-label="Next episode" onClick={(e) => e.stopPropagation()}>
+      {label ? <p className="vd-menu-pop max-w-72 truncate text-sm font-medium text-white/85 drop-shadow">{label}</p> : null}
+      <div className="vd-menu-pop flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="h-11 rounded-md bg-black/55 px-4 text-[15px] font-semibold text-white ring-1 ring-white/40 backdrop-blur-sm outline-none transition hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white/70"
+        >
+          Watch Credits
+        </button>
+        <button
+          type="button"
+          onClick={onPlay}
+          className="relative h-11 overflow-hidden rounded-md bg-white/70 px-5 text-[15px] font-semibold text-black shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+        >
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 bg-white"
+            style={{
+              width: seconds == null || filled ? "100%" : "0%",
+              transition: seconds == null ? undefined : `width ${seconds}s linear`,
+            }}
+          />
+          <span className="relative flex items-center gap-2">
+            <SkipForward size={16} fill="currentColor" strokeWidth={0} aria-hidden />
+            Next Episode
+          </span>
         </button>
       </div>
-      <button type="button" onClick={onPlay} className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-white py-2 text-sm font-semibold text-black hover:bg-white/90">
-        <SkipForward size={15} fill="currentColor" strokeWidth={0} />
-        {left != null && left > 0 ? `Play in ${left}s` : "Play next"}
-      </button>
     </div>
   );
 }

@@ -880,9 +880,26 @@ components:
         intro:
           type: object
           nullable: true
+          description: Episodes only, the detected intro.
+          properties:
+            start_ms: { type: integer }
+            end_ms: { type: integer }
+        credits:
+          type: object
+          nullable: true
+          description: Episodes only, where the detected end credits start.
+          properties:
+            start_ms: { type: integer }
         next_episode:
           type: object
           nullable: true
+          properties:
+            id: { type: string }
+            item_kind: { type: string }
+            item_id: { type: string }
+            title: { type: string }
+            season: { type: integer }
+            number: { type: integer }
         duration_ms: { type: integer }
         start_ms:
           type: integer

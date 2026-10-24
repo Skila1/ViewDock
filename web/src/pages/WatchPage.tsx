@@ -131,8 +131,11 @@ export function WatchPage({ kind }: { kind: ItemKind }) {
       startMs={startMs}
       title={kind === "episode" && info ? info.title : title}
       info={info}
-      onEnded={() => {
-        if (kind === "episode" && episode.data?.series_id) {
+      onEnded={(nextId) => {
+        // The session names the episode after this one. The series' Next Up
+        // is only a fallback: mid-episode it is still this episode.
+        if (nextId) navigate(`/watch/episode/${nextId}?t=0`, { replace: true, state: location.state });
+        else if (kind === "episode" && episode.data?.series_id) {
           void api
             .nextEpisode(episode.data.series_id)
             .then((next) => navigate(`/watch/episode/${next.id}?t=0`, { replace: true, state: location.state }))

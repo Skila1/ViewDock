@@ -59,6 +59,7 @@ type Session struct {
 	LastPing       time.Time
 	SeekableFromMS int64
 	Intro          any
+	Credits        any
 	NextEpisode    any
 	Encoder        string
 	EncoderType    string // cpu | nvidia_nvenc
