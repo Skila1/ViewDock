@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.3
 
 - fix the Next Episode button doing nothing partway through an episode
 - detect episode intros and end credits from chapters or audio shared across a series; Skip Intro and Next Episode prompts appear over the player
