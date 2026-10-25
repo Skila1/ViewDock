@@ -199,6 +199,9 @@ func (s *Service) runCopy(src Source, token, base string, m copyMeta) {
 		last = s.copyOnce(ctx, src, token, base, &m)
 		if last == nil {
 			s.event(ctx, src.ID, "copy_done", true, fmt.Sprintf("item %s is on ViewDock (%d MB) and plays locally", m.RemoteID, m.Size>>20))
+			if s.OnCopied != nil {
+				s.OnCopied()
+			}
 			return
 		}
 		if errors.Is(last, errNoSpace) {

@@ -104,7 +104,6 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 		// moves, scans or uploads can touch the same folders.
 		libs.RecoverMoves(context.Background())
 		meta.Start(context.Background())
-		markerSvc.Start(context.Background())
 	}
 	up := upload.New(sqlDB, libs, sc, ff, filepath.Join(cfg.ConfigDir, "uploads"))
 	srch := search.New(sqlDB)
@@ -283,6 +282,11 @@ func wire(srv *httpapi.Server, sqlDB *sql.DB, cfg config.Config, logger *slog.Lo
 			return sources.LocalCopy(ctx, sourceID, remoteID)
 		}
 		libs.RemoteCopyDir = sources.CopyDir()
+		// Finished copies of Jellyfin episodes are analysed for recaps,
+		// intros and credits like local files.
+		markerSvc.RemoteCopy = sources.LocalCopy
+		sources.OnCopied = markerSvc.Kick
+		markerSvc.Start(context.Background())
 		meta.RefreshRemote = sources.RefreshItem
 		play.Sources = sources
 		sources.Start(context.Background())

@@ -104,15 +104,31 @@ function withStoken(url: string, stoken?: string): string {
   return `${url}${url.includes("?") ? "&" : "?"}stoken=${encodeURIComponent(stoken)}`;
 }
 
+function creditsKnown(creditsStartMs: number | null | undefined, durationMs: number): creditsStartMs is number {
+  return creditsStartMs != null && creditsStartMs >= durationMs * 0.5 && creditsStartMs < durationMs - 5000;
+}
+
+/** How long before the end the countdown to the next episode runs at the latest. */
+function nearEndMs(upNextSeconds: number): number {
+  return Math.max(25_000, upNextSeconds * 1000 + 5000);
+}
+
 /**
- * Where the Next Episode prompt appears: when the end credits start, if they
- * were detected and leave the story most of the runtime, otherwise shortly
- * before the end.
+ * When the Next Episode prompt appears and when its countdown starts. With
+ * detected end credits both are when the credits start. Without them the
+ * prompt appears a quarter of the runtime before the end, at most ten
+ * minutes, and the countdown waits until shortly before the end, so a guess
+ * that comes early never skips the end of the story.
  */
-export function nextPromptAtMs(creditsStartMs: number | null | undefined, durationMs: number, upNextSeconds: number): number | null {
+export function nextPromptAtMs(
+  creditsStartMs: number | null | undefined,
+  durationMs: number,
+  upNextSeconds: number,
+): { promptAt: number; countdownAt: number } | null {
   if (durationMs <= 60_000) return null;
-  if (creditsStartMs != null && creditsStartMs >= durationMs * 0.5 && creditsStartMs < durationMs - 5000) return creditsStartMs;
-  return durationMs - Math.max(25_000, upNextSeconds * 1000 + 5000);
+  if (creditsKnown(creditsStartMs, durationMs)) return { promptAt: creditsStartMs, countdownAt: creditsStartMs };
+  const near = durationMs - nearEndMs(upNextSeconds);
+  return { promptAt: Math.min(near, durationMs - Math.min(10 * 60_000, durationMs * 0.25)), countdownAt: near };
 }
 
 type Span = { start_ms?: number; end_ms?: number } | null | undefined;
@@ -1424,8 +1440,9 @@ export function Player({
   const duration = movieDurationMs(session, movieDurRef.current || dur);
   const upNextSeconds = prefs.data?.upnext_seconds ?? 10;
   const skipTo = !inParty ? skipTarget(pos, session?.recap, session?.intro) : null;
-  const nextPromptAt = nextPromptAtMs(session?.credits?.start_ms, duration, upNextSeconds);
-  const showNextPrompt = Boolean(session?.next_episode?.id) && !inParty && !upNextDismissed && nextPromptAt != null && pos >= nextPromptAt;
+  const nextPrompt = nextPromptAtMs(session?.credits?.start_ms, duration, upNextSeconds);
+  const showNextPrompt = Boolean(session?.next_episode?.id) && !inParty && !upNextDismissed && nextPrompt != null && pos >= nextPrompt.promptAt;
+  const countingDown = nextPrompt != null && pos >= nextPrompt.countdownAt && autoplayRef.current && upNextSeconds > 0;
   const seekMax = Math.max(1, duration);
   const seekValue = Math.min(pos, duration);
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (seekValue / seekMax) * 100)) : 0;
@@ -1553,7 +1570,7 @@ export function Player({
           key={session.next_episode.id}
           raised={showUi}
           label={nextEpisodeLabel(session.next_episode)}
-          seconds={autoplayRef.current && upNextSeconds > 0 ? upNextSeconds : null}
+          seconds={countingDown ? upNextSeconds : null}
           onPlay={() => onEnded?.(session.next_episode!.id)}
           onDismiss={() => setUpNextDismissed(true)}
         />

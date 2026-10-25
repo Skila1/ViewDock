@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- detect recaps, intros and end credits on Jellyfin episodes once they are copied to ViewDock
+- without detected credits, the Next Episode prompt appears a quarter of the runtime before the end (at most ten minutes) and counts down only near the end
+- log each episode analysed for markers, and audio that cannot be read
+
 ## 1.0.4
 
 - detect "Previously on" recaps from chapters or scenes of earlier episodes; a Skip Recap button appears over the player

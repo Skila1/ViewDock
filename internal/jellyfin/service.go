@@ -68,6 +68,8 @@ type Service struct {
 	Audit    *audit.Log
 	Cfg      config.Config
 	HTTP     *http.Client
+	// OnCopied runs when a title finishes copying to ViewDock.
+	OnCopied func()
 
 	mu      sync.Mutex
 	syncing map[string]bool

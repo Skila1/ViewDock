@@ -8,6 +8,8 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,14 +35,17 @@ const (
 	recapWindowMS = 180_000
 )
 
-// Service detects recaps, intros and end credits of episodes with local files in
-// the background and stores them on the episode.
+// Service detects recaps, intros and end credits of episodes with local
+// files, or finished local copies of Jellyfin episodes, in the background
+// and stores them on the episode.
 type Service struct {
 	DB    *sql.DB
 	Media Media
 	Log   *slog.Logger
 	// Pause between episodes, so analysis stays a background task.
 	Pause time.Duration
+	// RemoteCopy returns the finished local copy of a Jellyfin item, if any.
+	RemoteCopy func(ctx context.Context, sourceID, remoteID string) (path, container string, size int64, ok bool)
 
 	mu   sync.Mutex
 	kick chan struct{}
@@ -98,6 +103,28 @@ type episode struct {
 // compared with, so new episodes of a series give old ones another try.
 func (e episode) key(partnerCount int) string {
 	return fmt.Sprintf("%s:%s:%d:%s", version, e.fileKey, partnerCount, e.fileID)
+}
+
+// stale reports whether the episode needs analysing: never analysed, its
+// file changed, or more episodes can be compared with it than last time.
+// Fewer, as when copies of Jellyfin episodes expire, keeps what was found.
+func (e episode) stale(partnerCount int) bool {
+	want := e.key(partnerCount)
+	if e.storedKey == want {
+		return false
+	}
+	// The partner count is the second-to-last field; file keys hold colons.
+	sp, wp := strings.Split(e.storedKey, ":"), strings.Split(want, ":")
+	if len(sp) != len(wp) || len(sp) < 2 {
+		return true
+	}
+	n := len(sp) - 2
+	stored, err := strconv.Atoi(sp[n])
+	if err != nil {
+		return true
+	}
+	sp[n], wp[n] = "", ""
+	return strings.Join(sp, ":") != strings.Join(wp, ":") || stored < partnerCount
 }
 
 // RunOnce analyses every episode whose markers are missing or out of date.
@@ -162,7 +189,74 @@ func (s *Service) load(ctx context.Context) ([]episode, error) {
 		e.fileKey = fmt.Sprintf("%d:%s", size, mtime)
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	copies, err := s.loadCopies(ctx, seen)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, copies...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.seriesID != b.seriesID {
+			return a.seriesID < b.seriesID
+		}
+		if a.season != b.season {
+			return a.season < b.season
+		}
+		return a.number < b.number
+	})
+	return out, nil
+}
+
+// loadCopies lists Jellyfin episodes that have a finished local copy and no
+// local file of their own.
+func (s *Service) loadCopies(ctx context.Context, seen map[string]bool) ([]episode, error) {
+	if s.RemoteCopy == nil {
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT e.id, e.series_id, e.season, e.number, e.markers_key, r.source_id, r.remote_id, r.duration_ms
+		FROM episodes e
+		JOIN remote_items r ON r.item_kind = 'episode' AND r.item_id = e.id
+		WHERE r.duration_ms > 0
+	`)
+	if err != nil {
+		return nil, err
+	}
+	type remote struct {
+		e                  episode
+		sourceID, remoteID string
+	}
+	var found []remote
+	for rows.Next() {
+		var r remote
+		if err := rows.Scan(&r.e.id, &r.e.seriesID, &r.e.season, &r.e.number, &r.e.storedKey, &r.sourceID, &r.remoteID, &r.e.durationMS); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		found = append(found, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []episode
+	for _, r := range found {
+		if seen[r.e.id] {
+			continue
+		}
+		path, _, size, ok := s.RemoteCopy(ctx, r.sourceID, r.remoteID)
+		if !ok {
+			continue
+		}
+		seen[r.e.id] = true
+		r.e.path, r.e.fileID = path, r.remoteID
+		r.e.fileKey = fmt.Sprintf("jellyfin:%d", size)
+		out = append(out, r.e)
+	}
+	return out, nil
 }
 
 // prints holds an episode's fingerprint and its intro and credits windows.
@@ -176,7 +270,7 @@ func (s *Service) series(ctx context.Context, eps []episode) {
 	partnerCount := min(partners, len(eps)-1)
 	var todo []episode
 	for _, e := range eps {
-		if e.storedKey != e.key(partnerCount) {
+		if e.stale(partnerCount) {
 			todo = append(todo, e)
 		}
 	}
@@ -206,6 +300,9 @@ func (s *Service) series(ctx context.Context, eps []episode) {
 		}
 		if err := s.save(ctx, e, m, e.key(partnerCount)); err != nil {
 			s.Log.Warn("episode markers save", "category", "library", "episode", e.id, "err", err)
+		} else {
+			s.Log.Info("episode markers", "category", "library", "episode", e.id, "season", e.season, "number", e.number,
+				"partners", partnerCount, "recap", m.RecapSource, "intro", m.IntroSource, "credits", m.CreditsSource)
 		}
 		if s.Pause > 0 {
 			select {
@@ -381,6 +478,9 @@ func (s *Service) fingerprint(ctx context.Context, e episode) *prints {
 	pcm, err := s.Media.AudioPCM(ctx, e.path, 0, float64(e.durationMS)/1000+1, SampleRate)
 	if err != nil {
 		p.err = err
+		if ctx.Err() == nil {
+			s.Log.Warn("episode markers audio", "category", "library", "episode", e.id, "err", err)
+		}
 		return p
 	}
 	p.full = Fingerprint(pcm)

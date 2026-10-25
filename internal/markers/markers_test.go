@@ -286,3 +286,84 @@ func TestServiceStoresMarkers(t *testing.T) {
 		t.Fatalf("episode analysed again: %+v", r)
 	}
 }
+
+func TestStaleOnlyWhenMorePartners(t *testing.T) {
+	e := episode{fileID: "f1", fileKey: "100:2026-10-24T20:04:50Z"}
+	e.storedKey = e.key(3)
+	if e.stale(3) || e.stale(2) || e.stale(0) {
+		t.Fatal("fewer or the same partners should keep the stored markers")
+	}
+	if !e.stale(4) {
+		t.Fatal("more partners should analyse again")
+	}
+	changed := e
+	changed.fileKey = "101:2026-10-25T08:00:00Z"
+	if !changed.stale(3) {
+		t.Fatal("a changed file should analyse again")
+	}
+	if !(episode{}).stale(0) {
+		t.Fatal("never analysed should analyse")
+	}
+}
+
+func TestJellyfinCopiesAreAnalysed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vd.db")
+	if err := db.Migrate(path); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.Open(path, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := sqlDB.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO libraries(id, name, root_path, content_type, created_at, updated_at) VALUES ('lib', 'Jellyfin', '', 'tv', 't', 't')`)
+	exec(`INSERT INTO media_sources(id, library_id, name, url, username, created_at, updated_at) VALUES ('src', 'lib', 'Jellyfin', 'http://jellyfin.example', 'u', 't', 't')`)
+	exec(`INSERT INTO series(id, library_id, title, sort_title, overview, metadata_source, created_at, updated_at) VALUES ('s', 'lib', 'Show', 'show', '', 'jellyfin', 't', 't')`)
+	exec(`INSERT INTO seasons(id, series_id, number, title) VALUES ('s1', 's', 1, '')`)
+	seeds := map[string]int64{}
+	copies := map[string]string{}
+	for n := 1; n <= 4; n++ {
+		id := string(rune('0' + n))
+		exec(`INSERT INTO episodes(id, series_id, season_id, season, number, title, overview, intro_source) VALUES (?, 's', 's1', 1, ?, '', '', '')`, "e"+id, n)
+		exec(`INSERT INTO remote_items(source_id, remote_id, item_kind, item_id, duration_ms) VALUES ('src', ?, 'episode', ?, 360000)`, "r"+id, "e"+id)
+		// Episode 4 has not been copied.
+		if n == 4 {
+			continue
+		}
+		file := filepath.Join(dir, "r"+id+".media")
+		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		seeds[file] = int64(n)
+		copies["r"+id] = file
+	}
+	svc := New(sqlDB, stubMedia{seeds: seeds}, nil)
+	svc.Pause = 0
+	svc.RemoteCopy = func(_ context.Context, sourceID, remoteID string) (string, string, int64, bool) {
+		p, ok := copies[remoteID]
+		return p, "mkv", 1, ok && sourceID == "src"
+	}
+	if err := svc.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var credits sql.NullInt64
+	var recapSrc string
+	if err := sqlDB.QueryRow(`SELECT credits_start_ms, recap_source FROM episodes WHERE id = 'e2'`).Scan(&credits, &recapSrc); err != nil {
+		t.Fatal(err)
+	}
+	if !credits.Valid || recapSrc != SourceFingerprint {
+		t.Fatalf("copied episode not analysed: credits %v recap %q", credits, recapSrc)
+	}
+	near(t, "credits start", credits.Int64, 300_000, 1000)
+	var key string
+	if err := sqlDB.QueryRow(`SELECT markers_key FROM episodes WHERE id = 'e4'`).Scan(&key); err != nil || key != "" {
+		t.Fatalf("episode without a copy was analysed: %q %v", key, err)
+	}
+}
