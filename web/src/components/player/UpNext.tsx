@@ -18,10 +18,14 @@ export function SkipButton({ label, raised, onSkip }: { label: string; raised: b
       <button
         type="button"
         onClick={onSkip}
-        className="vd-menu-pop flex h-11 items-center gap-2 rounded-md border-2 border-white/80 bg-black/55 px-5 text-[15px] font-semibold text-white shadow-2xl backdrop-blur-sm outline-none transition hover:bg-white hover:text-black focus-visible:ring-2 focus-visible:ring-white/70"
+        className="group vd-menu-pop flex h-11 items-center rounded-md border-2 border-white/80 bg-black/55 px-5 shadow-2xl backdrop-blur-sm outline-none transition hover:bg-white focus-visible:ring-2 focus-visible:ring-white/70"
       >
-        <ChevronsRight size={18} aria-hidden />
-        {label}
+        {/* Text styles go on the span: the global button rule (color and font
+            inherit, outside any layer) overrides utilities on the button. */}
+        <span className="flex items-center gap-2 text-[15px] font-semibold text-white transition group-hover:text-black">
+          <ChevronsRight size={18} aria-hidden />
+          {label}
+        </span>
       </button>
     </div>
   );
@@ -65,14 +69,14 @@ export function NextEpisodePrompt({
         <button
           type="button"
           onClick={onDismiss}
-          className="h-11 rounded-md bg-black/55 px-4 text-[15px] font-semibold text-white ring-1 ring-white/40 backdrop-blur-sm outline-none transition hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white/70"
+          className="h-11 rounded-md bg-black/55 px-4 ring-1 ring-white/40 backdrop-blur-sm outline-none transition hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white/70"
         >
-          Watch Credits
+          <span className="text-[15px] font-semibold text-white">Watch Credits</span>
         </button>
         <button
           type="button"
           onClick={onPlay}
-          className="relative h-11 overflow-hidden rounded-md bg-white/70 px-5 text-[15px] font-semibold text-black shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+          className="relative h-11 overflow-hidden rounded-md bg-white/70 px-5 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/70"
         >
           <span
             aria-hidden
@@ -82,7 +86,7 @@ export function NextEpisodePrompt({
               transition: seconds == null ? undefined : `width ${seconds}s linear`,
             }}
           />
-          <span className="relative flex items-center gap-2">
+          <span className="relative flex items-center gap-2 text-[15px] font-semibold text-black">
             <SkipForward size={16} fill="currentColor" strokeWidth={0} aria-hidden />
             Next Episode
           </span>

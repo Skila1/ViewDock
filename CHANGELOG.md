@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- make the Next Episode button text readable
+
 ## 1.0.5
 
 - detect recaps, intros and end credits on Jellyfin episodes once they are copied to ViewDock
