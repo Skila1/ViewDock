@@ -58,6 +58,7 @@ type Session struct {
 	Created        time.Time
 	LastPing       time.Time
 	SeekableFromMS int64
+	Recap          any
 	Intro          any
 	Credits        any
 	NextEpisode    any

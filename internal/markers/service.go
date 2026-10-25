@@ -21,12 +21,19 @@ type Media interface {
 }
 
 // version is part of every markers_key; raising it analyses every episode again.
-const version = "v1"
+const version = "v2"
 
-// partners is how many other episodes of the series one is compared with.
-const partners = 3
+const (
+	// partners is how many other episodes of the series one is compared with
+	// for its intro and credits.
+	partners = 3
+	// recapSources is how many previous episodes a recap is looked for in.
+	recapSources = 2
+	// recapWindowMS is how much of an episode is searched for a recap.
+	recapWindowMS = 180_000
+)
 
-// Service detects intros and end credits of episodes with local files in
+// Service detects recaps, intros and end credits of episodes with local files in
 // the background and stores them on the episode.
 type Service struct {
 	DB    *sql.DB
@@ -158,9 +165,11 @@ func (s *Service) load(ctx context.Context) ([]episode, error) {
 	return out, rows.Err()
 }
 
+// prints holds an episode's fingerprint and its intro and credits windows.
 type prints struct {
-	head, tail Print
-	err        error
+	full, head, tail Print
+	tailStartMS      int64
+	err              error
 }
 
 func (s *Service) series(ctx context.Context, eps []episode) {
@@ -209,13 +218,13 @@ func (s *Service) series(ctx context.Context, eps []episode) {
 }
 
 // detect uses chapter titles where the file has them and audio shared with
-// the nearest other episodes for what they do not give.
+// other episodes for what they do not give.
 func (s *Service) detect(ctx context.Context, e episode, all []episode, get func(episode) *prints) Markers {
 	var m Markers
 	if ch, err := s.Media.Chapters(ctx, e.path); err == nil {
 		m = FromChapters(ch, e.durationMS)
 	}
-	if m.HasIntro() && m.HasCredits() {
+	if m.HasRecap() && m.HasIntro() && m.HasCredits() {
 		return m
 	}
 	mine := get(e)
@@ -229,11 +238,8 @@ func (s *Service) detect(ctx context.Context, e episode, all []episode, get func
 	var intros [][2]int64
 	var credits []int64
 	for _, o := range nearest(e, all) {
-		if _, err := os.Stat(o.path); err != nil {
-			continue
-		}
-		theirs := get(o)
-		if theirs.err != nil {
+		theirs := s.visible(o, get)
+		if theirs == nil {
 			continue
 		}
 		if wantIntro {
@@ -242,7 +248,7 @@ func (s *Service) detect(ctx context.Context, e episode, all []episode, get func
 			}
 		}
 		if wantCredits {
-			if c, ok := CreditsFrom(mine.tail, theirs.tail, e.durationMS); ok {
+			if c, ok := CreditsFrom(mine.tail, theirs.tail, mine.tailStartMS, e.durationMS); ok {
 				credits = append(credits, c)
 			}
 		}
@@ -254,7 +260,69 @@ func (s *Service) detect(ctx context.Context, e episode, all []episode, get func
 	if len(credits) > 0 {
 		m.CreditsStartMS, m.CreditsSource = slices.Max(credits), SourceFingerprint
 	}
+	if !m.HasRecap() {
+		m.RecapStartMS, m.RecapEndMS, m.RecapSource = s.recap(e, m, mine, all, get)
+	}
 	return m
+}
+
+// recap looks for clips of the previous episodes before the intro, or just
+// after it when the episode opens with it. The previous episodes' own intro
+// and credits are left out, so the theme never counts as a recap.
+func (s *Service) recap(e episode, m Markers, mine *prints, all []episode, get func(episode) *prints) (int64, int64, string) {
+	from, to := int64(0), min(recapWindowMS, e.durationMS/5)
+	if m.HasIntro() {
+		if m.IntroStartMS >= 10_000 {
+			to = m.IntroStartMS
+		} else {
+			from, to = m.IntroEndMS, min(m.IntroEndMS+recapWindowMS, e.durationMS/2)
+		}
+	}
+	window := mine.full.Slice(points(from), points(to))
+	var clips []Segment
+	for _, o := range earlier(e, all) {
+		theirs := s.visible(o, get)
+		if theirs == nil {
+			continue
+		}
+		masked := theirs.full
+		if seg, ok := Longest(theirs.head, mine.head, points(minIntroMS)); ok && seg.Len() <= points(maxIntroMS) {
+			masked = masked.Mask(seg.AStart, seg.AEnd)
+		}
+		if c, ok := CreditsFrom(theirs.tail, mine.tail, theirs.tailStartMS, o.durationMS); ok {
+			masked = masked.Mask(points(c), len(masked.Points))
+		}
+		clips = append(clips, Clips(window, masked, points(minClipMS))...)
+	}
+	start, end, ok := RecapFrom(merge(clips), from, to)
+	if !ok {
+		return 0, 0, ""
+	}
+	return start, end, SourceFingerprint
+}
+
+// merge keeps the longest of overlapping clips, in order.
+func merge(clips []Segment) []Segment {
+	sort.Slice(clips, func(i, j int) bool { return clips[i].Len() > clips[j].Len() })
+	var out []Segment
+	for _, c := range clips {
+		if !slices.ContainsFunc(out, func(o Segment) bool { return c.AStart < o.AEnd && o.AStart < c.AEnd }) {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AStart < out[j].AStart })
+	return out
+}
+
+// visible returns an episode's prints when its file can be read here.
+func (s *Service) visible(o episode, get func(episode) *prints) *prints {
+	if _, err := os.Stat(o.path); err != nil {
+		return nil
+	}
+	if p := get(o); p.err == nil {
+		return p
+	}
+	return nil
 }
 
 // agreedIntro is the part of the intros found with each partner that all of
@@ -296,26 +364,40 @@ func nearest(e episode, all []episode) []episode {
 	return out
 }
 
+// earlier returns the episodes just before e, most recent first.
+func earlier(e episode, all []episode) []episode {
+	var out []episode
+	for i := len(all) - 1; i >= 0 && len(out) < recapSources; i-- {
+		o := all[i]
+		if o.season < e.season || (o.season == e.season && o.number < e.number) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 func (s *Service) fingerprint(ctx context.Context, e episode) *prints {
 	p := &prints{}
-	hs, hl := IntroWindow(e.durationMS)
-	head, err := s.Media.AudioPCM(ctx, e.path, hs, hl, SampleRate)
+	pcm, err := s.Media.AudioPCM(ctx, e.path, 0, float64(e.durationMS)/1000+1, SampleRate)
 	if err != nil {
 		p.err = err
 		return p
 	}
-	ts, tl := CreditsWindow(e.durationMS)
-	tail, err := s.Media.AudioPCM(ctx, e.path, ts, tl, SampleRate)
-	if err != nil {
-		p.err = err
-		return p
-	}
-	p.head, p.tail = Fingerprint(head), Fingerprint(tail)
+	p.full = Fingerprint(pcm)
+	_, hl := IntroWindow(e.durationMS)
+	ts, _ := CreditsWindow(e.durationMS)
+	tailStart := points(int64(ts * 1000))
+	p.head = p.full.Slice(0, points(int64(hl*1000)))
+	p.tail = p.full.Slice(tailStart, len(p.full.Points))
+	p.tailStartMS = int64(float64(tailStart) * FrameMS)
 	return p
 }
 
 func (s *Service) save(ctx context.Context, e episode, m Markers, key string) error {
-	var introStart, introEnd, credits any
+	var recapStart, recapEnd, introStart, introEnd, credits any
+	if m.HasRecap() {
+		recapStart, recapEnd = m.RecapStartMS, m.RecapEndMS
+	}
 	if m.HasIntro() {
 		introStart, introEnd = m.IntroStartMS, m.IntroEndMS
 	}
@@ -323,9 +405,10 @@ func (s *Service) save(ctx context.Context, e episode, m Markers, key string) er
 		credits = m.CreditsStartMS
 	}
 	_, err := s.DB.ExecContext(ctx, `
-		UPDATE episodes SET intro_start_ms = ?, intro_end_ms = ?, intro_source = ?,
+		UPDATE episodes SET recap_start_ms = ?, recap_end_ms = ?, recap_source = ?,
+			intro_start_ms = ?, intro_end_ms = ?, intro_source = ?,
 			credits_start_ms = ?, credits_source = ?, markers_key = ?
 		WHERE id = ?
-	`, introStart, introEnd, m.IntroSource, credits, m.CreditsSource, key, e.id)
+	`, recapStart, recapEnd, m.RecapSource, introStart, introEnd, m.IntroSource, credits, m.CreditsSource, key, e.id)
 	return err
 }

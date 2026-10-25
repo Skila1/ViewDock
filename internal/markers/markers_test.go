@@ -109,7 +109,7 @@ func TestCreditsShared(t *testing.T) {
 	// Story audio, then the shared credits, then a different preview.
 	a := Fingerprint(mix(1, tones(20, 240), credits, tones(21, 30)))
 	b := Fingerprint(mix(2, tones(22, 250), credits, tones(23, 20)))
-	start, ok := CreditsFrom(a, b, durMS)
+	start, ok := CreditsFrom(a, b, durMS-360_000, durMS)
 	if !ok {
 		t.Fatal("shared credits not found")
 	}
@@ -143,18 +143,69 @@ func TestParseChaptersJSON(t *testing.T) {
 	}
 }
 
-// stubMedia serves generated audio: every episode shares a theme 20 s in
-// and credits 60 s before the end of its credits window.
+func TestRecapFromPreviousEpisode(t *testing.T) {
+	story := tones(30, 200)
+	clip := func(from, to float64) []float64 { return story[int(from*SampleRate):int(to*SampleRate)] }
+	previous := Fingerprint(mix(1, tones(31, 20), story, tones(32, 20)))
+	// "Previously on" over a short sting, three scenes from the previous
+	// episode with cuts between them, then new material.
+	opening := Fingerprint(mix(2, tones(33, 3), clip(20, 28), tones(34, 1), clip(90, 97), tones(35, 1.5), clip(150, 159), tones(36, 60)))
+	start, end, ok := RecapFrom(merge(Clips(opening, previous, points(minClipMS))), 0, 120_000)
+	if !ok {
+		t.Fatal("recap not found")
+	}
+	if start != 0 {
+		t.Fatalf("recap start = %d, want 0 (the lead-in belongs to it)", start)
+	}
+	near(t, "recap end", end, 29_500, 1000)
+}
+
+func TestNoRecapWithoutEarlierScenes(t *testing.T) {
+	previous := Fingerprint(mix(1, tones(40, 240)))
+	opening := Fingerprint(mix(2, tones(41, 120)))
+	if s, e, ok := RecapFrom(merge(Clips(opening, previous, points(minClipMS))), 0, 120_000); ok {
+		t.Fatalf("recap found in new material: %d to %d ms", s, e)
+	}
+}
+
+func TestRecapChapter(t *testing.T) {
+	m := FromChapters([]ffmpeg.Chapter{
+		{StartMS: 0, EndMS: 45_000, Title: "Previously On"},
+		{StartMS: 45_000, EndMS: 2_400_000, Title: "Episode"},
+	}, 2_400_000)
+	if m.RecapSource != SourceChapters || m.RecapStartMS != 0 || m.RecapEndMS != 45_000 {
+		t.Fatalf("recap = %+v", m)
+	}
+}
+
+// Generated six-minute episodes: an opening (26 s), the shared theme
+// (26 to 76 s), the story (to 300 s), shared credits (to 350 s) and a
+// preview. From the second episode on, the opening is a recap of three
+// scenes from the previous episode's story.
+func story(n int64) []float64 { return tones(n*10+1, 224) }
+
+func episodeAudio(n int64) []int16 {
+	var opening [][]float64
+	if n == 1 {
+		opening = [][]float64{tones(n*10, 26)}
+	} else {
+		prev := story(n - 1)
+		cut := func(from, to float64) []float64 { return prev[int(from*SampleRate):int(to*SampleRate)] }
+		opening = [][]float64{cut(20, 28), tones(n*10, 1), cut(90, 97), tones(n*10+5, 1), cut(150, 159)}
+	}
+	parts := append(opening, tones(1000, 50), story(n), tones(2000, 50), tones(n*10+3, 10))
+	return mix(n, parts...)
+}
+
 type stubMedia struct{ seeds map[string]int64 }
 
 func (s stubMedia) Chapters(context.Context, string) ([]ffmpeg.Chapter, error) { return nil, nil }
 
 func (s stubMedia) AudioPCM(_ context.Context, path string, startSec, durSec float64, _ int) ([]int16, error) {
-	seed := s.seeds[path]
-	if startSec == 0 {
-		return mix(seed, tones(seed*10, 20), tones(1000, 60), tones(seed*10+1, durSec-80)), nil
-	}
-	return mix(seed, tones(seed*10+2, 60), tones(2000, 75), tones(seed*10+3, durSec-135)), nil
+	pcm := episodeAudio(s.seeds[path])
+	from := min(len(pcm), int(startSec*SampleRate))
+	to := min(len(pcm), from+int(durSec*SampleRate))
+	return pcm[from:to], nil
 }
 
 func TestServiceStoresMarkers(t *testing.T) {
@@ -186,7 +237,7 @@ func TestServiceStoresMarkers(t *testing.T) {
 		}
 		seeds[file] = int64(n)
 		exec(`INSERT INTO episodes(id, series_id, season_id, season, number, title, overview, intro_source) VALUES (?, 's', 's1', 1, ?, '', '', '')`, "e"+id, n)
-		exec(`INSERT INTO media_files(id, library_id, rel_path, abs_path, kind, duration_ms, created_at, updated_at) VALUES (?, 'lib', ?, ?, 'episode', 1440000, 't', 't')`, "f"+id, "e"+id+".mkv", file)
+		exec(`INSERT INTO media_files(id, library_id, rel_path, abs_path, kind, duration_ms, created_at, updated_at) VALUES (?, 'lib', ?, ?, 'episode', 360000, 't', 't')`, "f"+id, "e"+id+".mkv", file)
 		exec(`INSERT INTO media_file_episodes(media_file_id, episode_id) VALUES (?, ?)`, "f"+id, "e"+id)
 	}
 	svc := New(sqlDB, stubMedia{seeds: seeds}, nil)
@@ -194,25 +245,44 @@ func TestServiceStoresMarkers(t *testing.T) {
 	if err := svc.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var start, end, credits sql.NullInt64
-	var src, csrc, key string
-	if err := sqlDB.QueryRow(`SELECT intro_start_ms, intro_end_ms, intro_source, credits_start_ms, credits_source, markers_key FROM episodes WHERE id = 'e2'`).
-		Scan(&start, &end, &src, &credits, &csrc, &key); err != nil {
-		t.Fatal(err)
+	type row struct {
+		recapStart, recapEnd, introStart, introEnd, credits sql.NullInt64
+		key                                                 string
 	}
-	if src != SourceFingerprint || csrc != SourceFingerprint || key == "" {
-		t.Fatalf("sources %q %q key %q", src, csrc, key)
+	get := func(id string) row {
+		var r row
+		if err := sqlDB.QueryRow(`SELECT recap_start_ms, recap_end_ms, intro_start_ms, intro_end_ms, credits_start_ms, markers_key FROM episodes WHERE id = ?`, id).
+			Scan(&r.recapStart, &r.recapEnd, &r.introStart, &r.introEnd, &r.credits, &r.key); err != nil {
+			t.Fatal(err)
+		}
+		return r
 	}
-	near(t, "intro start", start.Int64, 20_000, 1000)
-	near(t, "intro end", end.Int64, 80_000, 1000)
-	near(t, "credits start", credits.Int64, 1_440_000-360_000+60_000, 1000)
+	for _, id := range []string{"e1", "e2", "e3"} {
+		r := get(id)
+		if r.key == "" || !r.introStart.Valid || !r.credits.Valid {
+			t.Fatalf("%s: %+v", id, r)
+		}
+		near(t, id+" intro start", r.introStart.Int64, 26_000, 1000)
+		near(t, id+" intro end", r.introEnd.Int64, 76_000, 1000)
+		near(t, id+" credits start", r.credits.Int64, 300_000, 1000)
+		if id == "e1" {
+			if r.recapStart.Valid {
+				t.Fatalf("the first episode has a recap: %+v", r)
+			}
+			continue
+		}
+		if !r.recapStart.Valid || r.recapStart.Int64 != 0 {
+			t.Fatalf("%s recap: %+v", id, r)
+		}
+		near(t, id+" recap end", r.recapEnd.Int64, 26_000, 1000)
+	}
 
 	// Nothing changed, so a second run leaves the episodes alone.
 	exec(`UPDATE episodes SET intro_start_ms = 1 WHERE id = 'e2'`)
 	if err := svc.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlDB.QueryRow(`SELECT intro_start_ms FROM episodes WHERE id = 'e2'`).Scan(&start); err != nil || start.Int64 != 1 {
-		t.Fatalf("episode analysed again: %v %v", start, err)
+	if r := get("e2"); r.introStart.Int64 != 1 {
+		t.Fatalf("episode analysed again: %+v", r)
 	}
 }

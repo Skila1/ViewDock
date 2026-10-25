@@ -7,6 +7,8 @@ import (
 	"math"
 	"math/bits"
 	"math/cmplx"
+	"slices"
+	"sort"
 )
 
 // Audio is fingerprinted at SampleRate in frames of frameLen samples taken
@@ -149,17 +151,65 @@ const (
 	stride        = 3
 	scoreWindowMS = 8000
 	candidates    = 6
+	// Recap clips: offsets are scored over clipWindowMS and many of them
+	// are searched. A cut to another scene changes the offset, so a clip
+	// only ends at a gap longer than clipGapPoints (about 2 s).
+	clipWindowMS   = 4000
+	clipCandidates = 24
+	clipGapPoints  = 64
 )
 
 // Longest finds the longest stretch of audio a and b share, at least
-// minPoints long. Noise between two encodes leaves few points exactly
-// equal, so every alignment is scored by its best window of near matches,
-// sampling every stride-th point, and the best few are searched in full.
+// minPoints long.
 func Longest(a, b Print, minPoints int) (Segment, bool) {
-	if len(a.Points) < minPoints || len(b.Points) < minPoints {
-		return Segment{}, false
+	var out Segment
+	found := false
+	for _, off := range alignments(a, b, minPoints, scoreWindowMS, 0.25, candidates) {
+		for _, seg := range runsAt(a, b, off, minPoints, maxGapPoints) {
+			if !found || seg.Len() > out.Len() {
+				out, found = seg, true
+			}
+		}
 	}
-	win := max(1, points(scoreWindowMS)/stride)
+	return out, found
+}
+
+// Clips finds every separate clip of at least minPoints that a shares with
+// b, such as the scenes of a recap taken from an earlier episode. Clips
+// never overlap in a.
+func Clips(a, b Print, minPoints int) []Segment {
+	var all []Segment
+	for _, off := range alignments(a, b, minPoints, clipWindowMS, 0.4, clipCandidates) {
+		all = append(all, runsAt(a, b, off, minPoints, clipGapPoints)...)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Len() > all[j].Len() })
+	var out []Segment
+	for _, c := range all {
+		overlaps := false
+		for _, o := range out {
+			if c.AStart < o.AEnd && o.AStart < c.AEnd {
+				overlaps = true
+				break
+			}
+		}
+		if !overlaps {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AStart < out[j].AStart })
+	return out
+}
+
+// alignments returns the best few offsets of b against a (b index minus a
+// index). Noise between two encodes leaves few points exactly equal, so
+// every offset is scored by its best window of near matches, sampling every
+// stride-th point; offsets whose best window matches less than minShare are
+// dropped.
+func alignments(a, b Print, minPoints int, windowMS int64, minShare float64, limit int) []int {
+	if len(a.Points) < minPoints || len(b.Points) < minPoints {
+		return nil
+	}
+	win := max(1, points(windowMS)/stride)
 	type cand struct{ off, score int }
 	var cs []cand
 	ring := make([]bool, win)
@@ -182,13 +232,12 @@ func Longest(a, b Print, minPoints int) (Segment, bool) {
 			best = max(best, count)
 		}
 		// Unrelated audio matches about one point in forty.
-		if best*4 >= win {
+		if float64(best) >= minShare*float64(win) {
 			cs = append(cs, cand{off, best})
 		}
 	}
-	var out Segment
-	found := false
-	for n := 0; n < candidates && len(cs) > 0; n++ {
+	var out []int
+	for picks := 0; picks < limit && len(cs) > 0; picks++ {
 		bi := 0
 		for i, c := range cs {
 			if c.score > cs[bi].score {
@@ -197,9 +246,7 @@ func Longest(a, b Print, minPoints int) (Segment, bool) {
 		}
 		pick := cs[bi].off
 		for off := pick - stride; off <= pick+stride; off++ {
-			if seg, ok := runAt(a, b, off, minPoints); ok && (!found || seg.Len() > out.Len()) {
-				out, found = seg, true
-			}
+			out = append(out, off)
 		}
 		// Neighbouring alignments are the same match.
 		kept := cs[:0]
@@ -210,17 +257,18 @@ func Longest(a, b Print, minPoints int) (Segment, bool) {
 		}
 		cs = kept
 	}
-	return out, found
+	return out
 }
 
-// runAt finds the longest shared run with b shifted by off. A point is
-// shared when enough points around it match, so the odd chance match in
-// unrelated audio never links two stretches.
-func runAt(a, b Print, off, minPoints int) (Segment, bool) {
+// runsAt finds the shared runs of at least minPoints with b shifted by off,
+// bridging gaps of up to maxGap points. A point is shared when enough points
+// around it match, so the odd chance match in unrelated audio never links
+// two stretches.
+func runsAt(a, b Print, off, minPoints, maxGap int) []Segment {
 	lo := max(0, -off)
 	hi := min(len(a.Points), len(b.Points)-off)
 	if hi-lo < minPoints {
-		return Segment{}, false
+		return nil
 	}
 	n := hi - lo
 	sum := make([]int, n+1)
@@ -237,8 +285,7 @@ func runAt(a, b Print, off, minPoints int) (Segment, bool) {
 		return float64(sum[r]-sum[l]) / float64(r-l)
 	}
 	shared := func(k int) bool { return sum[k+1]-sum[k] == 1 && density(k) >= minDensity }
-	var best Segment
-	found := false
+	var out []Segment
 	start, last := -1, -1
 	flush := func() {
 		if start < 0 {
@@ -256,16 +303,15 @@ func runAt(a, b Print, off, minPoints int) (Segment, bool) {
 		for e > s && !(sum[e+1]-sum[e] == 1 && density(e) >= thr) {
 			e--
 		}
-		if l := e - s + 1; l >= minPoints && (!found || l > best.Len()) {
-			best = Segment{AStart: lo + s, AEnd: lo + e + 1, BStart: lo + s + off, BEnd: lo + e + 1 + off}
-			found = true
+		if e-s+1 >= minPoints {
+			out = append(out, Segment{AStart: lo + s, AEnd: lo + e + 1, BStart: lo + s + off, BEnd: lo + e + 1 + off})
 		}
 	}
 	for k := 0; k < n; k++ {
 		if !shared(k) {
 			continue
 		}
-		if start >= 0 && k-last > maxGapPoints {
+		if start >= 0 && k-last > maxGap {
 			flush()
 			start = -1
 		}
@@ -275,5 +321,28 @@ func runAt(a, b Print, off, minPoints int) (Segment, bool) {
 		last = k
 	}
 	flush()
-	return best, found
+	return out
+}
+
+// Mask returns p with the points in [from, to) treated as silence, so they
+// never match.
+func (p Print) Mask(from, to int) Print {
+	from, to = max(0, from), min(len(p.Points), to)
+	if from >= to {
+		return p
+	}
+	silent := slices.Clone(p.Silent)
+	for i := from; i < to; i++ {
+		silent[i] = true
+	}
+	return Print{Points: p.Points, Silent: silent}
+}
+
+// Slice returns the points in [from, to).
+func (p Print) Slice(from, to int) Print {
+	from, to = max(0, min(from, len(p.Points))), max(0, min(to, len(p.Points)))
+	if from >= to {
+		return Print{}
+	}
+	return Print{Points: p.Points[from:to], Silent: p.Silent[from:to]}
 }

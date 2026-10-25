@@ -877,6 +877,13 @@ components:
             video: { type: object, additionalProperties: true }
             audio: { type: object, additionalProperties: true }
             container: { type: object, additionalProperties: true }
+        recap:
+          type: object
+          nullable: true
+          description: Episodes only, the detected recap of earlier episodes.
+          properties:
+            start_ms: { type: integer }
+            end_ms: { type: integer }
         intro:
           type: object
           nullable: true

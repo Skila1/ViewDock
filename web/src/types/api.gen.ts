@@ -565,6 +565,8 @@ export interface PlaybackSession {
   audio?: SessionTrack[];
   subtitles?: SessionTrack[];
   decision?: PlaybackDecision;
+  /** Detected recap of earlier episodes at the start of an episode. */
+  recap?: { start_ms?: number; end_ms?: number } | null;
   /** Detected intro of an episode. */
   intro?: { start_ms?: number; end_ms?: number } | null;
   /** Where an episode's end credits start, when detected. */

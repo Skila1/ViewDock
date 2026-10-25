@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- detect "Previously on" recaps from chapters or scenes of earlier episodes; a Skip Recap button appears over the player
+
 ## 1.0.3
 
 - fix the Next Episode button doing nothing partway through an episode

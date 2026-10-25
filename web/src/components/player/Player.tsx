@@ -28,7 +28,7 @@ import { attachSession, CodecFallbackError, SessionGoneError, type AttachHandle 
 import { SessionTelemetry } from "./sessionTelemetry";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { StatsOverlay } from "./StatsOverlay";
-import { EndCard, NextEpisodePrompt, SkipIntroButton, type EndCardTitle } from "./UpNext";
+import { EndCard, NextEpisodePrompt, SkipButton, type EndCardTitle } from "./UpNext";
 import { prepareNext, takePrepared } from "./nextEpisode";
 import type { CacheStats } from "./bufferCache";
 import { PlayerErrorPanel, type ReportStatus } from "./PlayerErrorPanel";
@@ -113,6 +113,17 @@ export function nextPromptAtMs(creditsStartMs: number | null | undefined, durati
   if (durationMs <= 60_000) return null;
   if (creditsStartMs != null && creditsStartMs >= durationMs * 0.5 && creditsStartMs < durationMs - 5000) return creditsStartMs;
   return durationMs - Math.max(25_000, upNextSeconds * 1000 + 5000);
+}
+
+type Span = { start_ms?: number; end_ms?: number } | null | undefined;
+
+/** The recap or intro playing at posMs, if any, and where it ends. */
+export function skipTarget(posMs: number, recap: Span, intro: Span): { label: string; endMs: number; source: string } | null {
+  const within = (s: Span) =>
+    s?.start_ms != null && s.end_ms != null && s.end_ms - s.start_ms >= 5000 && posMs >= s.start_ms && posMs < s.end_ms - 1500;
+  if (within(recap)) return { label: "Skip Recap", endMs: recap!.end_ms!, source: "skip_recap" };
+  if (within(intro)) return { label: "Skip Intro", endMs: intro!.end_ms!, source: "skip_intro" };
+  return null;
 }
 
 function nextEpisodeLabel(next: { title?: string; season?: number; number?: number }): string {
@@ -1412,9 +1423,7 @@ export function Player({
   const applePlayer = isIOSDevice();
   const duration = movieDurationMs(session, movieDurRef.current || dur);
   const upNextSeconds = prefs.data?.upnext_seconds ?? 10;
-  const intro = session?.intro;
-  const showSkipIntro =
-    !inParty && intro?.start_ms != null && intro.end_ms != null && intro.end_ms - intro.start_ms >= 5000 && pos >= intro.start_ms && pos < intro.end_ms - 1500;
+  const skipTo = !inParty ? skipTarget(pos, session?.recap, session?.intro) : null;
   const nextPromptAt = nextPromptAtMs(session?.credits?.start_ms, duration, upNextSeconds);
   const showNextPrompt = Boolean(session?.next_episode?.id) && !inParty && !upNextDismissed && nextPromptAt != null && pos >= nextPromptAt;
   const seekMax = Math.max(1, duration);
@@ -1537,9 +1546,7 @@ export function Player({
 
       {statsOpen ? <StatsOverlay video={videoRef.current} session={session} engine={engine ?? ""} stats={cacheStats} onClose={() => setStatsOpen(false)} /> : null}
 
-      {showSkipIntro && session?.intro?.end_ms ? (
-        <SkipIntroButton raised={showUi} onSkip={() => seek(session.intro!.end_ms!, "skip_intro")} />
-      ) : null}
+      {skipTo ? <SkipButton key={skipTo.label} label={skipTo.label} raised={showUi} onSkip={() => seek(skipTo.endMs, skipTo.source)} /> : null}
 
       {showNextPrompt && session?.next_episode?.id ? (
         <NextEpisodePrompt

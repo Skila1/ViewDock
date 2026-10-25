@@ -17,6 +17,18 @@ func (a *API) intro(ctx context.Context, itemKind, itemID string) any {
 	return map[string]int64{"start_ms": start.Int64, "end_ms": end.Int64}
 }
 
+func (a *API) recap(ctx context.Context, itemKind, itemID string) any {
+	if itemKind != "episode" || a.DB == nil {
+		return nil
+	}
+	var start, end sql.NullInt64
+	err := a.DB.QueryRowContext(ctx, `SELECT recap_start_ms, recap_end_ms FROM episodes WHERE id = ?`, itemID).Scan(&start, &end)
+	if err != nil || !start.Valid || !end.Valid {
+		return nil
+	}
+	return map[string]int64{"start_ms": start.Int64, "end_ms": end.Int64}
+}
+
 func (a *API) credits(ctx context.Context, itemKind, itemID string) any {
 	if itemKind != "episode" || a.DB == nil {
 		return nil

@@ -11,8 +11,8 @@ function corner(raised: boolean) {
   );
 }
 
-/** Shown while the intro plays; skips to where it ends. */
-export function SkipIntroButton({ raised, onSkip }: { raised: boolean; onSkip: () => void }) {
+/** Shown while a recap or the intro plays; skips to where it ends. */
+export function SkipButton({ label, raised, onSkip }: { label: string; raised: boolean; onSkip: () => void }) {
   return (
     <div className={corner(raised)} onClick={(e) => e.stopPropagation()}>
       <button
@@ -21,7 +21,7 @@ export function SkipIntroButton({ raised, onSkip }: { raised: boolean; onSkip: (
         className="vd-menu-pop flex h-11 items-center gap-2 rounded-md border-2 border-white/80 bg-black/55 px-5 text-[15px] font-semibold text-white shadow-2xl backdrop-blur-sm outline-none transition hover:bg-white hover:text-black focus-visible:ring-2 focus-visible:ring-white/70"
       >
         <ChevronsRight size={18} aria-hidden />
-        Skip Intro
+        {label}
       </button>
     </div>
   );
